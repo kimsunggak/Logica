@@ -1,0 +1,28 @@
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Dataset}
+We evaluate on a video pose benchmark with annotated occlusion labels.
+
+\subsection{Metrics}
+We report the mean per-joint position error (MPJPE) on all joints and on
+occluded joints only.
+
+\subsection{Main Results}
+Table~\ref{tab:main} compares \method{} with a per-frame baseline and a
+temporal baseline \citep{pavllo2019videopose}.
+
+\begin{table}[t]
+  \centering
+  \begin{tabular}{lcc}
+    \toprule
+    Method & All joints & Occluded \\
+    \midrule
+    Per-frame & 52.1 & 78.4 \\
+    Temporal & 48.7 & 69.0 \\
+    \method{} (ours) & \textbf{46.9} & \textbf{61.2} \\
+    \bottomrule
+  \end{tabular}
+  \caption{MPJPE (lower is better).}
+  \label{tab:main}
+\end{table}

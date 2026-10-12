@@ -1,0 +1,182 @@
+/**
+ * Extract the relevant problems from a LaTeX `.log` file so the user sees
+ * "sections/method.tex:42  Undefined control sequence \foo" instead of the
+ * raw terminal output.
+ */
+import { joinPath, normalizePath } from "../parser/text";
+
+export interface LogItem {
+  severity: "error" | "warning";
+  message: string;
+  /** Project-relative file path when known. */
+  file?: string;
+  line?: number;
+  /** Source excerpt reported by TeX (`l.42 \foo`). */
+  context?: string;
+  hint?: string;
+}
+
+export interface ParsedLog {
+  errors: LogItem[];
+  warnings: LogItem[];
+  missingPackages: string[];
+}
+
+const MAX_PRINT_LINE = 79;
+const MAX_ITEMS = 30;
+
+/**
+ * TeX wraps log lines at 79 characters; join them back. Error context lines
+ * (`l.42 ...` and the indented line after it) are padded rather than wrapped,
+ * so they are never joined with what follows.
+ */
+function unwrap(log: string): string[] {
+  const raw = log.replace(/\r\n?/g, "\n").split("\n");
+  const out: string[] = [];
+  let buffer = "";
+  for (const line of raw) {
+    const isContext = /^l\.\d+/.test(line) || (buffer === "" && /^\s/.test(line));
+    buffer += line;
+    if (line.length === MAX_PRINT_LINE && !isContext) continue;
+    out.push(buffer);
+    buffer = "";
+  }
+  if (buffer) out.push(buffer);
+  return out;
+}
+
+const MAX_CONTEXT = 160;
+
+function toProjectPath(file: string, mainDir: string): string {
+  const cleaned = file.trim().replace(/^"|"$/g, "");
+  if (cleaned.startsWith("/") || /^[A-Za-z]:[\\/]/.test(cleaned)) return normalizePath(cleaned);
+  return joinPath(mainDir, cleaned);
+}
+
+function hintFor(message: string): { hint?: string; pkg?: string } {
+  const missing = /File [`'"]?([^`'"]+?\.(?:sty|cls))['"]? not found/.exec(message);
+  if (missing) {
+    const pkg = missing[1];
+    return {
+      pkg,
+      hint: `Missing package ${pkg}. Install it with your TeX distribution (e.g. tlmgr install ${pkg.replace(/\.(sty|cls)$/, "")} or the MiKTeX console).`,
+    };
+  }
+  if (/Undefined control sequence/.test(message)) {
+    return { hint: "A command is misspelled or its package is not loaded." };
+  }
+  if (/Missing \$ inserted/.test(message)) {
+    return { hint: "Math-only syntax (e.g. ^ or _) used outside math mode, or an unclosed $." };
+  }
+  if (/Missing \} inserted|Extra \}|Missing \{ inserted/.test(message)) {
+    return { hint: "Unbalanced braces." };
+  }
+  if (/\\begin\{[^}]*\} on input line \d+ ended by \\end/.test(message)) {
+    return { hint: "Mismatched \\begin / \\end environment." };
+  }
+  if (/File [`'"]?[^`'"]+['"]? not found/.test(message)) {
+    return { hint: "A file referenced by \\input, \\include or \\includegraphics does not exist." };
+  }
+  return {};
+}
+
+export function parseLatexLog(log: string, mainFile = "main.tex"): ParsedLog {
+  const mainDir = mainFile.includes("/") ? mainFile.slice(0, mainFile.lastIndexOf("/")) : "";
+  const lines = unwrap(log);
+  const errors: LogItem[] = [];
+  const warnings: LogItem[] = [];
+  const missingPackages = new Set<string>();
+  const seen = new Set<string>();
+
+  const push = (list: LogItem[], item: LogItem) => {
+    const key = `${item.severity}|${item.file}|${item.line}|${item.message}`;
+    if (seen.has(key) || list.length >= MAX_ITEMS) return;
+    seen.add(key);
+    list.push(item);
+  };
+
+  /** Read TeX's `l.<n> <context>` lines following an error. */
+  const readContext = (start: number): { line?: number; context?: string } => {
+    for (let j = start; j < Math.min(lines.length, start + 12); j++) {
+      const m = /^l\.(\d+)\s?(.*)$/.exec(lines[j]);
+      if (m) {
+        const next = lines[j + 1]?.trim();
+        const context = [m[2].trim(), next && !/^\s*$/.test(next) && !next.startsWith("?") ? next : ""]
+          .filter(Boolean)
+          .join(" ");
+        const clipped = context.length > MAX_CONTEXT ? `${context.slice(0, MAX_CONTEXT)}…` : context;
+        return { line: Number(m[1]), context: clipped || undefined };
+      }
+    }
+    return {};
+  };
+
+  const fileLineError = /^(.*?\.(?:tex|sty|cls|bbl|aux|ltx|def|cfg|clo)):(\d+):\s*(.*)$/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    const fle = fileLineError.exec(line);
+    if (fle) {
+      const message = fle[3].replace(/^LaTeX Error:\s*/, "").trim();
+      const { context } = readContext(i + 1);
+      const { hint, pkg } = hintFor(message);
+      if (pkg) missingPackages.add(pkg);
+      push(errors, {
+        severity: "error",
+        file: toProjectPath(fle[1], mainDir),
+        line: Number(fle[2]),
+        message,
+        context,
+        hint,
+      });
+      continue;
+    }
+
+    if (line.startsWith("! ")) {
+      const message = line.slice(2).replace(/^LaTeX Error:\s*/, "").trim();
+      const { line: errLine, context } = readContext(i + 1);
+      const { hint, pkg } = hintFor(message);
+      if (pkg) missingPackages.add(pkg);
+      push(errors, { severity: "error", message, line: errLine, context, hint });
+      continue;
+    }
+
+    const refWarning =
+      /(?:LaTeX|Package \w+) Warning: (Citation|Reference) [`'"]([^'"]+)['"] (?:on page \S+ )?undefined(?: on input line (\d+))?/.exec(
+        line,
+      );
+    if (refWarning) {
+      push(warnings, {
+        severity: "warning",
+        message: `${refWarning[1]} "${refWarning[2]}" is undefined`,
+        line: refWarning[3] ? Number(refWarning[3]) : undefined,
+      });
+      continue;
+    }
+
+    const genericWarning = /^(?:LaTeX|Package (\S+)|Class (\S+)) Warning: (.*)$/.exec(line);
+    if (genericWarning) {
+      let message = genericWarning[3];
+      // Package warnings continue on lines starting with "(pkg)".
+      for (let j = i + 1; j < lines.length && /^\(\S+\)\s/.test(lines[j]); j++) {
+        message += ` ${lines[j].replace(/^\(\S+\)\s+/, "")}`;
+      }
+      const inputLine = /on input line (\d+)/.exec(message);
+      if (/There were undefined references|Label\(s\) may have changed|Rerun to get/.test(message)) continue;
+      push(warnings, {
+        severity: "warning",
+        message: message.replace(/\s+on input line \d+\.?/, "").trim(),
+        line: inputLine ? Number(inputLine[1]) : undefined,
+      });
+    }
+  }
+
+  if (errors.length === 0 && /Fatal error occurred, no output PDF file produced/.test(log)) {
+    errors.push({ severity: "error", message: "Fatal error occurred, no output PDF file produced." });
+  }
+  if (errors.length === 0 && /Emergency stop/.test(log)) {
+    errors.push({ severity: "error", message: "Emergency stop." });
+  }
+  return { errors, warnings, missingPackages: [...missingPackages] };
+}

@@ -1,0 +1,37 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# secrets: never commit credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# LaTeX build artifacts (sample project / local testing)
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.bbl
+*.blg
+*.bcf
+*.run.xml
+*.lof
+*.lot
+examples/**/*.pdf
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp

@@ -1,0 +1,23 @@
+\section{Introduction}
+\label{sec:intro}
+
+\subsection{Motivation}
+Human pose estimation from video is a building block for action recognition,
+sports analytics and rehabilitation \citep{cao2017realtime}. Previous methods do
+not consider uncertainty and therefore have problems when the image is occluded,
+which is very common in real world videos where people overlap with each other
+or with objects in the scene.
+
+\subsection{Problem Statement}
+Given a sequence of frames $\{I_t\}_{t=1}^{T}$, we estimate the 2D location
+$\mathbf{p}_{t,j} \in \R^2$ of every joint $j$ in every frame $t$.
+A joint may be visible in some frames and hidden in others.
+
+\subsection{Contributions}
+Our contributions are as follows.
+\begin{itemize}
+  \item We propose per-joint uncertainty estimation for video pose estimation.
+  \item We introduce temporal routing that uses neighbouring frames only for
+        uncertain joints (Section~\ref{sec:routing}).
+  \item We show consistent gains on occluded joints (Table~\ref{tab:main}).
+\end{itemize}
