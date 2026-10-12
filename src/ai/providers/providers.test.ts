@@ -16,7 +16,7 @@ const request: AIRequest = {
 
 describe("provider adapters", () => {
   it("OpenAI uses the Responses API format", () => {
-    const body = new OpenAIProvider().buildBody(request);
+    const body = new OpenAIProvider(() => "api_key").buildBody(request);
     expect(body).toMatchObject({ model: "model-x", stream: true, store: false, max_output_tokens: 1000 });
     expect(typeof body.instructions).toBe("string");
     expect((body.input as { role: string }[])[0].role).toBe("user");

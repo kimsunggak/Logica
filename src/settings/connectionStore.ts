@@ -3,12 +3,15 @@
  * provider pickers. Only status information lives here, never secrets.
  */
 import { create } from "zustand";
-import { getCredentialStatus } from "../ai/credentials/credentialStore";
-import { PROVIDER_IDS, type CredentialStatus, type ProviderId } from "../ai/types";
+import { getChatGPTStatus, getCredentialStatus } from "../ai/credentials/credentialStore";
+import { PROVIDER_IDS, type AuthMethodKind, type ChatGPTStatus, type CredentialStatus, type ProviderId } from "../ai/types";
 import { errorMessage } from "../lib/backend";
 
 export interface ProviderConnection {
+  /** API key status. */
   status: CredentialStatus | null;
+  /** Sign in with ChatGPT status (OpenAI only). */
+  chatgpt?: ChatGPTStatus | null;
   /** Result of the last connection test (models API call). */
   verified?: boolean;
   testError?: string;
@@ -29,8 +32,11 @@ export function setConnection(provider: ProviderId, patch: Partial<ProviderConne
 export async function refreshConnection(provider: ProviderId): Promise<void> {
   setConnection(provider, { loading: true });
   try {
-    const status = await getCredentialStatus(provider);
-    setConnection(provider, { status, loading: false });
+    const [status, chatgpt] = await Promise.all([
+      getCredentialStatus(provider),
+      provider === "openai" ? getChatGPTStatus().catch(() => null) : Promise.resolve(undefined),
+    ]);
+    setConnection(provider, { status, chatgpt, loading: false });
   } catch (err) {
     setConnection(provider, {
       loading: false,
@@ -50,6 +56,15 @@ export function refreshAllConnections(): Promise<void[]> {
   return Promise.all(PROVIDER_IDS.map(refreshConnection));
 }
 
-export function isConnected(connection: ProviderConnection): boolean {
+/** Whether the provider can be used with its active authentication method. */
+export function isConnected(provider: ProviderId, connection: ProviderConnection, openaiAuth: AuthMethodKind): boolean {
+  if (provider === "openai" && openaiAuth === "chatgpt") {
+    return Boolean(connection.chatgpt?.connected && connection.chatgpt.planUsage);
+  }
   return Boolean(connection.status?.stored);
+}
+
+/** Whether the connection status has been loaded at least once. */
+export function isKnown(connection: ProviderConnection): boolean {
+  return connection.status !== null;
 }

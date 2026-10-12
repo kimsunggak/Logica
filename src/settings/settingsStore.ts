@@ -4,13 +4,15 @@
  */
 import { create } from "zustand";
 import { DEFAULT_MODEL_ID } from "../ai/models/modelConfig";
-import type { ModelConfig, ProviderId } from "../ai/types";
+import type { AuthMethodKind, ModelConfig, ProviderId } from "../ai/types";
 
 export type ThemeSetting = "system" | "light" | "dark";
 export type CompilerSetting = "auto" | "latexmk" | "pdflatex" | "xelatex" | "custom";
 
 export interface AISettings {
   defaultProvider: ProviderId;
+  /** How LOGICA authenticates to OpenAI. */
+  openaiAuth: AuthMethodKind;
   /** Selected model per provider. */
   models: Record<ProviderId, string>;
   /** Model ids added by hand. */
@@ -44,6 +46,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   ai: {
     defaultProvider: "openai",
+    openaiAuth: "chatgpt",
     models: { ...DEFAULT_MODEL_ID },
     customModels: { openai: [], anthropic: [] },
     fetchedModels: { openai: [], anthropic: [] },
@@ -96,6 +99,7 @@ export function mergeSettings(saved: unknown): Settings {
       customModels: { ...DEFAULT_SETTINGS.ai.customModels, ...(ai.customModels ?? {}) },
       fetchedModels: { ...DEFAULT_SETTINGS.ai.fetchedModels, ...(ai.fetchedModels ?? {}) },
       defaultProvider: ai.defaultProvider === "anthropic" ? "anthropic" : "openai",
+      openaiAuth: ai.openaiAuth === "api_key" ? "api_key" : "chatgpt",
     },
     editor: { ...DEFAULT_SETTINGS.editor, ...(s.editor ?? {}) },
     latex: { ...DEFAULT_SETTINGS.latex, ...(s.latex ?? {}) },

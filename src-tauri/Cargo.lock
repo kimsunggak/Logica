@@ -2338,16 +2338,20 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 name = "logica"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "futures-util",
+ "getrandom 0.4.3",
  "keyring",
  "reqwest",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tokio",
+ "url",
  "which",
 ]
 

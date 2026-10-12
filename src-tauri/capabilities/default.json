@@ -13,7 +13,8 @@
       "identifier": "opener:allow-open-url",
       "allow": [
         { "url": "https://platform.openai.com/*" },
-        { "url": "https://platform.claude.com/*" }
+        { "url": "https://platform.claude.com/*" },
+        { "url": "https://chatgpt.com/*" }
       ]
     }
   ]

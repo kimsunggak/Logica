@@ -3,7 +3,7 @@ import { PROVIDER_LABELS } from "../ai/providers/registry";
 import { pickProjectFolder } from "../lib/backend";
 import { compileProject, openProject, saveAll } from "../project/projectActions";
 import { useProject } from "../project/projectStore";
-import { isConnected, useConnections } from "../settings/connectionStore";
+import { isConnected, isKnown, useConnections } from "../settings/connectionStore";
 import { useSettings } from "../settings/settingsStore";
 import { useWorkspace } from "../storage/workspaceStore";
 import { ProviderSelect } from "./ProviderSelect";
@@ -25,6 +25,8 @@ export function TopBar() {
   const provider = useSettings((s) => s.ai.defaultProvider);
   const model = useSettings((s) => s.ai.models[provider]);
   const connection = useConnections((s) => s[provider]);
+  const openaiAuth = useSettings((s) => s.ai.openaiAuth);
+  const connected = isConnected(provider, connection, openaiAuth);
   const showPdf = useWorkspace((s) => s.layout.showPdf);
   const showChat = useWorkspace((s) => s.layout.showChat);
   const toggle = (key: "showPdf" | "showChat") => useWorkspace.getState().updateLayout({ [key]: !useWorkspace.getState().layout[key] });
@@ -58,8 +60,8 @@ export function TopBar() {
       )}
       <div className="ml-auto flex items-center gap-1.5">
         <span
-          className={`h-2 w-2 rounded-full ${connection.status ? (isConnected(connection) ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600") : "bg-slate-300"}`}
-          title={isConnected(connection) ? `${PROVIDER_LABELS[provider]} connected` : `${PROVIDER_LABELS[provider]} not connected`}
+          className={`h-2 w-2 rounded-full ${isKnown(connection) && connected ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600"}`}
+          title={connected ? `${PROVIDER_LABELS[provider]} connected` : `${PROVIDER_LABELS[provider]} not connected`}
         />
         <ProviderSelect
           value={provider}

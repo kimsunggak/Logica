@@ -76,14 +76,27 @@ export interface ModelConfig {
   source?: "default" | "api" | "custom";
 }
 
-export type AuthMethodKind = "api_key";
+/** `chatgpt` is OpenAI's Sign in with ChatGPT (uses the user's ChatGPT plan). */
+export type AuthMethodKind = "api_key" | "chatgpt";
 
 export interface AuthMethodDescriptor {
   kind: AuthMethodKind;
   label: string;
-  /** Where users obtain the credential. */
+  /** Where users obtain the credential or manage the connection. */
   helpUrl: string;
-  placeholder: string;
+  /** Input placeholder for API keys. */
+  placeholder?: string;
+}
+
+/** Sign in with ChatGPT connection state (no tokens). */
+export interface ChatGPTStatus {
+  connected: boolean;
+  email: string | null;
+  name: string | null;
+  /** Whether the user allowed LOGICA to use their ChatGPT plan. */
+  planUsage: boolean;
+  storeAvailable: boolean;
+  error: string | null;
 }
 
 export interface CredentialStatus {

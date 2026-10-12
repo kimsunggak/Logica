@@ -7,7 +7,7 @@
  */
 import { call, createChannel } from "../../lib/backend";
 import { toAIError } from "../errors";
-import type { ProviderId } from "../types";
+import type { AuthMethodKind, ProviderId } from "../types";
 
 type RawStreamEvent = { type: "open"; status: number } | { type: "chunk"; data: string } | { type: "done" };
 
@@ -16,6 +16,8 @@ export interface StreamOptions {
   provider: ProviderId;
   path: string;
   body: Record<string, unknown>;
+  /** Credential to attach (OpenAI only); defaults to the API key. */
+  auth?: AuthMethodKind;
   onChunk: (text: string) => void;
 }
 
@@ -34,6 +36,7 @@ export async function streamProviderRequest(options: StreamOptions): Promise<voi
         provider: options.provider,
         path: options.path,
         body: options.body,
+        auth: options.auth ?? null,
       },
       onEvent: channel,
     });
@@ -49,9 +52,9 @@ export async function cancelProviderRequest(requestId: string): Promise<void> {
   await call<boolean>("ai_cancel", { requestId }).catch(() => false);
 }
 
-export async function providerGet<T>(provider: ProviderId, path: string): Promise<T> {
+export async function providerGet<T>(provider: ProviderId, path: string, auth?: AuthMethodKind): Promise<T> {
   try {
-    return await call<T>("ai_get", { provider, path });
+    return await call<T>("ai_get", { provider, path, auth: auth ?? null });
   } catch (err) {
     throw toAIError(err, provider);
   }

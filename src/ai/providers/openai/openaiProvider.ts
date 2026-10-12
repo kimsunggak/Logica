@@ -1,11 +1,13 @@
 /**
  * OpenAI adapter (Responses API, streaming).
  *
- * Authentication: an OpenAI API key, stored in the OS credential store and
- * attached by the backend. See README "AI providers" for why API keys are
- * the method used here.
+ * Two official authentication methods, both attached by the backend:
+ * - Sign in with ChatGPT: OAuth access token, usage draws on the user's
+ *   ChatGPT plan (src-tauri/src/chatgpt.rs).
+ * - API key: OpenAI Platform key from the OS credential store.
+ * The request format is identical; only the credential differs.
  */
-import { getCredentialStatus } from "../../credentials/credentialStore";
+import { getChatGPTStatus, getCredentialStatus } from "../../credentials/credentialStore";
 import { AIError, fromStreamError } from "../../errors";
 import { isOpenAITextModel } from "../../models/modelConfig";
 import { buildPrompt } from "../../prompts";
@@ -16,29 +18,53 @@ import type {
   AIRequest,
   AIResponse,
   AIUsage,
+  AuthMethodKind,
   FinishReason,
   ModelConfig,
   StreamHandlers,
 } from "../../types";
 
+/** Platform API keys get `data[]`; ChatGPT sign-in gets the plan catalog `models[]`. */
 interface OpenAIModelList {
   data?: { id: string; created?: number }[];
+  models?: { slug?: string; display_name?: string; visibility?: string }[];
 }
+
+export const CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage";
 
 export class OpenAIProvider implements AIProvider {
   readonly id = "openai" as const;
   readonly name = "OpenAI";
   readonly authMethods = [
-    {
-      kind: "api_key" as const,
-      label: "API key",
-      helpUrl: "https://platform.openai.com/api-keys",
-      placeholder: "sk-...",
-    },
+    { kind: "chatgpt" as const, label: "Sign in with ChatGPT", helpUrl: CHATGPT_USAGE_URL },
+    { kind: "api_key" as const, label: "API key", helpUrl: "https://platform.openai.com/api-keys", placeholder: "sk-..." },
   ];
 
+  /** @param authMethod returns the authentication method chosen in Settings. */
+  constructor(private readonly authMethod: () => AuthMethodKind) {}
+
   async isAuthenticated(): Promise<boolean> {
+    if (this.authMethod() === "chatgpt") {
+      const status = await getChatGPTStatus();
+      return status.connected && status.planUsage;
+    }
     return (await getCredentialStatus(this.id)).stored;
+  }
+
+  /** Explain errors in terms of the active sign-in method. */
+  private explain(error: AIError, auth: AuthMethodKind): AIError {
+    if (auth !== "chatgpt") return error;
+    const opts = { provider: this.id, status: error.status };
+    if (error.kind === "auth") {
+      return new AIError("auth", error.status ? "ChatGPT did not accept the sign-in. Sign in with ChatGPT again in Settings." : error.message, opts);
+    }
+    if (error.kind === "rate_limit" || error.kind === "quota") {
+      return new AIError(error.kind, `ChatGPT plan usage limit reached for LOGICA. Check or change the limit at ${CHATGPT_USAGE_URL}.`, opts);
+    }
+    if (error.kind === "model_unavailable") {
+      return new AIError("model_unavailable", "This model is not available with your ChatGPT plan. Refresh the model list in Settings.", opts);
+    }
+    return error;
   }
 
   /** Convert the shared prompt payload into a Responses API request body. */
@@ -55,6 +81,15 @@ export class OpenAIProvider implements AIProvider {
   }
 
   async generate(request: AIRequest, handlers?: StreamHandlers): Promise<AIResponse> {
+    const auth = this.authMethod();
+    try {
+      return await this.stream(request, auth, handlers);
+    } catch (err) {
+      throw err instanceof AIError ? this.explain(err, auth) : err;
+    }
+  }
+
+  private async stream(request: AIRequest, auth: AuthMethodKind, handlers?: StreamHandlers): Promise<AIResponse> {
     const parser = new SSEParser();
     let text = "";
     let finishReason: FinishReason = "stop";
@@ -104,6 +139,7 @@ export class OpenAIProvider implements AIProvider {
       provider: this.id,
       path: "/v1/responses",
       body: this.buildBody(request),
+      auth,
       onChunk: (chunk) => parser.push(chunk).forEach(handle),
     });
     parser.end().forEach(handle);
@@ -122,7 +158,24 @@ export class OpenAIProvider implements AIProvider {
   }
 
   async listModels(): Promise<ModelConfig[]> {
-    const list = await providerGet<OpenAIModelList>(this.id, "/v1/models");
+    const auth = this.authMethod();
+    let list: OpenAIModelList;
+    try {
+      list = await providerGet<OpenAIModelList>(this.id, "/v1/models", auth);
+    } catch (err) {
+      throw err instanceof AIError ? this.explain(err, auth) : err;
+    }
+    if (Array.isArray(list.models)) {
+      return list.models
+        .filter((m) => m.visibility === "list" && typeof m.slug === "string" && m.slug.trim())
+        .map((m) => ({
+          id: m.slug!,
+          provider: this.id,
+          displayName: m.display_name?.trim() || m.slug!,
+          supportsStreaming: true,
+          source: "api" as const,
+        }));
+    }
     return (list.data ?? [])
       .filter((m) => typeof m.id === "string" && isOpenAITextModel(m.id))
       .sort((a, b) => (b.created ?? 0) - (a.created ?? 0))

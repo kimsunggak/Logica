@@ -6,12 +6,14 @@
 //! * `project`: sandboxed file access inside the opened LaTeX project folder.
 //! * `compile`: running the local LaTeX toolchain.
 //! * `credentials`: storing provider secrets in the OS credential store.
+//! * `chatgpt`: Sign in with ChatGPT (OAuth with PKCE and a loopback redirect).
 //! * `ai`: forwarding AI requests to fixed provider endpoints, attaching the
 //!   stored credential so that secrets never reach the webview.
 //! * `app_state`: persisting non-secret UI state and settings.
 
 mod ai;
 mod app_state;
+mod chatgpt;
 mod compile;
 mod credentials;
 mod error;
@@ -23,6 +25,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(ai::AiRequests::default())
+        .manage(chatgpt::ChatGptAuth::default())
         .invoke_handler(tauri::generate_handler![
             project::list_project_files,
             project::read_text_file,
@@ -38,6 +41,10 @@ pub fn run() {
             ai::ai_stream,
             ai::ai_cancel,
             ai::ai_get,
+            chatgpt::chatgpt_status,
+            chatgpt::chatgpt_sign_in,
+            chatgpt::chatgpt_cancel_sign_in,
+            chatgpt::chatgpt_sign_out,
             app_state::load_app_state,
             app_state::save_app_state,
         ])

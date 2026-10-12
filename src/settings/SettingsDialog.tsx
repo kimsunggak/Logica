@@ -1,16 +1,23 @@
 import { CheckCircle2, CircleDashed, ExternalLink, KeyRound, Loader2, RefreshCw, X, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { deleteCredential, saveApiKey } from "../ai/credentials/credentialStore";
+import {
+  cancelChatGPTSignIn,
+  deleteCredential,
+  saveApiKey,
+  signInWithChatGPT,
+  signOutOfChatGPT,
+} from "../ai/credentials/credentialStore";
 import { AIError } from "../ai/errors";
 import { mergeModels } from "../ai/models/modelConfig";
+import { CHATGPT_USAGE_URL } from "../ai/providers/openai/openaiProvider";
 import { PROVIDER_LABELS, PROVIDERS } from "../ai/providers/registry";
 import { aiService } from "../ai/service";
-import { PROVIDER_IDS, type ProviderId } from "../ai/types";
+import { PROVIDER_IDS, type AuthMethodKind, type ProviderId } from "../ai/types";
 import { ProviderSelect } from "../components/ProviderSelect";
 import { closeSettings, useUI, type SettingsTab } from "../components/uiStore";
 import { detectCompilers, type DetectedTool } from "../latex/compiler/compileApi";
-import { errorMessage, openExternal } from "../lib/backend";
-import { refreshAllConnections, refreshConnection, setConnection, useConnections } from "./connectionStore";
+import { errorKind, errorMessage, openExternal } from "../lib/backend";
+import { isConnected, refreshAllConnections, refreshConnection, setConnection, useConnections } from "./connectionStore";
 import { useSettings, type CompilerSetting, type ThemeSetting } from "./settingsStore";
 
 function Row({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
@@ -38,20 +45,23 @@ async function testConnection(provider: ProviderId) {
   }
 }
 
-function ProviderCard({ provider }: { provider: ProviderId }) {
+function Badge({ tone, children, testId }: { tone: "ok" | "bad" | "idle"; children: React.ReactNode; testId?: string }) {
+  const color = tone === "ok" ? "text-emerald-600" : tone === "bad" ? "text-red-600" : "text-slate-500";
+  const Icon = tone === "ok" ? CheckCircle2 : tone === "bad" ? XCircle : CircleDashed;
+  return (
+    <span className={`flex items-center gap-1 ${color}`} data-testid={testId}>
+      <Icon size={13} /> {children}
+    </span>
+  );
+}
+
+function ApiKeyAuth({ provider, busy, setBusy }: { provider: ProviderId; busy: boolean; setBusy: (b: boolean) => void }) {
   const connection = useConnections((s) => s[provider]);
-  const selectedModel = useSettings((s) => s.ai.models[provider]);
-  const fetched = useSettings((s) => s.ai.fetchedModels[provider]);
-  const custom = useSettings((s) => s.ai.customModels[provider]);
   const [key, setKey] = useState("");
-  const [customId, setCustomId] = useState("");
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const adapter = PROVIDERS[provider];
-  const method = adapter.authMethods[0];
+  const method = PROVIDERS[provider].authMethods.find((m) => m.kind === "api_key")!;
   const status = connection.status;
   const connected = Boolean(status?.stored);
-  const models = mergeModels(provider, fetched, custom);
 
   const connect = async () => {
     const secret = key.trim();
@@ -84,6 +94,159 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
     }
   };
 
+  return (
+    <div>
+      <button className="inline-flex items-center gap-0.5 text-[12px] text-sky-600 hover:underline" onClick={() => void openExternal(method.helpUrl)}>
+        Get a key <ExternalLink size={11} />
+      </button>
+      {connected ? (
+        <div className="mt-2 flex items-center gap-2">
+          <span className="font-mono text-[12px] text-slate-500">Stored key {status?.hint}</span>
+          <button className="btn" onClick={() => void testConnection(provider)} disabled={busy || connection.loading}>
+            Test connection
+          </button>
+          <button className="btn-danger" onClick={() => void disconnect()} disabled={busy} data-testid={`disconnect-${provider}`}>
+            Disconnect
+          </button>
+        </div>
+      ) : (
+        <form
+          className="mt-2 flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void connect();
+          }}
+        >
+          <input
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            className="input flex-1 font-mono"
+            placeholder={method.placeholder}
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            data-testid={`key-${provider}`}
+          />
+          <button type="submit" className="btn-primary" disabled={!key.trim() || busy} data-testid={`connect-${provider}`}>
+            Connect
+          </button>
+        </form>
+      )}
+      {status?.error && <div className="mt-1.5 text-[12px] text-red-600">{status.error}</div>}
+      {error && <div className="mt-1.5 text-[12px] text-red-600">{error}</div>}
+      <div className="mt-1.5 text-[11.5px] text-slate-400">
+        The key is stored in your OS credential store (Keychain, Credential Manager or Secret Service) and is never written to disk by LOGICA.
+      </div>
+    </div>
+  );
+}
+
+function ChatGPTAuth({ busy, setBusy }: { busy: boolean; setBusy: (b: boolean) => void }) {
+  const chatgpt = useConnections((s) => s.openai.chatgpt);
+  const [waiting, setWaiting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const signIn = async () => {
+    setWaiting(true);
+    setBusy(true);
+    setError(null);
+    setNote(null);
+    try {
+      await signInWithChatGPT();
+      await refreshConnection("openai");
+      await testConnection("openai");
+    } catch (err) {
+      if (errorKind(err) !== "cancelled") setError(errorMessage(err));
+    } finally {
+      setWaiting(false);
+      setBusy(false);
+    }
+  };
+
+  const signOut = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { revoked } = await signOutOfChatGPT();
+      setConnection("openai", { verified: undefined, testError: undefined });
+      await refreshConnection("openai");
+      setNote(revoked ? null : "Signed out locally, but OpenAI could not confirm the disconnection. You can remove LOGICA under Connected apps in ChatGPT settings.");
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div data-testid="chatgpt-auth">
+      {chatgpt?.connected ? (
+        <div className="space-y-2">
+          <div className="text-[12.5px]" data-testid="chatgpt-account">
+            Signed in as <span className="font-medium">{chatgpt.name ?? chatgpt.email ?? "ChatGPT user"}</span>
+            {chatgpt.name && chatgpt.email ? <span className="text-slate-500"> ({chatgpt.email})</span> : null}
+          </div>
+          {!chatgpt.planUsage && (
+            <div className="text-[12px] text-amber-700 dark:text-amber-300">
+              ChatGPT plan usage was not allowed for LOGICA. Sign out and sign in again, then allow plan usage.
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <button className="btn" onClick={() => void testConnection("openai")} disabled={busy}>
+              Test connection
+            </button>
+            <button className="btn" onClick={() => void openExternal(CHATGPT_USAGE_URL)}>
+              Manage usage <ExternalLink size={11} />
+            </button>
+            <button className="btn-danger" onClick={() => void signOut()} disabled={busy} data-testid="chatgpt-sign-out">
+              Sign out
+            </button>
+          </div>
+        </div>
+      ) : waiting ? (
+        <div className="flex items-center gap-2 text-[12.5px] text-slate-600 dark:text-slate-300">
+          <Loader2 size={13} className="animate-spin" /> Finish signing in in your browser…
+          <button className="btn" onClick={() => void cancelChatGPTSignIn()} data-testid="chatgpt-cancel">
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button className="btn-primary" onClick={() => void signIn()} disabled={busy} data-testid="chatgpt-sign-in">
+          Sign in with ChatGPT
+        </button>
+      )}
+      {chatgpt?.error && <div className="mt-1.5 text-[12px] text-red-600">{chatgpt.error}</div>}
+      {error && <div className="mt-1.5 text-[12px] text-red-600" data-testid="chatgpt-error">{error}</div>}
+      {note && <div className="mt-1.5 text-[12px] text-amber-700 dark:text-amber-300">{note}</div>}
+      <div className="mt-1.5 text-[11.5px] text-slate-400">
+        Uses your ChatGPT plan (for eligible plans) instead of an API key. Sign-in happens on chatgpt.com in your browser; LOGICA never sees your password and keeps the access tokens only in your OS credential store.
+      </div>
+    </div>
+  );
+}
+
+function ProviderCard({ provider }: { provider: ProviderId }) {
+  const connection = useConnections((s) => s[provider]);
+  const selectedModel = useSettings((s) => s.ai.models[provider]);
+  const fetched = useSettings((s) => s.ai.fetchedModels[provider]);
+  const custom = useSettings((s) => s.ai.customModels[provider]);
+  const openaiAuth = useSettings((s) => s.ai.openaiAuth);
+  const [customId, setCustomId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const methods = PROVIDERS[provider].authMethods;
+  const activeMethod = provider === "openai" ? openaiAuth : "api_key";
+  const connected = isConnected(provider, connection, openaiAuth);
+  const models = mergeModels(provider, fetched, custom);
+
+  const chooseMethod = (method: AuthMethodKind) => {
+    if (method === openaiAuth) return;
+    // Model catalogs differ between ChatGPT plans and API keys.
+    const ai = useSettings.getState().ai;
+    useSettings.getState().updateAI({ openaiAuth: method, fetchedModels: { ...ai.fetchedModels, openai: [] } });
+    setConnection("openai", { verified: undefined, testError: undefined });
+  };
+
   const addCustom = () => {
     const id = customId.trim();
     if (!id) return;
@@ -95,12 +258,13 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
     setCustomId("");
   };
 
+  const storeMissing = activeMethod === "chatgpt" ? connection.chatgpt?.storeAvailable === false : connection.status?.storeAvailable === false;
   let badge: React.ReactNode;
   if (connection.loading || busy) badge = <span className="flex items-center gap-1 text-slate-500"><Loader2 size={13} className="animate-spin" /> Checking…</span>;
-  else if (status && !status.storeAvailable) badge = <span className="flex items-center gap-1 text-red-600"><XCircle size={13} /> Secure storage unavailable</span>;
-  else if (connected && connection.verified === false) badge = <span className="flex items-center gap-1 text-red-600"><XCircle size={13} /> Connection failed</span>;
-  else if (connected) badge = <span className="flex items-center gap-1 text-emerald-600" data-testid={`status-${provider}`}><CheckCircle2 size={13} /> Connected</span>;
-  else badge = <span className="flex items-center gap-1 text-slate-500" data-testid={`status-${provider}`}><CircleDashed size={13} /> Not connected</span>;
+  else if (storeMissing) badge = <Badge tone="bad">Secure storage unavailable</Badge>;
+  else if (connected && connection.verified === false) badge = <Badge tone="bad">Connection failed</Badge>;
+  else if (connected) badge = <Badge tone="ok" testId={`status-${provider}`}>Connected</Badge>;
+  else badge = <Badge tone="idle" testId={`status-${provider}`}>Not connected</Badge>;
 
   return (
     <section className="rounded-lg border border-slate-200 p-3 dark:border-slate-700" data-testid={`provider-${provider}`}>
@@ -109,52 +273,28 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
         <div className="ml-auto text-[12px]">{badge}</div>
       </div>
       <Row label="Authentication">
-        <div className="flex items-center gap-2 text-[12.5px]">
+        <div className="mb-2 flex flex-wrap items-center gap-3 text-[12.5px]">
           <KeyRound size={13} className="text-slate-400" />
-          <span>● {method.label}</span>
-          <button className="ml-1 inline-flex items-center gap-0.5 text-sky-600 hover:underline" onClick={() => void openExternal(method.helpUrl)}>
-            Get a key <ExternalLink size={11} />
-          </button>
+          {methods.map((m) => (
+            <label key={m.kind} className="flex items-center gap-1.5">
+              <input
+                type="radio"
+                name={`auth-${provider}`}
+                checked={activeMethod === m.kind}
+                disabled={methods.length === 1 || busy}
+                onChange={() => chooseMethod(m.kind)}
+                data-testid={`auth-${provider}-${m.kind}`}
+              />
+              {m.label}
+            </label>
+          ))}
         </div>
-        {connected ? (
-          <div className="mt-2 flex items-center gap-2">
-            <span className="font-mono text-[12px] text-slate-500">Stored key {status?.hint}</span>
-            <button className="btn" onClick={() => void testConnection(provider)} disabled={busy || connection.loading}>
-              Test connection
-            </button>
-            <button className="btn-danger" onClick={() => void disconnect()} disabled={busy} data-testid={`disconnect-${provider}`}>
-              Disconnect
-            </button>
-          </div>
+        {activeMethod === "chatgpt" ? (
+          <ChatGPTAuth busy={busy} setBusy={setBusy} />
         ) : (
-          <form
-            className="mt-2 flex items-center gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void connect();
-            }}
-          >
-            <input
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-              className="input flex-1 font-mono"
-              placeholder={method.placeholder}
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              data-testid={`key-${provider}`}
-            />
-            <button type="submit" className="btn-primary" disabled={!key.trim() || busy} data-testid={`connect-${provider}`}>
-              Connect
-            </button>
-          </form>
+          <ApiKeyAuth provider={provider} busy={busy} setBusy={setBusy} />
         )}
         {connection.testError && <div className="mt-1.5 text-[12px] text-red-600">{connection.testError}</div>}
-        {status?.error && <div className="mt-1.5 text-[12px] text-red-600">{status.error}</div>}
-        {error && <div className="mt-1.5 text-[12px] text-red-600">{error}</div>}
-        <div className="mt-1.5 text-[11.5px] text-slate-400">
-          The key is stored in your OS credential store (Keychain, Credential Manager or Secret Service) and is never written to disk by LOGICA.
-        </div>
       </Row>
       <Row label="Model">
         <div className="flex items-center gap-2">
@@ -204,7 +344,7 @@ function AISettings() {
         <ProviderCard key={p} provider={p} />
       ))}
       <p className="text-[11.5px] text-slate-400">
-        LOGICA connects only through the official {PROVIDER_LABELS.openai} and Anthropic APIs. Browser sessions or cookies from ChatGPT or Claude.ai are never used.
+        LOGICA connects only through official {PROVIDER_LABELS.openai} and Anthropic sign-in methods and APIs. Browser sessions or cookies from ChatGPT or Claude.ai are never read.
       </p>
     </div>
   );

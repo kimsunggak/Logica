@@ -1,6 +1,7 @@
 import { PROVIDER_LABELS } from "../ai/providers/registry";
 import { PROVIDER_IDS, type ProviderId } from "../ai/types";
-import { isConnected, useConnections } from "../settings/connectionStore";
+import { isConnected, isKnown, useConnections } from "../settings/connectionStore";
+import { useSettings } from "../settings/settingsStore";
 
 interface ProviderSelectProps {
   value: ProviderId;
@@ -12,6 +13,7 @@ interface ProviderSelectProps {
 /** Provider dropdown; disconnected providers are marked. */
 export function ProviderSelect({ value, onChange, title, className }: ProviderSelectProps) {
   const connections = useConnections();
+  const openaiAuth = useSettings((s) => s.ai.openaiAuth);
   return (
     <select
       className={`select ${className ?? ""}`}
@@ -22,7 +24,7 @@ export function ProviderSelect({ value, onChange, title, className }: ProviderSe
       {PROVIDER_IDS.map((id) => (
         <option key={id} value={id}>
           {PROVIDER_LABELS[id]}
-          {connections[id].status && !isConnected(connections[id]) ? " (not connected)" : ""}
+          {isKnown(connections[id]) && !isConnected(id, connections[id], openaiAuth) ? " (not connected)" : ""}
         </option>
       ))}
     </select>

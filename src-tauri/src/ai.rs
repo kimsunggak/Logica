@@ -21,6 +21,7 @@ use tauri::ipc::Channel;
 use tauri::State;
 use tokio::sync::Notify;
 
+use crate::chatgpt::{self, ChatGptAuth};
 use crate::credentials::read_secret;
 use crate::error::{CmdError, CmdResult};
 
@@ -40,6 +41,9 @@ pub struct StreamRequest {
     provider: String,
     path: String,
     body: serde_json::Value,
+    /// OpenAI only: `api_key` (default) or `chatgpt` (Sign in with ChatGPT).
+    #[serde(default)]
+    auth: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -50,7 +54,7 @@ pub enum StreamEvent {
     Done,
 }
 
-fn client() -> CmdResult<&'static reqwest::Client> {
+pub(crate) fn client() -> CmdResult<&'static reqwest::Client> {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     if let Some(client) = CLIENT.get() {
         return Ok(client);
@@ -201,8 +205,18 @@ fn take_utf8(pending: &mut Vec<u8>) -> String {
     }
 }
 
-async fn stream_inner(request: StreamRequest, channel: Channel<StreamEvent>) -> CmdResult<()> {
-    let secret = load_secret(&request.provider).await?;
+/// The bearer credential for a request: the stored API key, or for OpenAI
+/// with `auth = "chatgpt"` a fresh Sign in with ChatGPT access token.
+async fn credential_for(chatgpt: &ChatGptAuth, provider: &str, auth: Option<&str>) -> CmdResult<String> {
+    match (provider, auth) {
+        ("openai", Some("chatgpt")) => chatgpt::access_token(chatgpt).await,
+        (_, None | Some("api_key")) => load_secret(provider).await,
+        (_, Some(other)) => Err(CmdError::new("invalid_request", format!("Unsupported authentication method: {other}"))),
+    }
+}
+
+async fn stream_inner(chatgpt: &ChatGptAuth, request: StreamRequest, channel: Channel<StreamEvent>) -> CmdResult<()> {
+    let secret = credential_for(chatgpt, &request.provider, request.auth.as_deref()).await?;
     stream_with_secret(&request, &secret, |event| {
         channel
             .send(event)
@@ -265,6 +279,7 @@ async fn stream_with_secret(
 #[tauri::command]
 pub async fn ai_stream(
     state: State<'_, AiRequests>,
+    chatgpt: State<'_, ChatGptAuth>,
     request: StreamRequest,
     on_event: Channel<StreamEvent>,
 ) -> CmdResult<()> {
@@ -277,7 +292,7 @@ pub async fn ai_stream(
         .insert(id.clone(), cancel.clone());
 
     let result = tokio::select! {
-        result = stream_inner(request, on_event) => result,
+        result = stream_inner(&chatgpt, request, on_event) => result,
         _ = cancel.notified() => Err(CmdError::new("cancelled", "Generation cancelled")),
     };
 
@@ -306,8 +321,13 @@ pub async fn ai_cancel(state: State<'_, AiRequests>, request_id: String) -> CmdR
 /// Non-streaming GET against an allowlisted provider endpoint (model listing,
 /// connection test). Returns the parsed JSON body.
 #[tauri::command]
-pub async fn ai_get(provider: String, path: String) -> CmdResult<serde_json::Value> {
-    let secret = load_secret(&provider).await?;
+pub async fn ai_get(
+    chatgpt: State<'_, ChatGptAuth>,
+    provider: String,
+    path: String,
+    auth: Option<String>,
+) -> CmdResult<serde_json::Value> {
+    let secret = credential_for(&chatgpt, &provider, auth.as_deref()).await?;
     get_with_secret(&provider, &path, &secret).await
 }
 
@@ -366,6 +386,7 @@ mod tests {
             request_id: "test".into(),
             provider: "anthropic".into(),
             path: "/v1/messages".into(),
+            auth: None,
             body: serde_json::json!({
                 "model": "claude-haiku-5-5",
                 "max_tokens": 16,

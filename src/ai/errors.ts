@@ -140,6 +140,11 @@ export function toAIError(err: unknown, provider?: ProviderId): AIError {
           : new AIError("unknown", err.message, { provider, status: err.status });
       case "no_credential":
         return new AIError("no_credential", err.message, { provider });
+      case "chatgpt_expired":
+      case "chatgpt_auth":
+        return new AIError("auth", err.message, { provider, status: err.status });
+      case "chatgpt_unavailable":
+        return new AIError("unavailable", err.message, { provider });
       case "store_unavailable":
         return new AIError("store_unavailable", err.message, { provider });
       case "cancelled":

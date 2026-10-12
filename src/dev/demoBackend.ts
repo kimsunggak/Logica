@@ -216,6 +216,28 @@ export function createDemoBackend(): DemoBackend {
   ];
   for (const [path, content] of seed) files.set(path, { content, mtime: now });
   const credentials = new Map<string, string>();
+  // Simulated Sign in with ChatGPT session (no real OAuth in the browser preview).
+  let chatgpt: { email: string; name: string } | null = null;
+  let signInAbort: (() => void) | null = null;
+  const chatgptStatus = () => ({
+    connected: Boolean(chatgpt),
+    email: chatgpt?.email ?? null,
+    name: chatgpt?.name ?? null,
+    planUsage: Boolean(chatgpt),
+    storeAvailable: true,
+    error: null,
+  });
+  /** Bearer credential for a request, mirroring ai.rs `credential_for`. */
+  const credentialFor = (provider: string, auth: string | null | undefined): string => {
+    if (provider === "openai" && auth === "chatgpt") {
+      if (!chatgpt) fail("no_credential", "Sign in with ChatGPT in Settings to use your ChatGPT plan.");
+      return "chatgpt-demo-token";
+    }
+    const key = credentials.get(provider);
+    if (!key) fail("no_credential", `${provider === "openai" ? "OpenAI" : "Claude (Anthropic)"} is not connected. Add an API key in Settings.`);
+    if (key === "invalid") fail("http_error", "Provider returned HTTP 401", { status: 401, body: '{"error":{"type":"authentication_error","message":"invalid api key"}}' });
+    return key;
+  };
   const cancelled = new Set<string>();
 
   const text = (path: string): string => {
@@ -293,20 +315,47 @@ export function createDemoBackend(): DemoBackend {
     credential_delete: ({ provider }) => {
       credentials.delete(provider);
     },
-    ai_get: ({ provider }) => {
-      const key = credentials.get(provider);
-      if (!key) fail("no_credential", "Not connected.");
-      if (key === "invalid") fail("http_error", "Provider returned HTTP 401", { status: 401, body: '{"error":{"type":"authentication_error","message":"invalid x-api-key"}}' });
+    chatgpt_status: () => chatgptStatus(),
+    chatgpt_sign_in: async () => {
+      // Stands in for: open browser, user approves, loopback callback, token exchange.
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, 900);
+        signInAbort = () => {
+          clearTimeout(timer);
+          reject({ kind: "cancelled", message: "ChatGPT sign-in was cancelled." });
+        };
+      }).finally(() => (signInAbort = null));
+      chatgpt = { email: "researcher@example.com", name: "Demo Researcher" };
+      return chatgptStatus();
+    },
+    chatgpt_cancel_sign_in: () => {
+      const abort = signInAbort;
+      abort?.();
+      return Boolean(abort);
+    },
+    chatgpt_sign_out: () => {
+      chatgpt = null;
+      return { revoked: true };
+    },
+    ai_get: ({ provider, auth }) => {
+      credentialFor(provider, auth);
+      if (provider === "openai" && auth === "chatgpt") {
+        return {
+          models: [
+            { slug: "gpt-6-sol", display_name: "GPT-6 Sol", visibility: "list" },
+            { slug: "gpt-6-luna", display_name: "GPT-6 Luna", visibility: "list" },
+            { slug: "internal-preview", display_name: "Hidden", visibility: "hide" },
+          ],
+        };
+      }
       return provider === "openai"
         ? { data: [{ id: "gpt-6-sol", created: 3 }, { id: "gpt-6-luna", created: 2 }, { id: "text-embedding-3-large", created: 1 }] }
         : { data: [{ id: "claude-sonnet-5-5", display_name: "Claude Sonnet 5.5" }, { id: "claude-opus-5-5", display_name: "Claude Opus 5.5" }] };
     },
     ai_stream: async ({ request, onEvent }) => {
       const channel = onEvent as Channel;
-      const { requestId, provider, body } = request as { requestId: string; provider: string; body: Record<string, any> };
-      const key = credentials.get(provider);
-      if (!key) fail("no_credential", `${provider === "openai" ? "OpenAI" : "Claude (Anthropic)"} is not connected. Add an API key in Settings.`);
-      if (key === "invalid") fail("http_error", "Provider returned HTTP 401", { status: 401, body: '{"error":{"type":"authentication_error","message":"invalid api key"}}' });
+      const { requestId, provider, body, auth } = request as { requestId: string; provider: string; body: Record<string, any>; auth?: string | null };
+      credentialFor(provider, auth);
       const messages: { content: string }[] = provider === "openai" ? body.input : body.messages;
       const answer = simulateAnswer(messages[messages.length - 1]?.content ?? "");
       const stream = (provider === "openai" ? openAIStream(answer) : anthropicStream(answer)).join("");
