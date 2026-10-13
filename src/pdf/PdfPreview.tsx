@@ -17,6 +17,7 @@ interface LoadedPdf {
 function PdfPage({ page, scale }: { page: PDFPageProxy; scale: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const holderRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   const viewport = page.getViewport({ scale });
 
@@ -45,9 +46,26 @@ function PdfPage({ page, scale }: { page: PDFPageProxy; scale: number }) {
     };
   }, [page, scale, visible]);
 
+  // Transparent text over the canvas so the paper's text can be selected and copied.
+  useEffect(() => {
+    const container = textRef.current;
+    if (!visible || !container) return;
+    container.replaceChildren();
+    const layer = new pdfjs.TextLayer({ textContentSource: page.streamTextContent(), container, viewport: page.getViewport({ scale }) });
+    layer.render().catch(() => {
+      // Cancelled (zoom or scroll) or a page without text: nothing to select.
+    });
+    return () => layer.cancel();
+  }, [page, scale, visible]);
+
   return (
-    <div ref={holderRef} className="pdf-page mx-auto mb-4 bg-white" style={{ width: viewport.width, height: viewport.height }}>
+    <div
+      ref={holderRef}
+      className="pdf-page relative mx-auto mb-4 bg-white"
+      style={{ width: viewport.width, height: viewport.height, ["--total-scale-factor" as string]: scale }}
+    >
       <canvas ref={canvasRef} style={{ width: viewport.width, height: viewport.height, display: "block" }} />
+      <div ref={textRef} className="textLayer" data-testid="pdf-text-layer" />
     </div>
   );
 }
