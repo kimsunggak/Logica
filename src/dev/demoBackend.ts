@@ -307,6 +307,16 @@ export function createDemoBackend(): DemoBackend {
       return file.content.slice().buffer;
     },
     path_exists: ({ path }) => files.has(path),
+    export_pdf: ({ path }) => {
+      // The browser has no save dialog API here; download the file instead.
+      const file = files.get(path);
+      if (!file || typeof file.content === "string") fail("not_found", `${path} is not a compiled PDF`);
+      const url = URL.createObjectURL(new Blob([file.content.slice()], { type: "application/pdf" }));
+      const link = Object.assign(document.createElement("a"), { href: url, download: path.split("/").pop() });
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return `Downloads/${link.download}`;
+    },
     detect_compilers: () => [{ name: "latexmk", path: "(browser preview)" }],
     compile_latex: async ({ request }) => {
       await sleep(400);

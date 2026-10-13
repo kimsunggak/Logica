@@ -12,7 +12,7 @@ import { keyAtOffset, REF_COMMANDS } from "../latex/parser/parseFile";
 import { confirmDialog, errorKind, errorMessage } from "../lib/backend";
 import { useSettings } from "../settings/settingsStore";
 import { useWorkspace } from "../storage/workspaceStore";
-import { listProjectFiles, pathExists, readTextFile, statFiles, writeTextFile } from "./projectApi";
+import { exportPdfFile, listProjectFiles, pathExists, readTextFile, statFiles, writeTextFile } from "./projectApi";
 import { initialProjectState, notify, openFileMeta, updateOpenFile, useProject, type CompileTrigger } from "./projectStore";
 import { t } from "../i18n";
 
@@ -439,6 +439,33 @@ export async function compileProject(trigger: CompileTrigger = "manual"): Promis
     const next = queued;
     queued = null;
     if (next && useProject.getState().root === root) void compileProject(next);
+  }
+}
+
+async function compileIdle(): Promise<void> {
+  while (compiling) await new Promise((resolve) => setTimeout(resolve, 100));
+}
+
+/** Compile if the PDF is not current, then save a copy where the author chooses. */
+export async function exportPdf(): Promise<void> {
+  const { root } = useProject.getState();
+  if (!root) return;
+  await compileIdle();
+  const { openFiles, compile } = useProject.getState();
+  if (openFiles.some((f) => f.dirty) || compile.status !== "success" || !compile.pdfPath) {
+    await compileProject("manual");
+    await compileIdle();
+  }
+  const { compile: after } = useProject.getState();
+  if (after.status !== "success" || !after.pdfPath) {
+    notify("error", t("export.failed"));
+    return;
+  }
+  try {
+    const saved = await exportPdfFile(root, after.pdfPath, t("export.dialogTitle"));
+    if (saved) notify("success", t("export.saved", { path: saved }));
+  } catch (err) {
+    notify("error", errorMessage(err));
   }
 }
 

@@ -1,7 +1,7 @@
-import { Bot, FileText, FolderOpen, Loader2, Play, Save, Settings } from "lucide-react";
+import { Bot, Download, FileText, FolderOpen, Loader2, Play, Save, Settings } from "lucide-react";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
 import { pickProjectFolder } from "../lib/backend";
-import { compileProject, openProject, saveAll } from "../project/projectActions";
+import { compileProject, exportPdf, openProject, saveAll } from "../project/projectActions";
 import { useProject } from "../project/projectStore";
 import { isConnected, isKnown, useConnections } from "../settings/connectionStore";
 import { useSettings } from "../settings/settingsStore";
@@ -89,6 +89,9 @@ export function TopBar() {
           >
             {compileStatus === "running" ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
             {t("top.compile")}
+          </button>
+          <button className="btn-ghost" onClick={() => void exportPdf()} title={t("top.exportTitle")} data-testid="export-pdf">
+            <Download size={14} /> {t("top.export")}
           </button>
         </>
       )}

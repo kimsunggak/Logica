@@ -292,6 +292,37 @@ pub async fn path_exists(root: String, path: String) -> CmdResult<bool> {
     Ok(resolve(&root_path, &path).map(|p| p.exists()).unwrap_or(false))
 }
 
+/// Save a copy of the compiled PDF where the user chooses. The destination
+/// comes from the native save dialog shown here, never from the webview.
+/// Returns the saved path, or None when the dialog was cancelled.
+#[tauri::command]
+pub async fn export_pdf(app: tauri::AppHandle, root: String, path: String, title: String) -> CmdResult<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let root_path = canonical_root(&root)?;
+    let source = resolve(&root_path, &path)?;
+    if source.extension().and_then(|e| e.to_str()) != Some("pdf") || !source.is_file() {
+        return Err(CmdError::new("not_found", format!("{path} is not a compiled PDF")));
+    }
+    let file_name = source.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "paper.pdf".into());
+    let dialog = app
+        .dialog()
+        .file()
+        .set_title(title)
+        .set_file_name(file_name)
+        .add_filter("PDF", &["pdf"]);
+    let chosen = tauri::async_runtime::spawn_blocking(move || dialog.blocking_save_file())
+        .await
+        .map_err(|e| CmdError::new("internal", e.to_string()))?;
+    let Some(chosen) = chosen else { return Ok(None) };
+    let mut dest = chosen.into_path().map_err(|e| CmdError::new("invalid_path", e.to_string()))?;
+    if dest.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("pdf")) != Some(true) {
+        dest.set_extension("pdf");
+    }
+    std::fs::copy(&source, &dest)?;
+    Ok(Some(dest.to_string_lossy().into_owned()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

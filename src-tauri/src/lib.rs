@@ -33,6 +33,7 @@ pub fn run() {
             project::stat_files,
             project::read_binary_file,
             project::path_exists,
+            project::export_pdf,
             compile::detect_compilers,
             compile::compile_latex,
             credentials::credential_status,

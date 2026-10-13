@@ -50,6 +50,11 @@ export function readBinaryFile(root: string, path: string): Promise<ArrayBuffer>
   return call<ArrayBuffer>("read_binary_file", { root, path });
 }
 
+/** Native save dialog plus copy; resolves to the saved path, or null if cancelled. */
+export function exportPdfFile(root: string, path: string, title: string): Promise<string | null> {
+  return call<string | null>("export_pdf", { root, path, title });
+}
+
 export function pathExists(root: string, path: string): Promise<boolean> {
   return call<boolean>("path_exists", { root, path });
 }
