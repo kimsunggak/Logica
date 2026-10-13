@@ -63,6 +63,12 @@ function hintFor(message: string): { hint?: string; pkg?: string } {
       hint: t("log.missingPackage", { pkg, name: pkg.replace(/\.(sty|cls)$/, "") }),
     };
   }
+  if (/Unicode character .*\(U\+(?:AC|AD|AE|AF|B[0-9A-F]|C[0-9A-F]|D[0-7]|11|31)[0-9A-F]{2}\)/.test(message)) {
+    return { hint: t("log.korean") };
+  }
+  if (/Unicode character .* not set up|Unicode character .*\(U\+[0-9A-F]+\)/.test(message)) {
+    return { hint: t("log.unicode") };
+  }
   if (/Undefined control sequence/.test(message)) {
     return { hint: t("log.undefinedCommand") };
   }

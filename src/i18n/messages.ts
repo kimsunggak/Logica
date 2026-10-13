@@ -16,7 +16,8 @@ const en = {
   "top.exportTitle": "Compile and save the PDF where you choose",
   "export.dialogTitle": "Save PDF",
   "export.saved": "Saved the PDF to {path}",
-  "export.failed": "The PDF could not be exported because compilation failed. Check the compile log.",
+  "export.failed": "The PDF could not be exported because compilation failed: {reason}",
+  "compile.perlMissing": "latexmk needs Perl, which is not installed. Choose Auto or pdflatex in Settings > LaTeX, or install Strawberry Perl.",
   "top.connected": "{provider} connected",
   "top.notConnected": "{provider} not connected",
   "top.defaultProvider": "Default AI provider",
@@ -127,6 +128,8 @@ const en = {
   "log.undefinedCitation": "Citation \"{key}\" is undefined",
   "log.undefinedReference": "Reference \"{key}\" is undefined",
   "log.fatal": "Fatal error occurred, no output PDF file produced.",
+  "log.korean": "pdflatex cannot typeset Korean text. Add \\usepackage{kotex} to the preamble and choose xelatex in Settings > LaTeX.",
+  "log.unicode": "This character is not supported by pdflatex. Use xelatex (Settings > LaTeX) or replace the character with a LaTeX command.",
   "log.emergency": "Emergency stop.",
 
   // inline AI edit
@@ -338,7 +341,8 @@ const ko: Record<MessageKey, string> = {
   "top.exportTitle": "컴파일한 뒤 원하는 위치에 PDF로 저장",
   "export.dialogTitle": "PDF 저장",
   "export.saved": "PDF를 저장했습니다: {path}",
-  "export.failed": "컴파일에 실패해 PDF를 내보낼 수 없습니다. 컴파일 로그를 확인하세요.",
+  "export.failed": "컴파일에 실패해 PDF를 내보낼 수 없습니다: {reason}",
+  "compile.perlMissing": "latexmk를 실행하려면 Perl이 필요한데 설치되어 있지 않습니다. 설정 > LaTeX에서 컴파일러를 '자동'이나 pdflatex로 바꾸거나 Strawberry Perl을 설치하세요.",
   "top.connected": "{provider} 연결됨",
   "top.notConnected": "{provider} 연결 안 됨",
   "top.defaultProvider": "기본 AI provider",
@@ -441,6 +445,8 @@ const ko: Record<MessageKey, string> = {
   "log.undefinedCitation": "인용 \"{key}\"이(가) 정의되어 있지 않습니다",
   "log.undefinedReference": "참조 \"{key}\"이(가) 정의되어 있지 않습니다",
   "log.fatal": "치명적 오류로 PDF가 만들어지지 않았습니다.",
+  "log.korean": "pdflatex는 한글을 조판할 수 없습니다. preamble에 \\usepackage{kotex}를 넣고 설정 > LaTeX에서 컴파일러를 xelatex로 바꾸세요.",
+  "log.unicode": "pdflatex가 지원하지 않는 문자입니다. 설정 > LaTeX에서 xelatex를 쓰거나 이 문자를 LaTeX 명령으로 바꾸세요.",
   "log.emergency": "컴파일이 비상 중단되었습니다.",
 
   "inline.close": "닫기 (Esc)",

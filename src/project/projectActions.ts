@@ -434,7 +434,9 @@ export async function compileProject(trigger: CompileTrigger = "manual"): Promis
         severity: "error",
         message: result.timedOut
           ? t("compile.timedOut", { seconds: settings.timeoutSecs })
-          : t("compile.failedGeneric"),
+          : /script engine|perl/i.test(result.output) && result.compiler === "latexmk"
+            ? t("compile.perlMissing")
+            : t("compile.failedGeneric"),
       });
     }
     useProject.setState((s) => ({
@@ -475,7 +477,8 @@ export async function exportPdf(): Promise<void> {
   }
   const { compile: after } = useProject.getState();
   if (after.status !== "success" || !after.pdfPath) {
-    notify("error", t("export.failed"));
+    const reason = after.error ?? after.log?.errors[0]?.message ?? t("compile.failedGeneric");
+    notify("error", t("export.failed", { reason }));
     return;
   }
   try {

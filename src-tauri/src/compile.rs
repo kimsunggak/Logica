@@ -227,6 +227,47 @@ fn common_args(file_name: &str) -> Vec<String> {
     ]
 }
 
+/// latexmk failed before LaTeX ran because its Perl interpreter is missing
+/// (MiKTeX: "could not find the script engine 'perl'").
+fn latexmk_unusable(output: &str) -> bool {
+    let o = output.to_lowercase();
+    o.contains("script engine") || (o.contains("perl") && (o.contains("not found") || o.contains("could not find") || o.contains("not recognized")))
+}
+
+/// Run a LaTeX engine directly, with BibTeX and extra passes when needed so
+/// that the bibliography and cross references resolve without latexmk.
+async fn engine_passes(
+    engine: &Path,
+    file_name: &str,
+    stem: &str,
+    cwd: &Path,
+    path_var: &OsString,
+    deadline: tokio::time::Instant,
+    combined_output: &mut String,
+) -> Result<bool, StepError> {
+    let first = run_step(engine, &common_args(file_name), cwd, path_var, deadline).await?;
+    combined_output.push_str(&first.output);
+    let aux = std::fs::read_to_string(cwd.join(format!("{stem}.aux"))).unwrap_or_default();
+    let mut passes = 0;
+    if aux.contains("\\bibdata") {
+        if let Ok(bibtex) = find_tool("bibtex", None, path_var) {
+            let out = run_step(&bibtex, &[stem.to_string()], cwd, path_var, deadline).await?;
+            combined_output.push_str(&out.output);
+            passes = 2;
+        }
+    }
+    let log = std::fs::read_to_string(cwd.join(format!("{stem}.log"))).unwrap_or_default();
+    if passes == 0 && log.contains("Rerun to get") {
+        passes = 1;
+    }
+    let mut last = first;
+    for _ in 0..passes {
+        last = run_step(engine, &common_args(file_name), cwd, path_var, deadline).await?;
+        combined_output.push_str(&last.output);
+    }
+    Ok(last.success)
+}
+
 #[tauri::command]
 pub async fn compile_latex(request: CompileRequest) -> CmdResult<CompileResult> {
     let started = Instant::now();
@@ -256,7 +297,8 @@ pub async fn compile_latex(request: CompileRequest) -> CmdResult<CompileResult> 
     let deadline = tokio::time::Instant::now() + timeout;
     let explicit = request.compiler_path.as_deref();
 
-    let compiler = if request.compiler == "auto" {
+    let auto = request.compiler == "auto";
+    let mut compiler = if auto {
         ["latexmk", "pdflatex", "xelatex"]
             .into_iter()
             .find(|name| find_tool(name, None, &path_var).is_ok())
@@ -290,32 +332,22 @@ pub async fn compile_latex(request: CompileRequest) -> CmdResult<CompileResult> 
                 let mut args = vec!["-pdf".to_string()];
                 args.extend(common_args(&file_name));
                 let out = run(bin, args).await?;
-                success &= out.success;
                 combined_output.push_str(&out.output);
+                // MiKTeX ships latexmk as a Perl script and Windows has no Perl by default.
+                // In auto mode fall back to running pdflatex directly.
+                let pdflatex = find_tool("pdflatex", None, &path_var);
+                if !out.success && auto && latexmk_unusable(&out.output) && pdflatex.is_ok() {
+                    combined_output.push_str("\nLOGICA: latexmk could not run (Perl is missing), using pdflatex instead.\n");
+                    compiler = "pdflatex".into();
+                    let engine = pdflatex?;
+                    success &= engine_passes(&engine, &file_name, &stem, &cwd, &path_var, deadline, &mut combined_output).await?;
+                } else {
+                    success &= out.success;
+                }
             }
             "pdflatex" | "xelatex" => {
                 let engine = find_tool(&compiler, explicit, &path_var)?;
-                let first = run(engine.clone(), common_args(&file_name)).await?;
-                combined_output.push_str(&first.output);
-                let aux = std::fs::read_to_string(cwd.join(format!("{stem}.aux"))).unwrap_or_default();
-                let mut passes = 0;
-                if aux.contains("\\bibdata") {
-                    if let Ok(bibtex) = find_tool("bibtex", None, &path_var) {
-                        let out = run(bibtex, vec![stem.clone()]).await?;
-                        combined_output.push_str(&out.output);
-                        passes = 2;
-                    }
-                }
-                let log = std::fs::read_to_string(cwd.join(format!("{stem}.log"))).unwrap_or_default();
-                if passes == 0 && log.contains("Rerun to get") {
-                    passes = 1;
-                }
-                let mut last = first;
-                for _ in 0..passes {
-                    last = run(engine.clone(), common_args(&file_name)).await?;
-                    combined_output.push_str(&last.output);
-                }
-                success &= last.success;
+                success &= engine_passes(&engine, &file_name, &stem, &cwd, &path_var, deadline, &mut combined_output).await?;
             }
             "custom" => {
                 let template = request
@@ -379,6 +411,15 @@ pub async fn compile_latex(request: CompileRequest) -> CmdResult<CompileResult> 
 mod tests {
     use super::*;
 
+    #[test]
+    fn detects_latexmk_without_perl() {
+        assert!(latexmk_unusable(
+            "Sorry, but latexmk did not succeed for the following reason:\n  MiKTeX could not find the script engine 'perl' which is required to execute 'latexmk'."
+        ));
+        assert!(latexmk_unusable("'perl' is not recognized as an internal or external command"));
+        assert!(!latexmk_unusable("Latexmk: Errors, so I did not complete making targets\n! Undefined control sequence."));
+    }
+
     fn sample_project(name: &str) -> PathBuf {
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/sample-paper");
         let dst = std::env::temp_dir().join(format!("logica-compile-{name}-{}", std::process::id()));
@@ -417,6 +458,35 @@ mod tests {
         assert_eq!(result.compiler, "latexmk");
         assert_eq!(result.pdf_path.as_deref(), Some("main.pdf"));
         assert!(!result.log.is_empty());
+    }
+
+    /// Changes PATH for the whole process, so it runs alone:
+    /// `cargo test falls_back -- --ignored --test-threads=1`
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore]
+    async fn falls_back_to_pdflatex_when_latexmk_has_no_perl() {
+        use std::os::unix::fs::PermissionsExt;
+        if !have("pdflatex") {
+            eprintln!("pdflatex not installed; skipping");
+            return;
+        }
+        let bin = std::env::temp_dir().join(format!("logica-fake-latexmk-{}", std::process::id()));
+        std::fs::create_dir_all(&bin).unwrap();
+        let fake = bin.join("latexmk");
+        std::fs::write(&fake, "#!/bin/sh\necho \"MiKTeX could not find the script engine 'perl' which is required to execute 'latexmk'.\" >&2\nexit 1\n").unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let old = std::env::var_os("PATH").unwrap_or_default();
+        let mut dirs = vec![bin.clone()];
+        dirs.extend(std::env::split_paths(&old));
+        std::env::set_var("PATH", std::env::join_paths(dirs).unwrap());
+        let root = sample_project("noperl");
+        let result = compile_latex(request(&root, "auto")).await;
+        std::env::set_var("PATH", old);
+        let result = result.unwrap();
+        assert!(result.success, "{}", result.output);
+        assert_eq!(result.compiler, "pdflatex");
+        assert!(result.output.contains("using pdflatex instead"));
     }
 
     #[tokio::test]

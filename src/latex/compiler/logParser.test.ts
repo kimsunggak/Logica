@@ -60,3 +60,11 @@ describe("parseLatexLog", () => {
     expect(nested.errors[0].hint).toBeDefined();
   });
 });
+
+describe("character hints", () => {
+  it("explains Korean text under pdflatex", () => {
+    const log = "./main.tex:3: LaTeX Error: Unicode character 한 (U+D55C)\n               not set up for use with LaTeX.\n\nl.3 한\n";
+    const parsed = parseLatexLog(log, "main.tex");
+    expect(parsed.errors[0].hint).toContain("kotex");
+  });
+});
