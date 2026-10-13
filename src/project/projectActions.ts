@@ -13,7 +13,7 @@ import { confirmDialog, errorKind, errorMessage } from "../lib/backend";
 import { useSettings } from "../settings/settingsStore";
 import { useWorkspace } from "../storage/workspaceStore";
 import { listProjectFiles, pathExists, readTextFile, statFiles, writeTextFile } from "./projectApi";
-import { initialProjectState, notify, openFileMeta, updateOpenFile, useProject } from "./projectStore";
+import { initialProjectState, notify, openFileMeta, updateOpenFile, useProject, type CompileTrigger } from "./projectStore";
 import { t } from "../i18n";
 
 /** Last known disk content of every .tex/.bib file of the project. */
@@ -60,6 +60,7 @@ export async function openProject(root: string): Promise<void> {
     return;
   }
 
+  clearTimeout(liveTimer);
   for (const path of editorSession.openPaths()) editorSession.close(path);
   diskTexts.clear();
   diskMtimes.clear();
@@ -239,7 +240,7 @@ export async function saveActive(): Promise<void> {
   const { activePath } = useProject.getState();
   if (!activePath) return;
   const saved = await saveFile(activePath);
-  if (saved && useSettings.getState().latex.autoCompile) void compileProject();
+  if (saved && useSettings.getState().latex.livePreview) void compileProject("live");
 }
 
 export async function saveAll(): Promise<boolean> {
@@ -362,20 +363,44 @@ export async function gotoDefinition(path: string, offset: number): Promise<bool
 // ---------------------------------------------------------------- compile
 
 let compiling = false;
+/** A compile requested while another was running; it runs right after. */
+let queued: CompileTrigger | null = null;
 
-export async function compileProject(): Promise<void> {
-  if (compiling) return;
+const LIVE_PREVIEW_DELAY_MS = 1200;
+let liveTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Live preview: save and compile once the author pauses typing. */
+export function scheduleLivePreview() {
+  clearTimeout(liveTimer);
+  if (!useSettings.getState().latex.livePreview || !useProject.getState().root) return;
+  liveTimer = setTimeout(() => void compileProject("live"), LIVE_PREVIEW_DELAY_MS);
+}
+
+/** Save without prompting; files changed on disk wait for the banner decision. */
+async function saveQuietly() {
+  for (const f of useProject.getState().openFiles) {
+    if (f.dirty && !f.external) await saveFile(f.path);
+  }
+}
+
+export async function compileProject(trigger: CompileTrigger = "manual"): Promise<void> {
+  if (compiling) {
+    if (queued !== "manual") queued = trigger;
+    return;
+  }
+  if (trigger === "manual") clearTimeout(liveTimer);
   const { root, doc } = useProject.getState();
   const mainFile = useProject.getState().mainFile ?? doc?.mainFile;
   if (!root) return;
   if (!mainFile) {
-    notify("error", t("compile.noMain"));
+    if (trigger === "manual") notify("error", t("compile.noMain"));
     return;
   }
   compiling = true;
   try {
-    await saveAll();
-    useProject.setState((s) => ({ compile: { ...s.compile, status: "running", error: undefined } }));
+    if (trigger === "manual") await saveAll();
+    else await saveQuietly();
+    useProject.setState((s) => ({ compile: { ...s.compile, status: "running", error: undefined, trigger } }));
     const settings = useSettings.getState().latex;
     const result = await compileLatex({
       root,
@@ -398,6 +423,7 @@ export async function compileProject(): Promise<void> {
     useProject.setState((s) => ({
       compile: {
         status: failed ? "failed" : "success",
+        trigger,
         result,
         log,
         pdfPath: result.pdfPath ?? s.compile.pdfPath,
@@ -406,10 +432,13 @@ export async function compileProject(): Promise<void> {
     }));
   } catch (err) {
     useProject.setState((s) => ({
-      compile: { ...s.compile, status: "failed", error: errorMessage(err), log: undefined, result: undefined },
+      compile: { ...s.compile, status: "failed", error: errorMessage(err), log: undefined, result: undefined, trigger },
     }));
   } finally {
     compiling = false;
+    const next = queued;
+    queued = null;
+    if (next && useProject.getState().root === root) void compileProject(next);
   }
 }
 
@@ -491,7 +520,10 @@ export async function resolveExternalChange(path: string, choice: "reload" | "ke
 /** Connect editor events to the project state. Call once at startup. */
 export function connectEditorSession() {
   editorSession.listener = {
-    onDocChanged: () => scheduleRebuild(),
+    onDocChanged: () => {
+      scheduleRebuild();
+      scheduleLivePreview();
+    },
     onSelectionChanged: (path, state) => updateCursor(path, state),
     onDirtyChanged: (path, dirty) => updateOpenFile(path, { dirty }),
     onActivated: (path) => {

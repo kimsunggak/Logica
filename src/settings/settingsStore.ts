@@ -34,7 +34,8 @@ export interface LatexSettings {
   compiler: CompilerSetting;
   compilerPath: string;
   customCommand: string;
-  autoCompile: boolean;
+  /** Save and compile shortly after typing stops. */
+  livePreview: boolean;
   timeoutSecs: number;
 }
 
@@ -69,7 +70,7 @@ export const DEFAULT_SETTINGS: Settings = {
     compiler: "auto",
     compilerPath: "",
     customCommand: "latexmk -pdf -interaction=nonstopmode -file-line-error {main}",
-    autoCompile: false,
+    livePreview: true,
     timeoutSecs: 120,
   },
 };
@@ -96,6 +97,18 @@ export function currentSettings(): Settings {
   return { ui, ai, editor, latex };
 }
 
+/** Defaults overlaid with the saved values of known keys only (drops retired settings). */
+function pickKnown<T extends object>(defaults: T, saved: unknown): T {
+  const result = { ...defaults };
+  if (saved && typeof saved === "object") {
+    for (const key of Object.keys(defaults) as (keyof T)[]) {
+      const value = (saved as Partial<T>)[key];
+      if (value !== undefined) result[key] = value as T[keyof T];
+    }
+  }
+  return result;
+}
+
 /** Merge persisted settings over defaults, tolerating missing or old fields. */
 export function mergeSettings(saved: unknown): Settings {
   const s = (saved && typeof saved === "object" ? saved : {}) as Partial<Settings>;
@@ -113,6 +126,6 @@ export function mergeSettings(saved: unknown): Settings {
       openaiAuth: ai.openaiAuth === "api_key" ? "api_key" : "chatgpt",
     },
     editor: { ...DEFAULT_SETTINGS.editor, ...(s.editor ?? {}) },
-    latex: { ...DEFAULT_SETTINGS.latex, ...(s.latex ?? {}) },
+    latex: pickKnown(DEFAULT_SETTINGS.latex, s.latex),
   };
 }

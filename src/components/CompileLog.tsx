@@ -16,7 +16,8 @@ export function CompileLog() {
   const warnings = compile.log?.warnings ?? [];
 
   useEffect(() => {
-    if (compile.status === "failed") setOpen(true);
+    // Live preview compiles while the author types; only a requested compile pops the log open.
+    if (compile.status === "failed" && compile.trigger !== "live") setOpen(true);
     if (compile.status === "success") setOpen(false);
   }, [compile.status, compile.result]);
 

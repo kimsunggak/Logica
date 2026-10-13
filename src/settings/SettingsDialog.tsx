@@ -438,10 +438,15 @@ function LatexSettingsPanel() {
           <input className="input w-full font-mono" value={latex.customCommand} onChange={(e) => update({ customCommand: e.target.value })} />
         </Row>
       )}
-      <Row label={t("settings.autoCompile")}>
+      <Row label={t("settings.livePreview")}>
         <label className="flex items-center gap-2 pt-1 text-[12.5px]">
-          <input type="checkbox" checked={latex.autoCompile} onChange={(e) => update({ autoCompile: e.target.checked })} />
-          {t("settings.compileAfterSave")}
+          <input
+            type="checkbox"
+            checked={latex.livePreview}
+            onChange={(e) => update({ livePreview: e.target.checked })}
+            data-testid="live-preview"
+          />
+          {t("settings.livePreviewOn")}
         </label>
       </Row>
       <Row label={t("settings.timeout")}>

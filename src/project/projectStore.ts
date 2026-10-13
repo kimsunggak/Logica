@@ -28,9 +28,13 @@ export interface CompileState {
   /** Error that prevented compilation (missing compiler, timeout, ...). */
   error?: string;
   pdfPath?: string;
+  /** What started the latest compilation: the Compile button or live preview. */
+  trigger?: CompileTrigger;
   /** Incremented whenever a new PDF is available. */
   pdfVersion: number;
 }
+
+export type CompileTrigger = "manual" | "live";
 
 export interface Notice {
   id: number;

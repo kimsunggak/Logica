@@ -246,8 +246,8 @@ const en = {
   "settings.compilerPathHint": "Leave empty to find it on PATH.",
   "settings.compileCommand": "Compile command",
   "settings.compileCommandHint": "Runs in the main file's folder. {main} = main file name, {name} = name without .tex. The PDF must be {name}.pdf.",
-  "settings.autoCompile": "Auto compile",
-  "settings.compileAfterSave": "Compile after saving",
+  "settings.livePreview": "Live preview",
+  "settings.livePreviewOn": "Save and compile automatically when you pause typing",
   "settings.timeout": "Timeout",
   "settings.seconds": "seconds",
 
@@ -535,8 +535,8 @@ const ko: Record<MessageKey, string> = {
   "settings.compilerPathHint": "비워 두면 PATH에서 찾습니다.",
   "settings.compileCommand": "컴파일 명령",
   "settings.compileCommandHint": "main 파일이 있는 폴더에서 실행됩니다. {main} = main 파일 이름, {name} = .tex를 뺀 이름. PDF는 {name}.pdf로 만들어져야 합니다.",
-  "settings.autoCompile": "자동 컴파일",
-  "settings.compileAfterSave": "저장하면 컴파일",
+  "settings.livePreview": "실시간 미리보기",
+  "settings.livePreviewOn": "입력을 멈추면 자동으로 저장하고 컴파일",
   "settings.timeout": "제한 시간",
   "settings.seconds": "초",
 
