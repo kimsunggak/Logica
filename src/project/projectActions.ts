@@ -487,8 +487,9 @@ async function compileIdle(): Promise<void> {
 
 /** Compile if the PDF is not current, then save a copy where the author chooses. */
 export async function exportPdf(): Promise<void> {
-  const { root } = useProject.getState();
+  const { root, name, doc } = useProject.getState();
   if (!root) return;
+  if (!(await confirmDialog(t("export.confirm", { name: doc?.title || name }), "LOGICA", "info"))) return;
   await compileIdle();
   const { openFiles, compile } = useProject.getState();
   if (openFiles.some((f) => f.dirty) || compile.status !== "success" || !compile.pdfPath) {

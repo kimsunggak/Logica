@@ -57,10 +57,10 @@ export async function pickProjectFolder(): Promise<string | null> {
   return (await demoBackend()).openFolderDialog();
 }
 
-export async function confirmDialog(message: string, title = "LOGICA"): Promise<boolean> {
+export async function confirmDialog(message: string, title = "LOGICA", kind: "info" | "warning" = "warning"): Promise<boolean> {
   if (isTauri()) {
     const { ask } = await import("@tauri-apps/plugin-dialog");
-    return ask(message, { title, kind: "warning" });
+    return ask(message, { title, kind });
   }
   return window.confirm(message);
 }
