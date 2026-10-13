@@ -1,7 +1,7 @@
 import { Clock, FilePlus, FolderOpen, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { currentLanguage, t as translateNow, useT } from "../i18n";
-import { isDemoMode } from "../lib/backend";
+import { confirmDialog, isDemoMode } from "../lib/backend";
 import { PdfThumbnail } from "../pdf/PdfThumbnail";
 import { newPaper, openProject } from "../project/projectActions";
 import { pathExists } from "../project/projectApi";
@@ -50,6 +50,10 @@ function useProjectFiles(root: string, memory: ProjectMemory) {
   return state;
 }
 
+async function removeFromList(root: string, name: string) {
+  if (await confirmDialog(translateNow("home.removeConfirm", { name }))) useWorkspace.getState().forgetProject(root);
+}
+
 function ProjectCard({ root, memory }: { root: string; memory: ProjectMemory }) {
   const t = useT();
   const files = useProjectFiles(root, memory);
@@ -85,7 +89,7 @@ function ProjectCard({ root, memory }: { root: string; memory: ProjectMemory }) 
         className="absolute top-1.5 right-1.5 hidden h-6 w-6 items-center justify-center rounded-md bg-white/90 text-slate-500 shadow-sm group-hover:flex hover:text-red-600 dark:bg-slate-800/90"
         title={t("home.remove")}
         aria-label={t("home.remove")}
-        onClick={() => useWorkspace.getState().forgetProject(root)}
+        onClick={() => void removeFromList(root, memory.title || folderName(root))}
         data-testid="recent-remove"
       >
         <X size={13} />
