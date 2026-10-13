@@ -6,6 +6,7 @@ import { closeFile, openFile, resolveExternalChange } from "../project/projectAc
 import { useT } from "../i18n";
 import { useProject } from "../project/projectStore";
 import { CompileLog } from "../components/CompileLog";
+import { CollapseButton } from "../components/panes";
 import { StatusBar } from "../components/StatusBar";
 import { editorSession } from "./editorSession";
 import { InlineEditPanel } from "./inlineEdit/InlineEditPanel";
@@ -15,51 +16,55 @@ function EditorTabs() {
   const openFiles = useProject((s) => s.openFiles);
   const activePath = useProject((s) => s.activePath);
   const mainFile = useProject((s) => s.mainFile);
-  if (openFiles.length === 0) return null;
   return (
-    <div className="flex h-8 shrink-0 items-end overflow-x-auto border-b border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-[#121820]" role="tablist">
-      {openFiles.map((file) => {
-        const active = file.path === activePath;
-        const name = file.path.split("/").pop();
-        return (
-          <div
-            key={file.path}
-            role="tab"
-            aria-selected={active}
-            title={file.path}
-            onMouseDown={(e) => {
-              if (e.button === 1) {
-                e.preventDefault();
-                void closeFile(file.path);
-              }
-            }}
-            onClick={() => void openFile(file.path)}
-            className={`group flex h-full cursor-pointer items-center gap-1.5 border-r border-slate-200 px-3 text-[12.5px] dark:border-slate-800 ${
-              active
-                ? "bg-white text-slate-900 dark:bg-[#0f141b] dark:text-slate-100"
-                : "text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800/60"
-            }`}
-          >
-            <FileText size={12} className={file.path === mainFile ? "text-sky-600 dark:text-sky-400" : "opacity-60"} />
-            <span className="whitespace-nowrap">{name}</span>
-            {file.dirty ? (
-              <span className="ml-0.5 h-2 w-2 rounded-full bg-slate-500 dark:bg-slate-300" title={t("editor.unsaved")} data-testid="dirty-dot" />
-            ) : (
-              <span className="ml-0.5 w-2" />
-            )}
-            <button
-              className="icon-btn -mr-1 h-5 w-5 opacity-0 group-hover:opacity-100"
-              title={t("editor.close")}
-              onClick={(e) => {
-                e.stopPropagation();
-                void closeFile(file.path);
+    <div className="flex h-8 shrink-0 border-b border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-[#121820]">
+      <div className="flex min-w-0 flex-1 items-end overflow-x-auto" role="tablist">
+        {openFiles.map((file) => {
+          const active = file.path === activePath;
+          const name = file.path.split("/").pop();
+          return (
+            <div
+              key={file.path}
+              role="tab"
+              aria-selected={active}
+              title={file.path}
+              onMouseDown={(e) => {
+                if (e.button === 1) {
+                  e.preventDefault();
+                  void closeFile(file.path);
+                }
               }}
+              onClick={() => void openFile(file.path)}
+              className={`group flex h-full cursor-pointer items-center gap-1.5 border-r border-slate-200 px-3 text-[12.5px] dark:border-slate-800 ${
+                active
+                  ? "bg-white text-slate-900 dark:bg-[#0f141b] dark:text-slate-100"
+                  : "text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800/60"
+              }`}
             >
-              <X size={12} />
-            </button>
-          </div>
-        );
-      })}
+              <FileText size={12} className={file.path === mainFile ? "text-sky-600 dark:text-sky-400" : "opacity-60"} />
+              <span className="whitespace-nowrap">{name}</span>
+              {file.dirty ? (
+                <span className="ml-0.5 h-2 w-2 rounded-full bg-slate-500 dark:bg-slate-300" title={t("editor.unsaved")} data-testid="dirty-dot" />
+              ) : (
+                <span className="ml-0.5 w-2" />
+              )}
+              <button
+                className="icon-btn -mr-1 h-5 w-5 opacity-0 group-hover:opacity-100"
+                title={t("editor.close")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void closeFile(file.path);
+                }}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex shrink-0 items-center px-1">
+        <CollapseButton pane="editor" />
+      </div>
     </div>
   );
 }
@@ -96,7 +101,10 @@ export function EditorPane() {
   const activePath = useProject((s) => s.activePath);
 
   useEffect(() => {
-    const view = new EditorView({ parent: hostRef.current!, state: EditorState.create({ doc: "" }) });
+    const view = new EditorView({
+      parent: hostRef.current!,
+      state: EditorState.create({ doc: "" }),
+    });
     editorSession.attach(view);
     return () => {
       editorSession.detach();

@@ -1,11 +1,11 @@
-import { GitCompare, Send, Square, Trash2, X } from "lucide-react";
+import { GitCompare, Send, Square, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
 import { ProviderSelect } from "../components/ProviderSelect";
 import { reviewProposal } from "../editor/inlineEdit/inlineEditStore";
 import { useT, type MessageKey } from "../i18n";
 import { useSettings } from "../settings/settingsStore";
-import { useWorkspace } from "../storage/workspaceStore";
+import { CollapseButton } from "../components/panes";
 import {
   chatProvider,
   clearChat,
@@ -93,9 +93,7 @@ export function ChatPanel() {
         <button className="icon-btn ml-auto" title={t("chat.clear")} onClick={clearChat}>
           <Trash2 size={12} />
         </button>
-        <button className="icon-btn" title={t("chat.close")} onClick={() => useWorkspace.getState().updateLayout({ showChat: false })}>
-          <X size={13} />
-        </button>
+        <CollapseButton pane="chat" />
       </div>
       <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
         {messages.length === 0 && (

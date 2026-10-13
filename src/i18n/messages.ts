@@ -289,6 +289,17 @@ const en = {
   // misc
   "error.panel": "The {name} panel hit an error.",
   "error.reloadPanel": "Reload panel",
+
+  // panels (collapse / expand)
+  "pane.outline": "Outline/Files",
+  "pane.editor": "Editor",
+  "pane.pdf": "PDF",
+  "pane.chat": "AI chat",
+  "pane.bar": "Panels",
+  "pane.collapse": "Collapse {pane}",
+  "pane.expand": "Expand {pane}",
+  "pane.expandAll": "Expand all panels",
+  "pane.allCollapsed": "All panels are collapsed. Expand one from the bar on the left.",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -564,6 +575,16 @@ const ko: Record<MessageKey, string> = {
 
   "error.panel": "{name} 패널에서 오류가 발생했습니다.",
   "error.reloadPanel": "패널 다시 불러오기",
+
+  "pane.outline": "목차/파일",
+  "pane.editor": "편집기",
+  "pane.pdf": "PDF",
+  "pane.chat": "AI 채팅",
+  "pane.bar": "창",
+  "pane.collapse": "{pane} 접기",
+  "pane.expand": "{pane} 펼치기",
+  "pane.expandAll": "모든 창 펼치기",
+  "pane.allCollapsed": "모든 창이 접혀 있습니다. 왼쪽 막대에서 펼칠 창을 선택하세요.",
 };
 
 export const messages: Record<"en" | "ko", Record<MessageKey, string>> = { en, ko };

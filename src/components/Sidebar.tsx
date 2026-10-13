@@ -2,6 +2,7 @@ import { OutlinePanel } from "../outline/OutlinePanel";
 import { FileExplorer } from "../project/FileExplorer";
 import { useT } from "../i18n";
 import { useWorkspace } from "../storage/workspaceStore";
+import { CollapseButton } from "./panes";
 
 export function Sidebar() {
   const t = useT();
@@ -23,6 +24,7 @@ export function Sidebar() {
             {t(id === "outline" ? "sidebar.outline" : "sidebar.files")}
           </button>
         ))}
+        <CollapseButton pane="outline" className="mb-0.5 ml-auto" />
       </div>
       <div className="min-h-0 flex-1">{tab === "outline" ? <OutlinePanel /> : <FileExplorer />}</div>
     </div>

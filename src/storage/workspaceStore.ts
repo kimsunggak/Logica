@@ -22,6 +22,9 @@ export interface LayoutState {
   sidebarWidth: number;
   pdfWidth: number;
   chatWidth: number;
+  /** Expanded (true) or collapsed to a strip (false), per panel. */
+  showOutline: boolean;
+  showEditor: boolean;
   showPdf: boolean;
   showChat: boolean;
   sidebarTab: "outline" | "files";
@@ -37,6 +40,8 @@ export const DEFAULT_LAYOUT: LayoutState = {
   sidebarWidth: 260,
   pdfWidth: 440,
   chatWidth: 360,
+  showOutline: true,
+  showEditor: true,
   showPdf: true,
   showChat: false,
   sidebarTab: "outline",

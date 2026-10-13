@@ -308,7 +308,13 @@ export function updateCursor(path: string, state: EditorState) {
 
 // ---------------------------------------------------------------- navigation
 
+/** Expand the editor panel if it is collapsed (explicit navigation targets it). */
+export function revealEditor() {
+  if (!useWorkspace.getState().layout.showEditor) useWorkspace.getState().updateLayout({ showEditor: true });
+}
+
 export async function navigateTo(path: string, line: number, column = 0): Promise<void> {
+  revealEditor();
   await openFile(path, { line, column });
 }
 

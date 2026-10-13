@@ -1,6 +1,6 @@
 import { BookOpen, FileText, Folder, RefreshCw, Star } from "lucide-react";
 import { useMemo } from "react";
-import { openFile, refreshFileList, setMainFile } from "./projectActions";
+import { openFile, refreshFileList, revealEditor, setMainFile } from "./projectActions";
 import { useT } from "../i18n";
 import { useProject } from "./projectStore";
 
@@ -69,7 +69,10 @@ export function FileExplorer() {
             : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800/70"
         }`}
         style={{ paddingLeft: 8 + depth * 14 }}
-        onClick={() => void openFile(node.path)}
+        onClick={() => {
+          revealEditor();
+          void openFile(node.path);
+        }}
         title={node.path}
       >
         {node.path.endsWith(".bib") ? <BookOpen size={13} className="shrink-0 opacity-70" /> : <FileText size={13} className="shrink-0 opacity-70" />}

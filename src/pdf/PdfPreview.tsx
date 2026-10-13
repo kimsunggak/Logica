@@ -9,6 +9,7 @@ import { t as translateNow, useT } from "../i18n";
 import { errorMessage } from "../lib/backend";
 import { readBinaryFile } from "../project/projectApi";
 import { useProject } from "../project/projectStore";
+import { CollapseButton } from "../components/panes";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -71,7 +72,8 @@ export function PdfPreview() {
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    // A collapsed panel reports width 0; keep the last real width for its return.
+    const observer = new ResizeObserver(([entry]) => entry.contentRect.width > 0 && setWidth(entry.contentRect.width));
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
@@ -132,6 +134,8 @@ export function PdfPreview() {
           <button className="icon-btn" title={t("pdf.fit")} onClick={() => setZoom("fit")} disabled={!pdf}>
             <Maximize2 size={12} />
           </button>
+          <div className="mx-0.5 h-4 w-px bg-slate-200 dark:bg-slate-700" />
+          <CollapseButton pane="pdf" />
         </div>
       </div>
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto p-3" data-testid="pdf-preview">
