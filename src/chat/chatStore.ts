@@ -10,6 +10,7 @@ import { AIError } from "../ai/errors";
 import { MAX_OUTPUT_TOKENS } from "../ai/models/modelConfig";
 import { aiService, newRequestId } from "../ai/service";
 import { lineOf, locateEdit, type ProposedEdit } from "../ai/agent/edits";
+import { deleteSession, listSessions, loadSession, newSessionId, saveSession, SESSION_VERSION, type SessionSummary } from "./chatHistory";
 import type { AIMessage, ProjectFile, ProviderId } from "../ai/types";
 import { editorSession } from "../editor/editorSession";
 import { sectionAt, sectionTrail } from "../latex/parser/documentModel";
@@ -49,9 +50,23 @@ interface ChatState {
   /** Provider override for the chat; null means the default provider. */
   provider: ProviderId | null;
   runningId: string | null;
+  /** Project the conversation belongs to, and the session being shown. */
+  root: string | null;
+  sessionId: string;
+  createdAt: number;
+  /** Saved conversations of this project, most recent first. */
+  sessions: SessionSummary[];
 }
 
-export const useChat = create<ChatState>()(() => ({ messages: [], provider: null, runningId: null }));
+export const useChat = create<ChatState>()(() => ({
+  messages: [],
+  provider: null,
+  runningId: null,
+  root: null,
+  sessionId: newSessionId(),
+  createdAt: Date.now(),
+  sessions: [],
+}));
 
 const MAX_HISTORY_MESSAGES = 12;
 /** Characters of paper source sent to the agent (roughly 40k tokens). */
@@ -174,10 +189,82 @@ export function stopChat() {
   if (runningId) void aiService.cancel(runningId);
 }
 
-export function clearChat() {
+// ---------------------------------------------------------------- saved sessions
+
+/** Load the project's conversations and show the most recent one (or a new one). */
+export async function openChatsFor(root: string | null): Promise<void> {
   stopChat();
-  useChat.setState({ messages: [] });
+  clearTimeout(saveTimer);
+  useChat.setState({ root, messages: [], sessions: [], sessionId: newSessionId(), createdAt: Date.now() });
+  if (!root) return;
+  const sessions = await listSessions(root).catch(() => [] as SessionSummary[]);
+  if (useChat.getState().root !== root) return;
+  useChat.setState({ sessions });
+  if (sessions[0]) await switchChatSession(sessions[0].id);
 }
+
+/** Start an empty conversation; it is saved once it has a message. */
+export function newChatSession() {
+  stopChat();
+  flushSave();
+  useChat.setState({ messages: [], sessionId: newSessionId(), createdAt: Date.now() });
+}
+
+export async function switchChatSession(id: string): Promise<void> {
+  const { root } = useChat.getState();
+  if (!root) return;
+  stopChat();
+  flushSave();
+  const file = await loadSession<ChatMessage>(root, id).catch(() => null);
+  if (!file || useChat.getState().root !== root) return;
+  // An answer that was still streaming when the app closed is shown as stopped.
+  const messages = file.messages.map((m) => (m.status === "streaming" ? { ...m, status: "cancelled" as const } : m));
+  useChat.setState({ messages, sessionId: id, createdAt: file.createdAt });
+}
+
+export async function deleteChatSession(id: string): Promise<void> {
+  const { root, sessionId } = useChat.getState();
+  if (!root) return;
+  if (id === sessionId) {
+    // Leave the conversation first so nothing saves it again while it is being removed.
+    stopChat();
+    clearTimeout(saveTimer);
+    useChat.setState({ messages: [], sessionId: newSessionId(), createdAt: Date.now() });
+  }
+  await deleteSession(root, id);
+  const sessions = useChat.getState().sessions.filter((s) => s.id !== id);
+  useChat.setState({ sessions });
+  if (id === sessionId && sessions[0]) await switchChatSession(sessions[0].id);
+}
+
+const SAVE_DELAY_MS = 500;
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+
+function sessionTitle(messages: ChatMessage[]): string {
+  const first = messages.find((m) => m.role === "user")?.content.replace(/\s+/g, " ").trim() ?? "";
+  return first.length > 60 ? `${first.slice(0, 60)}…` : first;
+}
+
+/** Write the shown conversation now (when it has messages and no answer is streaming). */
+function flushSave() {
+  clearTimeout(saveTimer);
+  const { root, sessionId, createdAt, messages, runningId, sessions } = useChat.getState();
+  if (!root || messages.length === 0 || runningId) return;
+  const updatedAt = Date.now();
+  void saveSession(root, sessionId, { version: SESSION_VERSION, createdAt, updatedAt, messages }).catch(() => {
+    // Saving is best effort; the conversation stays usable in memory.
+  });
+  const summary: SessionSummary = { id: sessionId, title: sessionTitle(messages), createdAt, updatedAt, messageCount: messages.length };
+  useChat.setState({ sessions: [summary, ...sessions.filter((s) => s.id !== sessionId)] });
+}
+
+// Save shortly after the conversation changes (new message, finished answer, applied edit).
+useChat.subscribe((state, prev) => {
+  if (state.messages === prev.messages && state.runningId === prev.runningId) return;
+  if (state.sessionId !== prev.sessionId || state.root !== prev.root) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushSave, SAVE_DELAY_MS);
+});
 
 export function setChatProvider(provider: ProviderId) {
   useChat.setState({ provider });

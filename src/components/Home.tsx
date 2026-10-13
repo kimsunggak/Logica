@@ -1,7 +1,8 @@
 import { Clock, FilePlus, FolderOpen, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { currentLanguage, t as translateNow, useT } from "../i18n";
+import { t as translateNow, useT } from "../i18n";
 import { confirmDialog, isDemoMode } from "../lib/backend";
+import { timeAgo } from "../lib/time";
 import { PdfThumbnail } from "../pdf/PdfThumbnail";
 import { newPaper, openProject } from "../project/projectActions";
 import { pathExists } from "../project/projectApi";
@@ -13,19 +14,6 @@ const THUMB_WIDTH = 220;
 
 function folderName(root: string): string {
   return root.split(/[\\/]/).filter(Boolean).pop() ?? root;
-}
-
-function timeAgo(ms: number | undefined): string {
-  if (!ms) return "";
-  const rtf = new Intl.RelativeTimeFormat(currentLanguage(), { numeric: "auto" });
-  const seconds = Math.round((ms - Date.now()) / 1000);
-  const steps: [Intl.RelativeTimeFormatUnit, number][] = [
-    ["day", 86400],
-    ["hour", 3600],
-    ["minute", 60],
-  ];
-  for (const [unit, size] of steps) if (Math.abs(seconds) >= size) return rtf.format(Math.round(seconds / size), unit);
-  return translateNow("home.justNow");
 }
 
 /** Whether the folder still exists, and the compiled PDF to preview (if any). */

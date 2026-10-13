@@ -1,4 +1,4 @@
-import { Check, CheckCheck, FileText, GitCompare, Send, Square, Trash2, X } from "lucide-react";
+import { Check, CheckCheck, FileText, GitCompare, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
@@ -6,6 +6,8 @@ import { ProviderSelect } from "../components/ProviderSelect";
 import { DiffView } from "../editor/inlineEdit/DiffView";
 import { reviewProposal } from "../editor/inlineEdit/inlineEditStore";
 import { validateRewrite } from "../latex/validation";
+import { confirmDialog } from "../lib/backend";
+import { timeAgo } from "../lib/time";
 import { currentTexts, navigateTo } from "../project/projectActions";
 import { useProject } from "../project/projectStore";
 import { useT, type MessageKey } from "../i18n";
@@ -15,7 +17,9 @@ import {
   applyAllChatEdits,
   applyChatEdit,
   chatProvider,
-  clearChat,
+  deleteChatSession,
+  newChatSession,
+  switchChatSession,
   rejectAllChatEdits,
   rejectChatEdit,
   sendChatMessage,
@@ -176,6 +180,87 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   );
 }
 
+/** Saved conversations of this project: switch to one, or delete it. */
+function SessionHistory() {
+  const t = useT();
+  const sessions = useChat((s) => s.sessions);
+  const current = useChat((s) => s.sessionId);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", close);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", close);
+    };
+  }, [open]);
+
+  const remove = async (id: string, title: string) => {
+    if (await confirmDialog(t("chat.deleteConfirm", { title: title || t("chat.untitled") }))) await deleteChatSession(id);
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        className={`icon-btn ${open ? "bg-slate-200 dark:bg-slate-700" : ""}`}
+        title={t("chat.history")}
+        onClick={() => setOpen(!open)}
+        data-testid="chat-history"
+      >
+        <History size={13} />
+      </button>
+      {open && (
+        <div
+          className="absolute top-7 right-0 z-40 w-72 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-[#151c26]"
+          data-testid="chat-history-list"
+        >
+          <div className="border-b border-slate-100 px-3 py-1.5 text-[11.5px] font-semibold text-slate-500 dark:border-slate-800">{t("chat.history")}</div>
+          <div className="max-h-80 overflow-y-auto py-1">
+            {sessions.length === 0 && <div className="px-3 py-3 text-[12px] text-slate-400">{t("chat.noHistory")}</div>}
+            {sessions.map((s) => (
+              <div
+                key={s.id}
+                className={`group flex items-center gap-2 px-3 py-1.5 ${s.id === current ? "bg-sky-50 dark:bg-sky-950/40" : "hover:bg-slate-50 dark:hover:bg-slate-800/60"}`}
+                data-testid="chat-session"
+                data-current={s.id === current || undefined}
+              >
+                <button
+                  className="min-w-0 flex-1 text-left"
+                  onClick={() => {
+                    setOpen(false);
+                    void switchChatSession(s.id);
+                  }}
+                >
+                  <div className="truncate text-[12.5px] text-slate-800 dark:text-slate-100">{s.title || t("chat.untitled")}</div>
+                  <div className="flex gap-2 text-[11px] text-slate-400">
+                    <span>{timeAgo(s.updatedAt)}</span>
+                    <span>{t("chat.messageCount", { count: s.messageCount })}</span>
+                  </div>
+                </button>
+                <button
+                  className="icon-btn h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 hover:text-red-600"
+                  title={t("chat.deleteSession")}
+                  onClick={() => void remove(s.id, s.title)}
+                  data-testid="chat-session-delete"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="border-t border-slate-100 px-3 py-1.5 text-[11px] text-slate-400 dark:border-slate-800">{t("chat.savedLocally")}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ChatPanel() {
   const t = useT();
   const messages = useChat((s) => s.messages);
@@ -210,10 +295,13 @@ export function ChatPanel() {
         <span className="truncate text-[11px] text-slate-400" title={models[provider]}>
           {models[provider]}
         </span>
-        <button className="icon-btn ml-auto" title={t("chat.clear")} onClick={clearChat}>
-          <Trash2 size={12} />
-        </button>
-        <CollapseButton pane="chat" />
+        <div className="ml-auto flex shrink-0 items-center gap-0.5">
+          <SessionHistory />
+          <button className="icon-btn" title={t("chat.new")} onClick={newChatSession} data-testid="chat-new">
+            <MessageSquarePlus size={13} />
+          </button>
+          <CollapseButton pane="chat" />
+        </div>
       </div>
       <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
         {messages.length === 0 && (

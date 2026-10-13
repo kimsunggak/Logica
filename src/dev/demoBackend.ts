@@ -229,6 +229,17 @@ function anthropicStream(text: string): string[] {
 
 // ------------------------------------------------------------------ backend
 
+const CHATS_KEY = "logica-demo-chats";
+type DemoSession = { createdAt: number; updatedAt: number; messages: { role: string; content: string }[] };
+
+function demoChats(): Record<string, Record<string, DemoSession>> {
+  try {
+    return JSON.parse(localStorage.getItem(CHATS_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
 export function createDemoBackend(): DemoBackend {
   // One in-memory file map per project folder; `files` is the one the current call targets.
   const projects = new Map<string, Map<string, DemoFile>>();
@@ -436,6 +447,28 @@ export function createDemoBackend(): DemoBackend {
     ai_cancel: ({ requestId }) => {
       cancelled.add(requestId);
       return true;
+    },
+    // Saved conversations: localStorage stands in for the app's local data folder.
+    chat_list_sessions: ({ root }) =>
+      Object.entries(demoChats()[root] ?? {})
+        .map(([id, s]) => ({
+          id,
+          title: (s.messages.find((m) => m.role === "user")?.content ?? "").replace(/\s+/g, " ").slice(0, 60),
+          createdAt: s.createdAt,
+          updatedAt: s.updatedAt,
+          messageCount: s.messages.length,
+        }))
+        .sort((a, b) => b.updatedAt - a.updatedAt),
+    chat_load_session: ({ root, id }) => demoChats()[root]?.[id] ?? null,
+    chat_save_session: ({ root, id, session }) => {
+      const all = demoChats();
+      all[root] = { ...all[root], [id]: session };
+      localStorage.setItem(CHATS_KEY, JSON.stringify(all));
+    },
+    chat_delete_session: ({ root, id }) => {
+      const all = demoChats();
+      delete all[root]?.[id];
+      localStorage.setItem(CHATS_KEY, JSON.stringify(all));
     },
     load_app_state: () => {
       try {

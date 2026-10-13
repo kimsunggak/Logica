@@ -13,6 +13,7 @@
 
 mod ai;
 mod app_state;
+mod chats;
 mod chatgpt;
 mod compile;
 mod credentials;
@@ -49,6 +50,10 @@ pub fn run() {
             chatgpt::chatgpt_sign_in,
             chatgpt::chatgpt_cancel_sign_in,
             chatgpt::chatgpt_sign_out,
+            chats::chat_list_sessions,
+            chats::chat_load_session,
+            chats::chat_save_session,
+            chats::chat_delete_session,
             app_state::load_app_state,
             app_state::save_app_state,
         ])

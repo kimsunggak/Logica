@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { clearChat } from "./chat/chatStore";
+import { openChatsFor } from "./chat/chatStore";
 import { Notices } from "./components/Notices";
 import { TopBar, chooseAndOpenProject } from "./components/TopBar";
 import { openSettings } from "./components/uiStore";
@@ -76,10 +76,10 @@ export default function App() {
     rebuildDocumentNow();
   }, [language]);
 
-  // A new project starts with a clean AI state.
+  // Each project has its own saved conversations.
   useEffect(() => {
     if (useInlineEdit.getState().open) rejectInlineEdit();
-    clearChat();
+    void openChatsFor(root);
   }, [root]);
 
   // Pick up changes made by other programs (Git, another editor, ...).

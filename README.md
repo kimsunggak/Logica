@@ -113,6 +113,19 @@ LOGICA는 특정 provider에 묶이지 않도록 공통 `AIProvider` 인터페�
 
 모델 ID는 `src/ai/models/modelConfig.ts` 한 곳에만 기본값으로 둡니다. provider를 연결하면 Settings에서 **Refresh list**로 계정에서 실제로 쓸 수 있는 모델 목록을 provider API에서 가져오고, 목록에 없는 모델 ID도 직접 추가할 수 있습니다. 선택한 모델은 provider별로 저장됩니다.
 
+## 데이터 저장 위치
+
+모든 데이터는 이 컴퓨터에만 저장됩니다. LOGICA는 자체 서버가 없습니다.
+
+| 데이터 | 위치 (Windows 기준) |
+| --- | --- |
+| 논문 원고와 컴파일 결과 | 논문 폴더 (기본: `문서\LOGICA\My Paper N`) |
+| AI 채팅 기록 | `%LOCALAPPDATA%\app.logica.desktop\chats\<프로젝트 ID>\<세션 ID>.json` (프로젝트 ID는 폴더 경로의 SHA-256 해시, 각 폴더의 `project.json`에 원래 경로 기록) |
+| 설정, 최근 작업, 창 배치 | `%APPDATA%\app.logica.desktop\state.json` |
+| API key, ChatGPT 로그인 토큰 | Windows 자격 증명 관리자 (macOS 키체인, Linux Secret Service) |
+
+채팅 세션 파일 형식은 `{ version, createdAt, updatedAt, messages }`입니다. 채팅창의 기록 버튼에서 이전 대화를 불러오거나 삭제하고, 새 대화 버튼으로 새 세션을 시작합니다. 질문할 때 보내는 내용(원고, 질문)은 선택한 AI 제공자(OpenAI, Anthropic)로 전송됩니다.
+
 ## 보안 설계
 
 1. **API key와 ChatGPT token은 OS credential store에만 저장**합니다: macOS Keychain, Windows Credential Manager, Linux Secret Service (`keyring` crate). secure store를 쓸 수 없으면 저장하지 않고 오류를 보여주며, plaintext 파일로 대체 저장하지 않습니다. Windows Credential Manager의 항목당 크기 제한(2.5KB) 때문에 OAuth token 묶음은 여러 항목으로 나눠 저장합니다.
