@@ -93,7 +93,6 @@ const BACKEND_KINDS: Record<string, MessageKey> = {
   timeout: "ai.err.timeout",
   chatgpt_expired: "ai.err.chatgptExpired",
   browser_unavailable: "ai.err.browser",
-  store_unavailable: "ai.err.storeUnavailable",
   invalid_secret: "ai.err.invalidKey",
 };
 
@@ -110,6 +109,9 @@ export function errorMessage(err: unknown): string {
     const kind = errorKind(err);
     if (kind && BACKEND_KINDS[kind]) return t(BACKEND_KINDS[kind]);
     if (kind === "chatgpt_auth") return `${t("ai.err.chatgptFailed")} (${message})`;
+    // Keep the OS store's own reason: it is what tells a locked store from a refused value.
+    if (kind === "store_unavailable") return `${t("ai.err.storeUnavailable")} (${message})`;
+    if (kind === "credential_error") return `${t("ai.err.credentialRejected")} (${message})`;
     return message;
   }
   return String(err);

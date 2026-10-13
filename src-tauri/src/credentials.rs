@@ -20,9 +20,10 @@ const SERVICE: &str = "app.logica.desktop";
 /// Other methods use their own accounts, e.g. `openai:chatgpt` (see chatgpt.rs).
 const API_KEY: &str = "api_key";
 
-/// Windows Credential Manager limits a secret to 2560 bytes; OAuth token sets
-/// can be larger, so blobs are split into chunks below that size.
-const CHUNK_BYTES: usize = 2000;
+/// Windows Credential Manager limits a secret to 2560 bytes and stores
+/// passwords as UTF-16, so one entry holds at most 1280 UTF-16 units. OAuth
+/// token sets are larger, so blobs are split into chunks below that size.
+const CHUNK_UTF16_UNITS: usize = 1200;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,10 +45,15 @@ fn account(provider: &str) -> CmdResult<String> {
 }
 
 pub fn store_error(err: keyring::Error) -> CmdError {
-    CmdError::new(
-        "store_unavailable",
-        format!("OS credential store is not available: {err}"),
-    )
+    match err {
+        // The store itself cannot be reached (locked, missing, no session).
+        keyring::Error::NoStorageAccess(_) | keyring::Error::NoDefaultStore | keyring::Error::PlatformFailure(_) => CmdError::new(
+            "store_unavailable",
+            format!("OS credential store is not available: {err}"),
+        ),
+        // The store works but refused this value (e.g. too long).
+        _ => CmdError::new("credential_error", format!("OS credential store rejected the credential: {err}")),
+    }
 }
 
 fn entry(provider: &str) -> CmdResult<Entry> {
@@ -89,16 +95,7 @@ fn chunk_count(header: Option<String>) -> usize {
 /// Store a value of any size as `<account>` (header) plus `<account>#<i>` chunks.
 pub fn write_blob(account: &str, value: &str) -> CmdResult<()> {
     let previous = chunk_count(read_entry(account)?);
-    let mut chunks = Vec::new();
-    let mut rest = value;
-    while !rest.is_empty() {
-        let mut cut = rest.len().min(CHUNK_BYTES);
-        while !rest.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        chunks.push(&rest[..cut]);
-        rest = &rest[cut..];
-    }
+    let chunks = split_chunks(value, CHUNK_UTF16_UNITS);
     for (i, chunk) in chunks.iter().enumerate() {
         write_entry(&format!("{account}#{i}"), chunk)?;
     }
@@ -107,6 +104,23 @@ pub fn write_blob(account: &str, value: &str) -> CmdResult<()> {
         delete_entry(&format!("{account}#{i}"))?;
     }
     Ok(())
+}
+
+/// Split on character boundaries so that no chunk exceeds `max_units` UTF-16 units.
+fn split_chunks(value: &str, max_units: usize) -> Vec<&str> {
+    let mut chunks = Vec::new();
+    let (mut start, mut units) = (0, 0);
+    for (i, c) in value.char_indices() {
+        if units + c.len_utf16() > max_units {
+            chunks.push(&value[start..i]);
+            (start, units) = (i, 0);
+        }
+        units += c.len_utf16();
+    }
+    if start < value.len() {
+        chunks.push(&value[start..]);
+    }
+    chunks
 }
 
 pub fn read_blob(account: &str) -> CmdResult<Option<String>> {
@@ -208,6 +222,20 @@ pub async fn credential_delete(provider: String) -> CmdResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Windows stores passwords as UTF-16 in at most 2560 bytes (1280 units).
+    #[test]
+    fn chunks_fit_the_windows_credential_limit() {
+        let token: String = "eyJhbGciOiJSUzI1NiJ9.".repeat(400); // ~8 KB, like a ChatGPT token set
+        let name = "연구자 😀 ".repeat(300); // multi-byte and surrogate-pair characters
+        for value in [token.as_str(), name.as_str()] {
+            let chunks = split_chunks(value, CHUNK_UTF16_UNITS);
+            assert!(chunks.len() > 1);
+            assert!(chunks.iter().all(|c| c.encode_utf16().count() * 2 <= 2560));
+            assert_eq!(chunks.concat(), value);
+        }
+        assert!(split_chunks("", CHUNK_UTF16_UNITS).is_empty());
+    }
 
     /// Needs a running OS credential store (skipped otherwise).
     #[test]
