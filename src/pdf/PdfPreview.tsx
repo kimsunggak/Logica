@@ -1,12 +1,26 @@
 import { Loader2, Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { t as translateNow, useT } from "../i18n";
 import { errorMessage } from "../lib/backend";
 import { readBinaryFile } from "../project/projectApi";
 import { pdfjs } from "./pdfjs";
 import { useProject } from "../project/projectStore";
 import { CollapseButton } from "../components/panes";
+
+const MIN_ZOOM = 0.3;
+const MAX_ZOOM = 4;
+
+/** Where the pointer was on the page when a wheel zoom started. */
+interface ZoomAnchor {
+  index: number;
+  /** Position inside the page, as fractions of its width and height. */
+  fx: number;
+  fy: number;
+  /** Pointer position inside the scroll area. */
+  x: number;
+  y: number;
+}
 
 interface LoadedPdf {
   task: PDFDocumentLoadingTask;
@@ -133,7 +147,53 @@ export function PdfPreview() {
   const baseWidth = pdf?.pages[0]?.getViewport({ scale: 1 }).width ?? 612;
   const fitScale = Math.max(0.2, (width - 24) / baseWidth);
   const scale = zoom === "fit" ? fitScale : zoom;
-  const setScale = (value: number) => setZoom(Math.max(0.3, Math.min(4, Math.round(value * 10) / 10)));
+  const setScale = (value: number) => setZoom(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(value * 10) / 10)));
+
+  // Ctrl (or ⌘) + wheel, and trackpad pinch (sent as ctrl+wheel), zoom around the pointer.
+  const scaleRef = useRef(scale);
+  scaleRef.current = scale;
+  const anchor = useRef<ZoomAnchor | null>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const pages = [...el.querySelectorAll<HTMLElement>(".pdf-page")];
+      if (pages.length === 0) return;
+      // Pixel deltas from trackpads are small and many; mouse wheels send one large step.
+      const delta = e.deltaMode === WheelEvent.DOM_DELTA_PIXEL ? e.deltaY : e.deltaY * 40;
+      const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, scaleRef.current * Math.exp(-Math.max(-50, Math.min(50, delta)) * 0.004)));
+      if (Math.abs(next - scaleRef.current) < 0.001) return;
+      const index = Math.max(0, pages.findIndex((p) => p.getBoundingClientRect().bottom >= e.clientY));
+      const rect = pages[index].getBoundingClientRect();
+      const box = el.getBoundingClientRect();
+      anchor.current = {
+        index,
+        fx: (e.clientX - rect.left) / rect.width,
+        fy: (e.clientY - rect.top) / rect.height,
+        x: e.clientX - box.left,
+        y: e.clientY - box.top,
+      };
+      scaleRef.current = next;
+      setZoom(next);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // After zooming, scroll so the point that was under the pointer is under it again.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const a = anchor.current;
+    anchor.current = null;
+    const page = el?.querySelectorAll<HTMLElement>(".pdf-page")[a?.index ?? -1];
+    if (!el || !a || !page) return;
+    const rect = page.getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    el.scrollLeft += rect.left + a.fx * rect.width - (box.left + a.x);
+    el.scrollTop += rect.top + a.fy * rect.height - (box.top + a.y);
+  }, [scale]);
 
   // Only the paper is shown; zoom and collapse float over it in a small bar.
   return (
