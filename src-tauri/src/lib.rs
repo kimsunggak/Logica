@@ -25,6 +25,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(ai::AiRequests::default())
+        .manage(compile::CompileJobs::default())
         .manage(chatgpt::ChatGptAuth::default())
         .invoke_handler(tauri::generate_handler![
             project::list_project_files,
@@ -37,6 +38,7 @@ pub fn run() {
             project::create_starter_project,
             compile::detect_compilers,
             compile::compile_latex,
+            compile::compile_cancel,
             credentials::credential_status,
             credentials::credential_set,
             credentials::credential_delete,

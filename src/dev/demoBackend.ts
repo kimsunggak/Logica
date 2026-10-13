@@ -272,6 +272,7 @@ export function createDemoBackend(): DemoBackend {
     return key;
   };
   const cancelled = new Set<string>();
+  const cancelledJobs = new Set<string>();
 
   const text = (path: string): string => {
     const file = files.get(path);
@@ -334,9 +335,15 @@ export function createDemoBackend(): DemoBackend {
     },
     detect_compilers: () => [{ name: "latexmk", path: "(browser preview)" }],
     compile_latex: async ({ request }) => {
-      await sleep(400);
+      // Like a real compiler, work on the project this call was made for, even if
+      // other calls switch projects while it runs.
+      const project = files;
+      const read = (f: DemoFile) => (typeof f.content === "string" ? f.content : new TextDecoder().decode(f.content));
+      // Tests can slow the simulated compiler down to exercise cancellation.
+      await sleep((globalThis as { __LOGICA_DEMO_COMPILE_MS?: number }).__LOGICA_DEMO_COMPILE_MS ?? 400);
+      if (request.jobId && cancelledJobs.delete(request.jobId)) fail("cancelled", "Compilation cancelled");
       const main = request.mainFile as string;
-      const texts = new Map([...files].filter(([p]) => p.endsWith(".tex")).map(([p]) => [p, text(p)]));
+      const texts = new Map([...project].filter(([p]) => p.endsWith(".tex")).map(([p, f]) => [p, read(f)]));
       const broken = [...texts].find(([, t]) => /\\undefinedcommand/.test(t));
       if (broken) {
         const line = broken[1].split("\n").findIndex((l) => l.includes("\\undefinedcommand")) + 1;
@@ -353,7 +360,7 @@ export function createDemoBackend(): DemoBackend {
       }
       const pdfPath = main.replace(/\.tex$/, ".pdf");
       const mtime = Date.now();
-      files.set(pdfPath, { content: renderPaper(texts, main), mtime });
+      project.set(pdfPath, { content: renderPaper(texts, main), mtime });
       return { success: true, compiler: "latexmk", pdfPath, pdfMtime: mtime, log: "", output: "Output written on main.pdf", durationMs: 400, timedOut: false };
     },
     credential_status: ({ provider }) => status(provider),
@@ -421,6 +428,10 @@ export function createDemoBackend(): DemoBackend {
         await sleep(25);
       }
       channel.onmessage({ type: "done" });
+    },
+    compile_cancel: ({ jobId }) => {
+      cancelledJobs.add(jobId);
+      return true;
     },
     ai_cancel: ({ requestId }) => {
       cancelled.add(requestId);

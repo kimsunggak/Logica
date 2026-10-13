@@ -5,7 +5,7 @@
 import type { EditorState } from "@codemirror/state";
 import { editorSession } from "../editor/editorSession";
 import { parseBibtex, type BibEntry, type BibParseError } from "../latex/bibtex/bibParser";
-import { compileLatex } from "../latex/compiler/compileApi";
+import { cancelCompileJob, compileLatex } from "../latex/compiler/compileApi";
 import { parseLatexLog } from "../latex/compiler/logParser";
 import { buildPaperDocument, sectionAt, type PaperSection } from "../latex/parser/documentModel";
 import { keyAtOffset, REF_COMMANDS } from "../latex/parser/parseFile";
@@ -60,7 +60,7 @@ export async function openProject(root: string): Promise<void> {
     return;
   }
 
-  clearTimeout(liveTimer);
+  cancelCompile();
   for (const path of editorSession.openPaths()) editorSession.close(path);
   diskTexts.clear();
   diskMtimes.clear();
@@ -122,7 +122,7 @@ export async function closeProject(): Promise<boolean> {
   if (!useProject.getState().root) return true;
   await saveQuietly();
   if (hasUnsavedChanges() && !(await confirmDialog(t("project.unsavedHome")))) return false;
-  clearTimeout(liveTimer);
+  cancelCompile();
   clearTimeout(rebuildTimer);
   for (const path of editorSession.openPaths()) editorSession.close(path);
   diskTexts.clear();
@@ -397,9 +397,18 @@ export async function gotoDefinition(path: string, offset: number): Promise<bool
 
 // ---------------------------------------------------------------- compile
 
-let compiling = false;
-/** A compile requested while another was running; it runs right after. */
-let queued: CompileTrigger | null = null;
+/** The compilation in progress, if any, and the project it belongs to. */
+let running: { id: string; root: string } | null = null;
+let jobCounter = 0;
+/** A compile requested while another was running; it runs right after (same project only). */
+let queued: { trigger: CompileTrigger; root: string } | null = null;
+
+/** Stop compiling the current project (leaving it or opening another). */
+function cancelCompile() {
+  clearTimeout(liveTimer);
+  queued = null;
+  if (running) void cancelCompileJob(running.id);
+}
 
 const LIVE_PREVIEW_DELAY_MS = 1200;
 let liveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -419,19 +428,22 @@ async function saveQuietly() {
 }
 
 export async function compileProject(trigger: CompileTrigger = "manual"): Promise<void> {
-  if (compiling) {
-    if (queued !== "manual") queued = trigger;
+  const { root, doc } = useProject.getState();
+  if (!root) return;
+  if (running) {
+    if (!queued || queued.root !== root || queued.trigger !== "manual") queued = { trigger, root };
     return;
   }
   if (trigger === "manual") clearTimeout(liveTimer);
-  const { root, doc } = useProject.getState();
   const mainFile = useProject.getState().mainFile ?? doc?.mainFile;
-  if (!root) return;
   if (!mainFile) {
     if (trigger === "manual") notify("error", t("compile.noMain"));
     return;
   }
-  compiling = true;
+  const job = { id: `compile-${++jobCounter}`, root };
+  running = job;
+  // A result that arrives after the author left this project must not touch the next one.
+  const stillOpen = () => useProject.getState().root === root;
   try {
     if (trigger === "manual") await saveAll();
     else await saveQuietly();
@@ -444,7 +456,8 @@ export async function compileProject(trigger: CompileTrigger = "manual"): Promis
       compilerPath: settings.compilerPath,
       customCommand: settings.customCommand,
       timeoutSecs: settings.timeoutSecs,
-    });
+    }, job.id);
+    if (!stillOpen()) return;
     const log = parseLatexLog(result.log, mainFile);
     const failed = !result.success || result.timedOut;
     if (failed && log.errors.length === 0) {
@@ -470,19 +483,20 @@ export async function compileProject(trigger: CompileTrigger = "manual"): Promis
       },
     }));
   } catch (err) {
+    if (errorKind(err) === "cancelled" || !stillOpen()) return;
     useProject.setState((s) => ({
       compile: { ...s.compile, status: "failed", error: errorMessage(err), log: undefined, result: undefined, trigger },
     }));
   } finally {
-    compiling = false;
+    if (running === job) running = null;
     const next = queued;
     queued = null;
-    if (next && useProject.getState().root === root) void compileProject(next);
+    if (next && next.root === useProject.getState().root) void compileProject(next.trigger);
   }
 }
 
 async function compileIdle(): Promise<void> {
-  while (compiling) await new Promise((resolve) => setTimeout(resolve, 100));
+  while (running) await new Promise((resolve) => setTimeout(resolve, 100));
 }
 
 /** Compile if the PDF is not current, then save a copy where the author chooses. */
@@ -496,9 +510,11 @@ export async function exportPdf(): Promise<void> {
     await compileProject("manual");
     await compileIdle();
   }
+  if (useProject.getState().root !== root) return; // left the project meanwhile
   const { compile: after } = useProject.getState();
   if (after.status !== "success" || !after.pdfPath) {
-    const reason = after.error ?? after.log?.errors[0]?.message ?? t("compile.failedGeneric");
+    const first = after.log?.errors[0];
+    const reason = after.error ?? (first ? `${first.message}${first.hint ? ` ${first.hint}` : ""}` : t("compile.failedGeneric"));
     notify("error", t("export.failed", { reason }));
     return;
   }

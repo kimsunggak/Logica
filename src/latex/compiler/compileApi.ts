@@ -27,7 +27,7 @@ export interface CompileOptions {
   timeoutSecs?: number;
 }
 
-export function compileLatex(options: CompileOptions): Promise<CompileResult> {
+export function compileLatex(options: CompileOptions, jobId?: string): Promise<CompileResult> {
   return call<CompileResult>("compile_latex", {
     request: {
       root: options.root,
@@ -36,10 +36,16 @@ export function compileLatex(options: CompileOptions): Promise<CompileResult> {
       compilerPath: options.compilerPath || null,
       customCommand: options.customCommand || null,
       timeoutSecs: options.timeoutSecs ?? null,
+      jobId: jobId ?? null,
     },
   });
 }
 
 export function detectCompilers(): Promise<DetectedTool[]> {
   return call<DetectedTool[]>("detect_compilers");
+}
+
+/** Stop a running compilation started with this job id (its TeX process is killed). */
+export async function cancelCompileJob(jobId: string): Promise<void> {
+  await call<boolean>("compile_cancel", { jobId }).catch(() => false);
 }

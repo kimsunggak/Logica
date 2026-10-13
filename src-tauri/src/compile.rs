@@ -5,13 +5,17 @@
 //! timeout and returns the raw `.log` so the frontend can extract the relevant
 //! errors.
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use tauri::State;
 use tokio::process::Command;
+use tokio::sync::Notify;
 
 use crate::error::{CmdError, CmdResult};
 use crate::project::{canonical_root, mtime_ms, resolve};
@@ -35,7 +39,14 @@ pub struct CompileRequest {
     /// Used when `compiler` is `custom`. `{main}` and `{name}` are substituted.
     custom_command: Option<String>,
     timeout_secs: Option<u64>,
+    /// Lets the frontend cancel this run with `compile_cancel` (e.g. when the
+    /// author leaves the project); the TeX process is then killed.
+    job_id: Option<String>,
 }
+
+/// Compilations that can still be cancelled, by job id.
+#[derive(Default)]
+pub struct CompileJobs(Mutex<HashMap<String, Arc<Notify>>>);
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -298,7 +309,39 @@ async fn engine_passes(
 }
 
 #[tauri::command]
-pub async fn compile_latex(request: CompileRequest) -> CmdResult<CompileResult> {
+pub async fn compile_latex(jobs: State<'_, CompileJobs>, request: CompileRequest) -> CmdResult<CompileResult> {
+    let Some(id) = request.job_id.clone() else {
+        return compile(request).await;
+    };
+    let cancel = Arc::new(Notify::new());
+    jobs.0
+        .lock()
+        .map_err(|_| CmdError::new("internal", "compile registry poisoned"))?
+        .insert(id.clone(), cancel.clone());
+    let result = compile_until_cancelled(request, cancel).await;
+    if let Ok(mut map) = jobs.0.lock() {
+        map.remove(&id);
+    }
+    result
+}
+
+/// Stop a running compilation. Returns whether a job with that id was running.
+#[tauri::command]
+pub async fn compile_cancel(jobs: State<'_, CompileJobs>, job_id: String) -> CmdResult<bool> {
+    let map = jobs.0.lock().map_err(|_| CmdError::new("internal", "compile registry poisoned"))?;
+    Ok(map.get(&job_id).map(|cancel| cancel.notify_one()).is_some())
+}
+
+/// Dropping the compile future drops the running child process, which
+/// `kill_on_drop` terminates.
+async fn compile_until_cancelled(request: CompileRequest, cancel: Arc<Notify>) -> CmdResult<CompileResult> {
+    tokio::select! {
+        result = compile(request) => result,
+        _ = cancel.notified() => Err(CmdError::new("cancelled", "Compilation cancelled")),
+    }
+}
+
+async fn compile(request: CompileRequest) -> CmdResult<CompileResult> {
     let started = Instant::now();
     let started_wall = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -460,6 +503,30 @@ pub async fn compile_latex(request: CompileRequest) -> CmdResult<CompileResult> 
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelling_stops_the_running_compiler() {
+        let root = std::env::temp_dir().join(format!("logica-cancel-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("main.tex"), "\\documentclass{article}").unwrap();
+        let marker = root.join("finished");
+        let mut req = request(&root, "custom");
+        req.custom_command = Some(format!("sleep 5 && touch '{}'", marker.display()));
+        let cancel = Arc::new(Notify::new());
+        let trigger = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            trigger.notify_one();
+        });
+        let started = Instant::now();
+        let err = compile_until_cancelled(req, cancel).await.err().expect("cancelled");
+        assert_eq!(err.kind, "cancelled");
+        assert!(started.elapsed() < Duration::from_secs(2));
+        // The shell was killed, so the command after `sleep` never runs.
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        assert!(!marker.exists());
+    }
+
     #[test]
     fn prefers_installed_tex_over_the_bundled_engine() {
         assert_eq!(pick_auto(|n| n == "pdflatex", true), Some("pdflatex"));
@@ -496,6 +563,7 @@ mod tests {
             compiler_path: None,
             custom_command: None,
             timeout_secs: Some(120),
+            job_id: None,
         }
     }
 
@@ -510,7 +578,7 @@ mod tests {
             return;
         }
         let root = sample_project("ok");
-        let result = compile_latex(request(&root, "auto")).await.unwrap();
+        let result = compile(request(&root, "auto")).await.unwrap();
         assert!(result.success, "{}", result.output);
         assert_eq!(result.compiler, "latexmk");
         assert_eq!(result.pdf_path.as_deref(), Some("main.pdf"));
@@ -538,7 +606,7 @@ mod tests {
         dirs.extend(std::env::split_paths(&old));
         std::env::set_var("PATH", std::env::join_paths(dirs).unwrap());
         let root = sample_project("noperl");
-        let result = compile_latex(request(&root, "auto")).await;
+        let result = compile(request(&root, "auto")).await;
         std::env::set_var("PATH", old);
         let result = result.unwrap();
         assert!(result.success, "{}", result.output);
@@ -571,7 +639,7 @@ mod tests {
         std::env::set_var("LOGICA_TECTONIC", &fake);
         let root = sample_project("tectonic");
         let tools = detect_compilers().await;
-        let result = compile_latex(request(&root, "tectonic")).await;
+        let result = compile(request(&root, "tectonic")).await;
         std::env::remove_var("LOGICA_TECTONIC");
         assert!(tools.iter().any(|t| t.name == "tectonic"));
         let result = result.unwrap();
@@ -591,7 +659,7 @@ mod tests {
         let method = root.join("sections/method.tex");
         let text = std::fs::read_to_string(&method).unwrap();
         std::fs::write(&method, text.replace("Overview}", "Overview}\\undefinedcommand")).unwrap();
-        let result = compile_latex(request(&root, "pdflatex")).await.unwrap();
+        let result = compile(request(&root, "pdflatex")).await.unwrap();
         assert!(!result.success);
         assert!(result.log.contains("sections/method.tex:"), "{}", result.log);
         assert!(result.log.contains("Undefined control sequence"));
@@ -602,7 +670,7 @@ mod tests {
         let root = sample_project("missing");
         let mut req = request(&root, "xelatex");
         req.compiler_path = Some("/nonexistent/xelatex".into());
-        let err = compile_latex(req).await.err().expect("should fail");
+        let err = compile(req).await.err().expect("should fail");
         assert_eq!(err.kind, "compiler_not_found");
     }
 }
