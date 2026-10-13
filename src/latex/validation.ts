@@ -8,6 +8,7 @@
  */
 import { CITE_COMMAND_PATTERN, REF_COMMANDS } from "./parser/parseFile";
 import { commentStart } from "./parser/text";
+import { t } from "../i18n";
 
 export interface ValidationIssue {
   severity: "error" | "warning";
@@ -100,71 +101,71 @@ export function validateRewrite(
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   if (!rewritten.trim()) {
-    return [{ severity: "error", message: "The AI returned an empty result." }];
+    return [{ severity: "error", message: t("val.empty") }];
   }
   const o = stripComments(original);
   const r = stripComments(rewritten);
 
   if (braceBalance(o) !== braceBalance(r)) {
-    issues.push({ severity: "error", message: "Unbalanced braces { } compared to the original." });
+    issues.push({ severity: "error", message: t("val.braces") });
   }
   const envO = environmentBalance(o);
   const envR = environmentBalance(r);
   for (const name of new Set([...envO.keys(), ...envR.keys()])) {
     if ((envO.get(name) ?? 0) !== (envR.get(name) ?? 0)) {
-      issues.push({ severity: "error", message: `Unbalanced \\begin{${name}} / \\end{${name}}.` });
+      issues.push({ severity: "error", message: t("val.environment", { name }) });
     }
   }
   if (dollarCount(o) % 2 !== dollarCount(r) % 2) {
-    issues.push({ severity: "error", message: "Unbalanced $ math delimiters." });
+    issues.push({ severity: "error", message: t("val.dollar") });
   }
   if (
     countMatches(o, /\\\(/g) - countMatches(o, /\\\)/g) !== countMatches(r, /\\\(/g) - countMatches(r, /\\\)/g) ||
     countMatches(o, /\\\[/g) - countMatches(o, /\\\]/g) !== countMatches(r, /\\\[/g) - countMatches(r, /\\\]/g)
   ) {
-    issues.push({ severity: "error", message: "Unbalanced \\( \\) or \\[ \\] math delimiters." });
+    issues.push({ severity: "error", message: t("val.mathDelimiters") });
   }
 
   const labelsO = keysOf(o, "label");
   const labelsR = keysOf(r, "label");
   const lostLabels = diffList(labelsO, labelsR);
   if (lostLabels.length) {
-    issues.push({ severity: "error", message: `Label removed or renamed: ${lostLabels.join(", ")}` });
+    issues.push({ severity: "error", message: t("val.labelRemoved", { keys: lostLabels.join(", ") }) });
   }
   const newLabels = diffList(labelsR, labelsO);
   if (newLabels.length) {
-    issues.push({ severity: "warning", message: `New label added: ${newLabels.join(", ")}` });
+    issues.push({ severity: "warning", message: t("val.labelAdded", { keys: newLabels.join(", ") }) });
   }
 
   const citesO = keysOf(o, CITE_COMMAND_PATTERN);
   const citesR = keysOf(r, CITE_COMMAND_PATTERN);
   const lostCites = diffList(citesO, citesR);
   if (lostCites.length) {
-    issues.push({ severity: "warning", message: `Citation removed: ${lostCites.join(", ")}` });
+    issues.push({ severity: "warning", message: t("val.citeRemoved", { keys: lostCites.join(", ") }) });
   }
   const newCites = diffList(citesR, citesO);
   const unknown = options.bibKeys ? newCites.filter((k) => !options.bibKeys!.has(k)) : [];
   if (unknown.length) {
-    issues.push({ severity: "error", message: `Unknown citation key: ${unknown.join(", ")}` });
+    issues.push({ severity: "error", message: t("val.citeUnknown", { keys: unknown.join(", ") }) });
   } else if (newCites.length) {
-    issues.push({ severity: "warning", message: `Citation added: ${newCites.join(", ")}` });
+    issues.push({ severity: "warning", message: t("val.citeAdded", { keys: newCites.join(", ") }) });
   }
 
   const refsO = keysOf(o, REF_COMMANDS.join("|"));
   const refsR = keysOf(r, REF_COMMANDS.join("|"));
   const lostRefs = diffList(refsO, refsR);
   if (lostRefs.length) {
-    issues.push({ severity: "warning", message: `Reference removed: ${lostRefs.join(", ")}` });
+    issues.push({ severity: "warning", message: t("val.refRemoved", { keys: lostRefs.join(", ") }) });
   }
   const newRefs = diffList(refsR, refsO);
   if (newRefs.length) {
-    issues.push({ severity: "warning", message: `Reference added: ${newRefs.join(", ")}` });
+    issues.push({ severity: "warning", message: t("val.refAdded", { keys: newRefs.join(", ") }) });
   }
 
   const mathO = mathSegments(o);
   const mathR = new Set(mathSegments(r));
   if (mathO.some((seg) => !mathR.has(seg))) {
-    issues.push({ severity: "warning", message: "Math content was changed. Check equations and notation." });
+    issues.push({ severity: "warning", message: t("val.math") });
   }
 
   const lostCommands = diffList(commandsUsed(o), commandsUsed(r)).filter(
@@ -173,12 +174,12 @@ export function validateRewrite(
   if (lostCommands.length) {
     issues.push({
       severity: "warning",
-      message: `LaTeX commands no longer used: ${lostCommands.map((c) => `\\${c}`).join(", ")}`,
+      message: t("val.commands", { commands: lostCommands.map((c) => `\\${c}`).join(", ") }),
     });
   }
 
   if (commentCount(rewritten) < commentCount(original)) {
-    issues.push({ severity: "warning", message: "Some % comments were removed." });
+    issues.push({ severity: "warning", message: t("val.comments") });
   }
   return issues;
 }

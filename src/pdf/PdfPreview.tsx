@@ -5,6 +5,7 @@ import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import { useEffect, useRef, useState } from "react";
+import { t as translateNow, useT } from "../i18n";
 import { errorMessage } from "../lib/backend";
 import { readBinaryFile } from "../project/projectApi";
 import { useProject } from "../project/projectStore";
@@ -57,6 +58,7 @@ function PdfPage({ page, scale }: { page: PDFPageProxy; scale: number }) {
 
 export function PdfPreview() {
   const root = useProject((s) => s.root);
+  const t = useT();
   const pdfPath = useProject((s) => s.compile.pdfPath);
   const version = useProject((s) => s.compile.pdfVersion);
   const status = useProject((s) => s.compile.status);
@@ -96,7 +98,7 @@ export function PdfPreview() {
           return { task, doc, pages };
         });
       } catch (err) {
-        if (!cancelled) setError(`Could not load the PDF: ${errorMessage(err)}`);
+        if (!cancelled) setError(translateNow("pdf.loadError", { error: errorMessage(err) }));
       }
     })();
     return () => {
@@ -112,22 +114,22 @@ export function PdfPreview() {
   return (
     <div className="flex h-full flex-col bg-slate-100 dark:bg-[#0b0f14]">
       <div className="flex h-8 shrink-0 items-center gap-1 border-b border-slate-200 bg-slate-50 px-2 dark:border-slate-800 dark:bg-[#121820]">
-        <span className="panel-title">PDF</span>
+        <span className="panel-title">{t("pdf.title")}</span>
         {status === "running" && (
           <span className="ml-2 flex items-center gap-1 text-[11.5px] text-slate-500">
-            <Loader2 size={12} className="animate-spin" /> Compiling…
+            <Loader2 size={12} className="animate-spin" /> {t("pdf.compiling")}
           </span>
         )}
-        {pdf && <span className="ml-2 text-[11.5px] text-slate-400">{pdf.doc.numPages} pages</span>}
+        {pdf && <span className="ml-2 text-[11.5px] text-slate-400">{t("pdf.pages", { count: pdf.doc.numPages })}</span>}
         <div className="ml-auto flex items-center gap-0.5">
-          <button className="icon-btn" title="Zoom out" onClick={() => setScale(scale - 0.1)} disabled={!pdf}>
+          <button className="icon-btn" title={t("pdf.zoomOut")} onClick={() => setScale(scale - 0.1)} disabled={!pdf}>
             <ZoomOut size={13} />
           </button>
           <span className="w-10 text-center text-[11px] text-slate-500 tabular-nums">{Math.round(scale * 100)}%</span>
-          <button className="icon-btn" title="Zoom in" onClick={() => setScale(scale + 0.1)} disabled={!pdf}>
+          <button className="icon-btn" title={t("pdf.zoomIn")} onClick={() => setScale(scale + 0.1)} disabled={!pdf}>
             <ZoomIn size={13} />
           </button>
-          <button className="icon-btn" title="Fit width" onClick={() => setZoom("fit")} disabled={!pdf}>
+          <button className="icon-btn" title={t("pdf.fit")} onClick={() => setZoom("fit")} disabled={!pdf}>
             <Maximize2 size={12} />
           </button>
         </div>
@@ -136,7 +138,7 @@ export function PdfPreview() {
         {error && <div className="text-[12px] text-red-600">{error}</div>}
         {!pdf && !error && (
           <div className="mt-10 text-center text-[12px] text-slate-400">
-            {status === "running" ? "Compiling…" : "No PDF yet. Press Compile to build the paper."}
+            {status === "running" ? t("pdf.compiling") : t("pdf.empty")}
           </div>
         )}
         {pdf?.pages.map((page) => <PdfPage key={page.pageNumber} page={page} scale={scale} />)}

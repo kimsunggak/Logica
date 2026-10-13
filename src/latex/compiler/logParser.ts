@@ -4,6 +4,7 @@
  * raw terminal output.
  */
 import { joinPath, normalizePath } from "../parser/text";
+import { t } from "../../i18n";
 
 export interface LogItem {
   severity: "error" | "warning";
@@ -59,23 +60,23 @@ function hintFor(message: string): { hint?: string; pkg?: string } {
     const pkg = missing[1];
     return {
       pkg,
-      hint: `Missing package ${pkg}. Install it with your TeX distribution (e.g. tlmgr install ${pkg.replace(/\.(sty|cls)$/, "")} or the MiKTeX console).`,
+      hint: t("log.missingPackage", { pkg, name: pkg.replace(/\.(sty|cls)$/, "") }),
     };
   }
   if (/Undefined control sequence/.test(message)) {
-    return { hint: "A command is misspelled or its package is not loaded." };
+    return { hint: t("log.undefinedCommand") };
   }
   if (/Missing \$ inserted/.test(message)) {
-    return { hint: "Math-only syntax (e.g. ^ or _) used outside math mode, or an unclosed $." };
+    return { hint: t("log.missingDollar") };
   }
   if (/Missing \} inserted|Extra \}|Missing \{ inserted/.test(message)) {
-    return { hint: "Unbalanced braces." };
+    return { hint: t("log.braces") };
   }
   if (/\\begin\{[^}]*\} on input line \d+ ended by \\end/.test(message)) {
-    return { hint: "Mismatched \\begin / \\end environment." };
+    return { hint: t("log.environment") };
   }
   if (/File [`'"]?[^`'"]+['"]? not found/.test(message)) {
-    return { hint: "A file referenced by \\input, \\include or \\includegraphics does not exist." };
+    return { hint: t("log.fileNotFound") };
   }
   return {};
 }
@@ -149,7 +150,7 @@ export function parseLatexLog(log: string, mainFile = "main.tex"): ParsedLog {
     if (refWarning) {
       push(warnings, {
         severity: "warning",
-        message: `${refWarning[1]} "${refWarning[2]}" is undefined`,
+        message: t(refWarning[1] === "Citation" ? "log.undefinedCitation" : "log.undefinedReference", { key: refWarning[2] }),
         line: refWarning[3] ? Number(refWarning[3]) : undefined,
       });
       continue;
@@ -173,10 +174,10 @@ export function parseLatexLog(log: string, mainFile = "main.tex"): ParsedLog {
   }
 
   if (errors.length === 0 && /Fatal error occurred, no output PDF file produced/.test(log)) {
-    errors.push({ severity: "error", message: "Fatal error occurred, no output PDF file produced." });
+    errors.push({ severity: "error", message: t("log.fatal") });
   }
   if (errors.length === 0 && /Emergency stop/.test(log)) {
-    errors.push({ severity: "error", message: "Emergency stop." });
+    errors.push({ severity: "error", message: t("log.emergency") });
   }
   return { errors, warnings, missingPackages: [...missingPackages] };
 }

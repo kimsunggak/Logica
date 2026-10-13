@@ -3,6 +3,7 @@ import { EditorView } from "@codemirror/view";
 import { AlertTriangle, FileText, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { closeFile, openFile, resolveExternalChange } from "../project/projectActions";
+import { useT } from "../i18n";
 import { useProject } from "../project/projectStore";
 import { CompileLog } from "../components/CompileLog";
 import { StatusBar } from "../components/StatusBar";
@@ -10,6 +11,7 @@ import { editorSession } from "./editorSession";
 import { InlineEditPanel } from "./inlineEdit/InlineEditPanel";
 
 function EditorTabs() {
+  const t = useT();
   const openFiles = useProject((s) => s.openFiles);
   const activePath = useProject((s) => s.activePath);
   const mainFile = useProject((s) => s.mainFile);
@@ -41,13 +43,13 @@ function EditorTabs() {
             <FileText size={12} className={file.path === mainFile ? "text-sky-600 dark:text-sky-400" : "opacity-60"} />
             <span className="whitespace-nowrap">{name}</span>
             {file.dirty ? (
-              <span className="ml-0.5 h-2 w-2 rounded-full bg-slate-500 dark:bg-slate-300" title="Unsaved changes" data-testid="dirty-dot" />
+              <span className="ml-0.5 h-2 w-2 rounded-full bg-slate-500 dark:bg-slate-300" title={t("editor.unsaved")} data-testid="dirty-dot" />
             ) : (
               <span className="ml-0.5 w-2" />
             )}
             <button
               className="icon-btn -mr-1 h-5 w-5 opacity-0 group-hover:opacity-100"
-              title="Close"
+              title={t("editor.close")}
               onClick={(e) => {
                 e.stopPropagation();
                 void closeFile(file.path);
@@ -63,6 +65,7 @@ function EditorTabs() {
 }
 
 function ExternalChangeBanner() {
+  const t = useT();
   const activePath = useProject((s) => s.activePath);
   const meta = useProject((s) => s.openFiles.find((f) => f.path === s.activePath));
   if (!activePath || !meta?.external) return null;
@@ -70,15 +73,15 @@ function ExternalChangeBanner() {
     <div className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-[12px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
       <AlertTriangle size={14} />
       {meta.external === "deleted" ? (
-        <span>This file was deleted on disk. Saving will recreate it.</span>
+        <span>{t("editor.deletedOnDisk")}</span>
       ) : (
         <>
-          <span>This file changed on disk and you have unsaved edits.</span>
+          <span>{t("editor.changedOnDisk")}</span>
           <button className="btn h-6" onClick={() => void resolveExternalChange(activePath, "reload")}>
-            Load disk version
+            {t("editor.loadDisk")}
           </button>
           <button className="btn h-6" onClick={() => void resolveExternalChange(activePath, "keep")}>
-            Keep my version
+            {t("editor.keepMine")}
           </button>
         </>
       )}
@@ -87,6 +90,7 @@ function ExternalChangeBanner() {
 }
 
 export function EditorPane() {
+  const t = useT();
   const hostRef = useRef<HTMLDivElement>(null);
   const areaRef = useRef<HTMLDivElement>(null);
   const activePath = useProject((s) => s.activePath);
@@ -108,7 +112,7 @@ export function EditorPane() {
         <div ref={hostRef} className={`absolute inset-0 ${activePath ? "" : "invisible"}`} data-testid="editor-host" />
         {!activePath && (
           <div className="absolute inset-0 flex items-center justify-center text-[13px] text-slate-400">
-            Select a section in the outline or a file to start writing.
+            {t("editor.empty")}
           </div>
         )}
         <InlineEditPanel container={areaRef} />

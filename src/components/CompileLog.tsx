@@ -1,10 +1,12 @@
 import { ChevronDown, ChevronRight, CircleAlert, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { navigateTo } from "../project/projectActions";
+import { useT } from "../i18n";
 import { useProject } from "../project/projectStore";
 
 /** Extracted compile errors and warnings; click to jump to the source line. */
 export function CompileLog() {
+  const t = useT();
   const compile = useProject((s) => s.compile);
   const mainFile = useProject((s) => s.mainFile);
   const [open, setOpen] = useState(false);
@@ -21,10 +23,11 @@ export function CompileLog() {
   if (compile.status === "idle" || compile.status === "running") return null;
   const failed = compile.status === "failed";
   const summary = compile.error
-    ? "Compilation could not run"
+    ? t("compile.couldNotRun")
     : failed
-      ? `Compilation failed: ${errors.length} error${errors.length === 1 ? "" : "s"}`
-      : `Compiled${compile.result ? ` in ${(compile.result.durationMs / 1000).toFixed(1)}s` : ""}${warnings.length ? `, ${warnings.length} warning${warnings.length === 1 ? "" : "s"}` : ""}`;
+      ? t("compile.failed", { count: errors.length })
+      : (compile.result ? t("compile.doneIn", { seconds: (compile.result.durationMs / 1000).toFixed(1) }) : t("compile.done")) +
+        (warnings.length ? `, ${t("compile.warnings", { count: warnings.length })}` : "");
 
   return (
     <div className="shrink-0 border-t border-slate-200 dark:border-slate-800" data-testid="compile-log">
@@ -70,7 +73,7 @@ export function CompileLog() {
           {compile.result?.output && (
             <div className="mt-1">
               <button className="text-[11.5px] text-slate-500 underline" onClick={() => setShowRaw(!showRaw)}>
-                {showRaw ? "Hide" : "Show"} raw compiler output
+                {t(showRaw ? "compile.hideRaw" : "compile.showRaw")}
               </button>
               {showRaw && (
                 <pre className="mt-1 max-h-48 overflow-auto rounded bg-slate-50 p-2 font-mono text-[11px] whitespace-pre-wrap text-slate-600 dark:bg-slate-900 dark:text-slate-400">

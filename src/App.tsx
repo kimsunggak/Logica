@@ -9,13 +9,22 @@ import { editorSession } from "./editor/editorSession";
 import { rejectInlineEdit, useInlineEdit } from "./editor/inlineEdit/inlineEditStore";
 import { installEditorExtensions } from "./editor/setupEditor";
 import { confirmDialog, isDesktop } from "./lib/backend";
-import { checkExternalChanges, connectEditorSession, openProject, refreshFileList, saveActive, saveAll } from "./project/projectActions";
+import {
+  checkExternalChanges,
+  connectEditorSession,
+  openProject,
+  rebuildDocumentNow,
+  refreshFileList,
+  saveActive,
+  saveAll,
+} from "./project/projectActions";
 import { useProject } from "./project/projectStore";
 import { refreshAllConnections } from "./settings/connectionStore";
 import { SettingsDialog } from "./settings/SettingsDialog";
 import { useSettings } from "./settings/settingsStore";
 import { loadPersistedState, startPersistence } from "./storage/persistence";
 import { useWorkspace } from "./storage/workspaceStore";
+import { t } from "./i18n";
 
 const EXTERNAL_CHECK_INTERVAL_MS = 3000;
 
@@ -62,6 +71,13 @@ export default function App() {
     document.documentElement.classList.toggle("dark", dark);
     editorSession.setConfig({ dark, ...editorSettings });
   }, [dark, editorSettings]);
+
+  const language = useSettings((s) => s.ui.language);
+  useEffect(() => {
+    document.documentElement.lang = language;
+    // Outline warnings are produced while parsing; parse again in the new language.
+    rebuildDocumentNow();
+  }, [language]);
 
   // A new project starts with a clean AI state.
   useEffect(() => {
@@ -125,7 +141,7 @@ export default function App() {
     let disposed = false;
     void import("@tauri-apps/api/window").then(async ({ getCurrentWindow }) => {
       const stop = await getCurrentWindow().onCloseRequested(async (event) => {
-        if (hasDirty() && !(await confirmDialog("You have unsaved changes. Quit without saving?"))) event.preventDefault();
+        if (hasDirty() && !(await confirmDialog(t("project.unsavedQuit")))) event.preventDefault();
       });
       if (disposed) stop();
       else unlisten = stop;

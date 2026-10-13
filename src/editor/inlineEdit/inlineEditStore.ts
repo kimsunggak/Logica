@@ -17,6 +17,7 @@ import { notify, useProject } from "../../project/projectStore";
 import { useSettings } from "../../settings/settingsStore";
 import { aiTargetField, setAITarget, type TargetRange } from "../aiTarget";
 import { editorSession } from "../editorSession";
+import { t } from "../../i18n";
 
 export type InlinePhase = "input" | "streaming" | "review" | "error";
 
@@ -83,7 +84,7 @@ export function openInlineEdit(): boolean {
   if (from === to) {
     const range = paragraphContext(snapshot.docText, from, to).currentRange;
     if (!range) {
-      notify("info", "Select the text you want LOGICA to edit.");
+      notify("info", t("inline.selectText"));
       return true;
     }
     ({ from, to } = range);
@@ -156,7 +157,7 @@ export async function runInlineEdit(instruction: string, provider?: ProviderId):
     const result = normalizeRewrite(state.original, response.text);
     const issues = validateRewrite(state.original, result, { bibKeys: bibKeys() });
     if (response.finishReason === "length") {
-      issues.unshift({ severity: "error", message: "The response was cut off (output limit reached)." });
+      issues.unshift({ severity: "error", message: t("inline.truncated") });
     }
     useInlineEdit.setState({
       phase: "review",
@@ -169,7 +170,7 @@ export async function runInlineEdit(instruction: string, provider?: ProviderId):
     if (useInlineEdit.getState().requestId !== requestId) return;
     const error = err instanceof AIError ? err : new AIError("unknown", String(err));
     if (error.kind === "cancelled") {
-      useInlineEdit.setState({ phase: "input", note: "Generation stopped.", requestId: undefined });
+      useInlineEdit.setState({ phase: "input", note: t("inline.stopped"), requestId: undefined });
       return;
     }
     useInlineEdit.setState({ phase: "error", error: error.message, errorKind: error.kind, requestId: undefined });
@@ -191,7 +192,7 @@ export function acceptInlineEdit(): boolean {
   if (!target || view.state.sliceDoc(target.from, target.to) !== state.original) {
     useInlineEdit.setState({
       phase: "error",
-      error: "The original text was edited while the AI was working. Run the edit again on the new text.",
+      error: t("inline.textChanged"),
       errorKind: "unknown",
     });
     return false;
@@ -232,7 +233,7 @@ export async function reviewProposal(anchor: { path: string; from: number; to: n
   if (doc.slice(from, to) !== anchor.text) {
     const index = doc.indexOf(anchor.text);
     if (index < 0 || !anchor.text) {
-      notify("error", "The original text is no longer in the document, so the suggestion cannot be applied.");
+      notify("error", t("inline.anchorMissing"));
       return;
     }
     from = index;

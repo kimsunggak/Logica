@@ -10,6 +10,7 @@
 import { getChatGPTStatus, getCredentialStatus } from "../../credentials/credentialStore";
 import { AIError, fromStreamError } from "../../errors";
 import { isOpenAITextModel } from "../../models/modelConfig";
+import { t } from "../../../i18n";
 import { buildPrompt } from "../../prompts";
 import { SSEParser, type SSEEvent } from "../../streaming/sse";
 import { cancelProviderRequest, providerGet, streamProviderRequest } from "../../streaming/transport";
@@ -56,13 +57,13 @@ export class OpenAIProvider implements AIProvider {
     if (auth !== "chatgpt") return error;
     const opts = { provider: this.id, status: error.status };
     if (error.kind === "auth") {
-      return new AIError("auth", error.status ? "ChatGPT did not accept the sign-in. Sign in with ChatGPT again in Settings." : error.message, opts);
+      return new AIError("auth", error.status ? t("ai.err.chatgptRejected") : error.message, opts);
     }
     if (error.kind === "rate_limit" || error.kind === "quota") {
-      return new AIError(error.kind, `ChatGPT plan usage limit reached for LOGICA. Check or change the limit at ${CHATGPT_USAGE_URL}.`, opts);
+      return new AIError(error.kind, t("ai.err.chatgptLimit", { url: CHATGPT_USAGE_URL }), opts);
     }
     if (error.kind === "model_unavailable") {
-      return new AIError("model_unavailable", "This model is not available with your ChatGPT plan. Refresh the model list in Settings.", opts);
+      return new AIError("model_unavailable", t("ai.err.chatgptModel"), opts);
     }
     return error;
   }
@@ -103,7 +104,7 @@ export class OpenAIProvider implements AIProvider {
       try {
         json = JSON.parse(event.data);
       } catch {
-        streamError ??= new AIError("malformed_response", "OpenAI sent a malformed stream event.", { provider: this.id });
+        streamError ??= new AIError("malformed_response", t("ai.err.malformed"), { provider: this.id });
         return;
       }
       switch (json?.type) {
@@ -146,7 +147,7 @@ export class OpenAIProvider implements AIProvider {
 
     if (streamError) throw streamError;
     if (!completed) {
-      throw new AIError("stream_interrupted", "The OpenAI stream ended before the response was complete.", {
+      throw new AIError("stream_interrupted", t("ai.err.incomplete", { provider: "OpenAI" }), {
         provider: this.id,
       });
     }

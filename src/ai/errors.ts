@@ -1,4 +1,6 @@
 import type { ProviderId } from "./types";
+import { t } from "../i18n";
+import { errorMessage } from "../lib/backend";
 
 export type AIErrorKind =
   | "no_credential"
@@ -86,28 +88,28 @@ export function fromHttpError(provider: ProviderId, status: number, body?: strin
   const opts = { provider, status };
 
   if (status === 401 || /authentication_error|invalid_api_key/.test(type)) {
-    return new AIError("auth", `${name} rejected the API key. It may be invalid, revoked or expired.`, opts);
+    return new AIError("auth", t("ai.err.auth", { provider: name }), opts);
   }
   if (/insufficient_quota|billing|credit balance/.test(text)) {
-    return new AIError("quota", `${name}: insufficient quota or credit balance${detail}.`, opts);
+    return new AIError("quota", t("ai.err.quota", { provider: name, detail }), opts);
   }
   if (status === 429 || /rate_limit/.test(type)) {
-    return new AIError("rate_limit", `${name} rate limit reached. Wait a moment and try again.`, opts);
+    return new AIError("rate_limit", t("ai.err.rateLimit", { provider: name }), opts);
   }
   const unknownModel = status === 400 && /model/.test(text) && /does not exist|not found|not supported|invalid model/.test(text);
   if (status === 404 || /model_not_found|not_found_error/.test(type) || unknownModel) {
-    return new AIError("model_unavailable", `The selected ${name} model is not available for this account${detail}.`, opts);
+    return new AIError("model_unavailable", t("ai.err.model", { provider: name, detail }), opts);
   }
   if (status === 403 || /permission/.test(type)) {
-    return new AIError("permission", `${name} denied access${detail}.`, opts);
+    return new AIError("permission", t("ai.err.permission", { provider: name, detail }), opts);
   }
   if (status === 529 || status >= 500 || /overloaded/.test(type)) {
-    return new AIError("unavailable", `${name} is temporarily unavailable (HTTP ${status}). Try again shortly.`, opts);
+    return new AIError("unavailable", t("ai.err.unavailable", { provider: name, status }), opts);
   }
   if (status === 400 || status === 413 || status === 422) {
-    return new AIError("bad_request", `${name} rejected the request${detail}.`, opts);
+    return new AIError("bad_request", t("ai.err.badRequest", { provider: name, detail }), opts);
   }
-  return new AIError("unknown", `${name} returned HTTP ${status}${detail}.`, opts);
+  return new AIError("unknown", t("ai.err.http", { provider: name, status, detail }), opts);
 }
 
 /** Map an error event received inside a stream. */
@@ -139,24 +141,24 @@ export function toAIError(err: unknown, provider?: ProviderId): AIError {
           ? fromHttpError(provider, err.status, err.body)
           : new AIError("unknown", err.message, { provider, status: err.status });
       case "no_credential":
-        return new AIError("no_credential", err.message, { provider });
+        return new AIError("no_credential", errorMessage(err), { provider });
       case "chatgpt_expired":
       case "chatgpt_auth":
-        return new AIError("auth", err.message, { provider, status: err.status });
+        return new AIError("auth", errorMessage(err), { provider, status: err.status });
       case "chatgpt_unavailable":
-        return new AIError("unavailable", err.message, { provider });
+        return new AIError("unavailable", errorMessage(err), { provider });
       case "store_unavailable":
-        return new AIError("store_unavailable", err.message, { provider });
+        return new AIError("store_unavailable", errorMessage(err), { provider });
       case "cancelled":
-        return new AIError("cancelled", "Generation cancelled.", { provider });
+        return new AIError("cancelled", t("ai.err.cancelled"), { provider });
       case "timeout":
-        return new AIError("timeout", "The request timed out.", { provider });
+        return new AIError("timeout", t("ai.err.timeout"), { provider });
       case "network":
-        return new AIError("network", "Network error. Check your internet connection.", { provider });
+        return new AIError("network", t("ai.err.network"), { provider });
       case "stream_interrupted":
-        return new AIError("stream_interrupted", "The response stream was interrupted.", { provider });
+        return new AIError("stream_interrupted", t("ai.err.interrupted"), { provider });
       case "malformed_response":
-        return new AIError("malformed_response", "The provider returned a malformed response.", { provider });
+        return new AIError("malformed_response", t("ai.err.malformed"), { provider });
       default:
         return new AIError("unknown", err.message, { provider });
     }

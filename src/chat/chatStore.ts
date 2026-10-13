@@ -15,6 +15,7 @@ import { sectionAt, sectionTrail } from "../latex/parser/documentModel";
 import { currentTexts } from "../project/projectActions";
 import { useProject } from "../project/projectStore";
 import { useSettings } from "../settings/settingsStore";
+import { t } from "../i18n";
 
 export interface ChatAnchor {
   path: string;
@@ -66,7 +67,7 @@ export async function sendChatMessage(text: string): Promise<void> {
   const snapshot = editorSession.selection();
 
   let anchor: ChatAnchor | undefined;
-  let contextLabel = "No file open";
+  let contextLabel = t("chat.noFile");
   let context = {};
   if (snapshot) {
     context = buildChatContext(
@@ -82,7 +83,7 @@ export async function sendChatMessage(text: string): Promise<void> {
     const line = snapshot.docText.slice(0, snapshot.from).split("\n").length;
     const section = doc ? sectionAt(doc, snapshot.path, line) : null;
     const where = section ? (section.order >= 0 && doc ? sectionTrail(doc, section) : section.title) : snapshot.path;
-    contextLabel = `${snapshot.path} › ${where}${snapshot.from !== snapshot.to ? ` (${snapshot.to - snapshot.from} chars selected)` : ""}`;
+    contextLabel = `${snapshot.path} › ${where}${snapshot.from !== snapshot.to ? ` ${t("chat.charsSelected", { count: snapshot.to - snapshot.from })}` : ""}`;
   }
 
   const history: AIMessage[] = useChat
@@ -121,7 +122,7 @@ export async function sendChatMessage(text: string): Promise<void> {
       { onDelta: (_d, full) => updateMessage(requestId, { content: full }) },
     );
     updateMessage(requestId, {
-      content: response.text + (response.finishReason === "length" ? "\n\n[Response truncated: output limit reached]" : ""),
+      content: response.text + (response.finishReason === "length" ? `\n\n${t("chat.truncated")}` : ""),
       status: "done",
     });
   } catch (err) {

@@ -1,7 +1,9 @@
 import { findSection } from "../latex/parser/documentModel";
+import { useT } from "../i18n";
 import { useProject } from "../project/projectStore";
 
 export function StatusBar() {
+  const t = useT();
   const activePath = useProject((s) => s.activePath);
   const cursor = useProject((s) => s.cursor);
   const doc = useProject((s) => s.doc);
@@ -15,7 +17,7 @@ export function StatusBar() {
         <>
           <span className="truncate" title={activePath}>
             {activePath}
-            {dirty ? " • unsaved" : ""}
+            {dirty ? ` • ${t("status.unsaved")}` : ""}
           </span>
           {section && (
             <span className="truncate">
@@ -24,14 +26,14 @@ export function StatusBar() {
             </span>
           )}
           <span className="ml-auto whitespace-nowrap">
-            Ln {cursor.line}, Col {cursor.column}
-            {cursor.selectionLength > 0 ? ` (${cursor.selectionLength} selected)` : ""}
+            {t("status.position", { line: cursor.line, column: cursor.column })}
+            {cursor.selectionLength > 0 ? ` ${t("status.selected", { count: cursor.selectionLength })}` : ""}
           </span>
         </>
       ) : (
         <span className="ml-auto" />
       )}
-      {doc && doc.wordCount > 0 && <span className="whitespace-nowrap">{doc.wordCount.toLocaleString()} words</span>}
+      {doc && doc.wordCount > 0 && <span className="whitespace-nowrap">{t("status.words", { count: doc.wordCount.toLocaleString() })}</span>}
     </div>
   );
 }

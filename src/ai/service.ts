@@ -6,6 +6,7 @@
 import { AIError, toAIError } from "./errors";
 import { PROVIDERS } from "./providers/registry";
 import type { AIProvider, AIRequest, AIResponse, ModelConfig, ProviderId, StreamHandlers } from "./types";
+import { t } from "../i18n";
 
 let counter = 0;
 
@@ -25,7 +26,7 @@ class AIService {
 
   async generate(providerId: ProviderId, request: AIRequest, handlers?: StreamHandlers): Promise<AIResponse> {
     if (!request.model) {
-      throw new AIError("model_unavailable", "No model selected. Choose a model in Settings.", { provider: providerId });
+      throw new AIError("model_unavailable", t("ai.err.noModel"), { provider: providerId });
     }
     this.active.set(request.id, providerId);
     try {

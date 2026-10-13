@@ -4,6 +4,7 @@ import { INLINE_COMMANDS } from "../../ai/prompts";
 import { PROVIDER_LABELS } from "../../ai/providers/registry";
 import type { ProviderId } from "../../ai/types";
 import { ProviderSelect } from "../../components/ProviderSelect";
+import { useT, type MessageKey } from "../../i18n";
 import { useProject } from "../../project/projectStore";
 import { aiTargetField } from "../aiTarget";
 import { editorSession } from "../editorSession";
@@ -71,6 +72,7 @@ function usePanelPosition(container: RefObject<HTMLDivElement | null>, panel: Re
 }
 
 export function InlineEditPanel({ container }: { container: RefObject<HTMLDivElement | null> }) {
+  const t = useT();
   const state = useInlineEdit();
   const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -139,7 +141,7 @@ export function InlineEditPanel({ container }: { container: RefObject<HTMLDivEle
         <span className="truncate text-[11.5px] text-slate-400" title={state.model}>
           {state.model}
         </span>
-        <button className="icon-btn ml-auto" title="Close (Esc)" onClick={rejectInlineEdit}>
+        <button className="icon-btn ml-auto" title={t("inline.close")} onClick={rejectInlineEdit}>
           <X size={14} />
         </button>
       </div>
@@ -152,7 +154,7 @@ export function InlineEditPanel({ container }: { container: RefObject<HTMLDivEle
               ref={inputRef}
               data-testid="inline-edit-input"
               className="input h-8 flex-1"
-              placeholder="Ask LOGICA to edit the selection… e.g. Make this more concise"
+              placeholder={t("inline.placeholder")}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -163,14 +165,14 @@ export function InlineEditPanel({ container }: { container: RefObject<HTMLDivEle
                 }
               }}
             />
-            <button className="btn-primary h-8" disabled={!draft.trim()} title="Run (Enter)" onClick={() => submit(draft)}>
+            <button className="btn-primary h-8" disabled={!draft.trim()} title={t("inline.run")} onClick={() => submit(draft)}>
               <CornerDownLeft size={13} />
             </button>
           </div>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {INLINE_COMMANDS.map((cmd) => (
               <button key={cmd.id} className="btn h-6 px-2 text-[11.5px]" onClick={() => submit(cmd.instruction)} title={cmd.instruction}>
-                {cmd.label}
+                {t(`cmd.${cmd.id}` as MessageKey)}
               </button>
             ))}
           </div>
@@ -182,9 +184,9 @@ export function InlineEditPanel({ container }: { container: RefObject<HTMLDivEle
         <div className="flex min-h-0 flex-col gap-2 p-3">
           <div className="flex items-center gap-2 text-[12px] text-slate-500">
             <span className="h-2 w-2 animate-pulse rounded-full bg-sky-500" />
-            Writing with {PROVIDER_LABELS[state.provider]}…
+            {t("inline.writing", { provider: PROVIDER_LABELS[state.provider] })}
             <button className="btn ml-auto h-6" onClick={stopInlineEdit} data-testid="inline-edit-stop">
-              <Square size={11} /> Stop
+              <Square size={11} /> {t("inline.stop")}
             </button>
           </div>
           <pre
@@ -199,7 +201,7 @@ export function InlineEditPanel({ container }: { container: RefObject<HTMLDivEle
       {state.phase === "review" && (
         <div className="flex min-h-0 flex-col">
           <div className="flex items-center gap-2 px-3 pt-2 text-[11.5px] text-slate-500">
-            <span>{state.origin === "chat" ? "Suggested in chat" : "Review the change"}</span>
+            <span>{t(state.origin === "chat" ? "inline.fromChat" : "inline.review")}</span>
             <div className="ml-auto flex overflow-hidden rounded border border-slate-200 dark:border-slate-700">
               {(["words", "lines"] as const).map((mode) => (
                 <button
@@ -207,14 +209,14 @@ export function InlineEditPanel({ container }: { container: RefObject<HTMLDivEle
                   className={`px-2 py-0.5 ${diffMode === mode ? "bg-slate-100 font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-100" : ""}`}
                   onClick={() => setDiffMode(mode)}
                 >
-                  {mode === "words" ? "Words" : "Lines"}
+                  {t(mode === "words" ? "inline.words" : "inline.lines")}
                 </button>
               ))}
             </div>
           </div>
           <div className="min-h-0 overflow-auto px-3 py-2" data-testid="inline-edit-diff">
             {state.result === state.original ? (
-              <div className="text-[12px] text-slate-500">The AI suggested no changes for this text.</div>
+              <div className="text-[12px] text-slate-500">{t("inline.noChanges")}</div>
             ) : (
               <DiffView original={state.original} revised={state.result} mode={diffMode} />
             )}
@@ -238,19 +240,19 @@ export function InlineEditPanel({ container }: { container: RefObject<HTMLDivEle
               className={errors.length ? "btn-danger" : "btn-primary"}
               onClick={acceptInlineEdit}
               data-testid="inline-edit-accept"
-              title={`Apply the change (${MOD}+Enter)`}
+              title={t("inline.acceptTitle", { mod: MOD })}
             >
-              <Check size={13} /> {errors.length ? "Accept anyway" : "Accept"}
+              <Check size={13} /> {t(errors.length ? "inline.acceptAnyway" : "inline.accept")}
               <span className="ml-1 opacity-70">{MOD}↵</span>
             </button>
-            <button className="btn" onClick={rejectInlineEdit} data-testid="inline-edit-reject" title="Discard (Esc)">
-              <X size={13} /> Reject
+            <button className="btn" onClick={rejectInlineEdit} data-testid="inline-edit-reject" title={t("inline.rejectTitle")}>
+              <X size={13} /> {t("inline.reject")}
             </button>
             <div className="ml-auto flex items-center gap-1.5">
-              <span className="text-[11.5px] text-slate-500">Regenerate with</span>
+              <span className="text-[11.5px] text-slate-500">{t("inline.regenerateWith")}</span>
               <ProviderSelect value={regenProvider} onChange={setRegenProvider} className="h-7" />
               <button className="btn" onClick={() => regenerateInlineEdit(regenProvider)} data-testid="inline-edit-regenerate">
-                <RotateCcw size={13} /> Regenerate
+                <RotateCcw size={13} /> {t("inline.regenerate")}
               </button>
             </div>
           </div>
@@ -263,14 +265,14 @@ export function InlineEditPanel({ container }: { container: RefObject<HTMLDivEle
           <div className="flex gap-2">
             {state.instruction && (
               <button className="btn-primary" onClick={() => regenerateInlineEdit(state.provider)}>
-                <RotateCcw size={13} /> Retry with {PROVIDER_LABELS[state.provider]}
+                <RotateCcw size={13} /> {t("inline.retryWith", { provider: PROVIDER_LABELS[state.provider] })}
               </button>
             )}
             <button className="btn" onClick={() => useInlineEdit.setState({ phase: "input", error: undefined })}>
-              Edit instruction
+              {t("inline.editInstruction")}
             </button>
             <button className="btn" onClick={rejectInlineEdit}>
-              Close
+              {t("editor.close")}
             </button>
           </div>
         </div>

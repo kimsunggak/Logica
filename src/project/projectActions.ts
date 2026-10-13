@@ -14,6 +14,7 @@ import { useSettings } from "../settings/settingsStore";
 import { useWorkspace } from "../storage/workspaceStore";
 import { listProjectFiles, pathExists, readTextFile, statFiles, writeTextFile } from "./projectApi";
 import { initialProjectState, notify, openFileMeta, updateOpenFile, useProject } from "./projectStore";
+import { t } from "../i18n";
 
 /** Last known disk content of every .tex/.bib file of the project. */
 const diskTexts = new Map<string, string>();
@@ -46,7 +47,7 @@ function hasUnsavedChanges(): boolean {
 export async function openProject(root: string): Promise<void> {
   const state = useProject.getState();
   if (state.root && hasUnsavedChanges()) {
-    const ok = await confirmDialog("You have unsaved changes. Open the project and discard them?");
+    const ok = await confirmDialog(t("project.unsavedOpen"));
     if (!ok) return;
   }
   useProject.setState({ loading: true });
@@ -55,7 +56,7 @@ export async function openProject(root: string): Promise<void> {
     listing = await listProjectFiles(root);
   } catch (err) {
     useProject.setState({ loading: false });
-    notify("error", `Could not open project: ${errorMessage(err)}`);
+    notify("error", t("project.openError", { error: errorMessage(err) }));
     return;
   }
 
@@ -88,11 +89,11 @@ export async function openProject(root: string): Promise<void> {
     mainFile: memory.mainFile && diskTexts.has(memory.mainFile) ? memory.mainFile : undefined,
     loading: false,
   });
-  if (listing.truncated) notify("info", "Large folder: only the first 5000 files are listed.");
+  if (listing.truncated) notify("info", t("project.truncated"));
 
   rebuildDocumentNow();
   const doc = useProject.getState().doc;
-  if (!doc?.mainFile) notify("info", "No main.tex found. Choose the main file in the Files tab.");
+  if (!doc?.mainFile) notify("info", t("project.noMain"));
   else void showExistingPdf(listing.root, doc.mainFile);
 
   const toOpen = memory.openFiles.filter((p) => diskTexts.has(p));
@@ -165,7 +166,7 @@ export async function openFile(
       mtime = file.mtime;
       lossy = file.lossy;
     } catch (err) {
-      notify("error", `Could not open ${path}: ${errorMessage(err)}`);
+      notify("error", t("project.fileOpenError", { path, error: errorMessage(err) }));
       return false;
     }
     if (SOURCE_FILE.test(path)) {
@@ -179,7 +180,7 @@ export async function openFile(
         ? s.openFiles
         : [...s.openFiles, { path, mtime, dirty: false, lossy }],
     }));
-    if (lossy) notify("info", `${path} is not valid UTF-8; some characters were replaced.`);
+    if (lossy) notify("info", t("project.lossy", { path }));
   }
   if (options.activate !== false) {
     editorSession.activate(path);
@@ -194,7 +195,7 @@ export async function openFile(
 export async function closeFile(path: string): Promise<void> {
   const meta = openFileMeta(path);
   if (meta?.dirty) {
-    const ok = await confirmDialog(`${path} has unsaved changes. Close it and discard them?`);
+    const ok = await confirmDialog(t("project.unsavedClose", { path }));
     if (!ok) return;
   }
   const { openFiles, activePath } = useProject.getState();
@@ -226,10 +227,10 @@ export async function saveFile(path: string, force = false): Promise<boolean> {
     return true;
   } catch (err) {
     if (errorKind(err) === "conflict") {
-      const ok = await confirmDialog(`${path} was changed outside LOGICA since it was opened. Overwrite it with your version?`);
+      const ok = await confirmDialog(t("project.overwrite", { path }));
       return ok ? saveFile(path, true) : false;
     }
-    notify("error", `Could not save ${path}: ${errorMessage(err)}`);
+    notify("error", t("project.saveError", { path, error: errorMessage(err) }));
     return false;
   }
 }
@@ -275,10 +276,10 @@ export function rebuildDocumentNow() {
     bibErrors.push(...result.errors);
   }
   for (const missing of doc.bibFiles.filter((p) => !texts.has(p))) {
-    doc.issues.push({ severity: "warning", message: `Bibliography file not found: ${missing}` });
+    doc.issues.push({ severity: "warning", message: t("issue.bibMissing", { path: missing }) });
   }
   for (const error of bibErrors.slice(0, 20)) {
-    doc.issues.push({ severity: "warning", message: `BibTeX: ${error.message}`, filePath: error.filePath, line: error.line });
+    doc.issues.push({ severity: "warning", message: t("issue.bibtex", { message: error.message }), filePath: error.filePath, line: error.line });
   }
   useProject.setState({ doc, bibEntries, bibErrors, mainFile: mainFile ?? doc.mainFile });
   const { activePath } = useProject.getState();
@@ -325,7 +326,7 @@ export async function gotoDefinition(path: string, offset: number): Promise<bool
   if (REF_COMMANDS.includes(hit.command)) {
     const label = doc.labels.find((l) => l.key === hit.key);
     if (!label) {
-      notify("info", `Label "${hit.key}" is not defined.`);
+      notify("info", t("nav.labelMissing", { key: hit.key }));
       return true;
     }
     await navigateTo(label.filePath, label.line);
@@ -334,7 +335,7 @@ export async function gotoDefinition(path: string, offset: number): Promise<bool
   if (/cite/i.test(hit.command)) {
     const entry = bibEntries.find((e) => e.key === hit.key);
     if (!entry) {
-      notify("info", `Citation key "${hit.key}" is not in the bibliography.`);
+      notify("info", t("nav.citeMissing", { key: hit.key }));
       return true;
     }
     await navigateTo(entry.filePath, entry.line);
@@ -346,7 +347,7 @@ export async function gotoDefinition(path: string, offset: number): Promise<bool
       await openFile(target.path);
       return true;
     }
-    notify("info", `File for \\${hit.command}{${hit.key}} not found.`);
+    notify("info", t("nav.fileMissing", { command: hit.command, key: hit.key }));
     return true;
   }
   return false;
@@ -362,7 +363,7 @@ export async function compileProject(): Promise<void> {
   const mainFile = useProject.getState().mainFile ?? doc?.mainFile;
   if (!root) return;
   if (!mainFile) {
-    notify("error", "No main file to compile. Set one in the Files tab.");
+    notify("error", t("compile.noMain"));
     return;
   }
   compiling = true;
@@ -384,8 +385,8 @@ export async function compileProject(): Promise<void> {
       log.errors.push({
         severity: "error",
         message: result.timedOut
-          ? `Compilation timed out after ${settings.timeoutSecs}s.`
-          : "Compilation failed. See the compiler output for details.",
+          ? t("compile.timedOut", { seconds: settings.timeoutSecs })
+          : t("compile.failedGeneric"),
       });
     }
     useProject.setState((s) => ({
@@ -442,7 +443,7 @@ export async function checkExternalChanges(): Promise<void> {
       } else if (!editorSession.isDirty(stat.path)) {
         editorSession.replaceDocument(stat.path, file.content);
         updateOpenFile(stat.path, { mtime: file.mtime, external: undefined, dirty: false });
-        notify("info", `Reloaded ${stat.path} (changed on disk).`);
+        notify("info", t("project.reloaded", { path: stat.path }));
       } else {
         updateOpenFile(stat.path, { external: "modified" });
       }
@@ -475,7 +476,7 @@ export async function resolveExternalChange(path: string, choice: "reload" | "ke
     updateOpenFile(path, { mtime: file.mtime, external: undefined, dirty: false });
     scheduleRebuild(50);
   } catch (err) {
-    notify("error", `Could not reload ${path}: ${errorMessage(err)}`);
+    notify("error", t("project.reloadError", { path, error: errorMessage(err) }));
   }
 }
 

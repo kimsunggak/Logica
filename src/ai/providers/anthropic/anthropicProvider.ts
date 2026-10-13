@@ -8,6 +8,7 @@
 import { getCredentialStatus } from "../../credentials/credentialStore";
 import { AIError, fromStreamError } from "../../errors";
 import { buildPrompt } from "../../prompts";
+import { t } from "../../../i18n";
 import { SSEParser, type SSEEvent } from "../../streaming/sse";
 import { cancelProviderRequest, providerGet, streamProviderRequest } from "../../streaming/transport";
 import type {
@@ -68,7 +69,7 @@ export class AnthropicProvider implements AIProvider {
       try {
         json = JSON.parse(event.data);
       } catch {
-        streamError ??= new AIError("malformed_response", "Claude sent a malformed stream event.", { provider: this.id });
+        streamError ??= new AIError("malformed_response", t("ai.err.malformed"), { provider: this.id });
         return;
       }
       switch (json?.type) {
@@ -107,10 +108,10 @@ export class AnthropicProvider implements AIProvider {
 
     if (streamError) throw streamError;
     if (refused && !text.trim()) {
-      throw new AIError("bad_request", "Claude declined to answer this request.", { provider: this.id });
+      throw new AIError("bad_request", t("ai.err.refused", { provider: "Claude" }), { provider: this.id });
     }
     if (!completed) {
-      throw new AIError("stream_interrupted", "The Claude stream ended before the response was complete.", {
+      throw new AIError("stream_interrupted", t("ai.err.incomplete", { provider: "Claude" }), {
         provider: this.id,
       });
     }

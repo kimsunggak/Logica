@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
 import { ProviderSelect } from "../components/ProviderSelect";
 import { reviewProposal } from "../editor/inlineEdit/inlineEditStore";
+import { useT, type MessageKey } from "../i18n";
 import { useSettings } from "../settings/settingsStore";
 import { useWorkspace } from "../storage/workspaceStore";
 import {
@@ -16,14 +17,10 @@ import {
   type ChatMessage,
 } from "./chatStore";
 
-const EXAMPLES = [
-  "이 문단이 앞 문단과 자연스럽게 이어지도록 수정해줘.",
-  "이 표현을 더 간결하게 만들어줘.",
-  "이 subsection 내용을 20% 정도 줄여줘.",
-  "현재 section 기준으로 terminology를 통일해줘.",
-];
+const EXAMPLES: MessageKey[] = ["chat.example1", "chat.example2", "chat.example3", "chat.example4"];
 
 function AssistantMessage({ message }: { message: ChatMessage }) {
+  const t = useT();
   if (message.status === "error") {
     return <div className="rounded-md bg-red-50 px-2.5 py-2 text-[12.5px] text-red-800 dark:bg-red-950/50 dark:text-red-200">{message.content}</div>;
   }
@@ -45,21 +42,22 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
                   data-testid="chat-review"
                   onClick={() => void reviewProposal(message.anchor!, block.text, message.instruction ?? "", message.provider ?? chatProvider())}
                 >
-                  <GitCompare size={12} /> Review as diff
+                  <GitCompare size={12} /> {t("chat.reviewDiff")}
                 </button>
-                <span className="truncate text-[11px] text-slate-400">replaces the {message.anchor.text.length} chars it was asked about</span>
+                <span className="truncate text-[11px] text-slate-400">{t("chat.replaces", { count: message.anchor.text.length })}</span>
               </div>
             )}
           </div>
         ),
       )}
       {message.status === "streaming" && <span className="inline-block h-3 w-1.5 animate-pulse bg-slate-400" />}
-      {message.status === "cancelled" && <div className="text-[11.5px] text-slate-400">Stopped.</div>}
+      {message.status === "cancelled" && <div className="text-[11.5px] text-slate-400">{t("chat.stopped")}</div>}
     </div>
   );
 }
 
 export function ChatPanel() {
+  const t = useT();
   const messages = useChat((s) => s.messages);
   const running = useChat((s) => s.runningId !== null);
   const providerOverride = useChat((s) => s.provider);
@@ -87,24 +85,24 @@ export function ChatPanel() {
   return (
     <div className="flex h-full flex-col bg-white dark:bg-[#0f141b]" data-testid="chat-panel">
       <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-slate-200 bg-slate-50 px-2 dark:border-slate-800 dark:bg-[#121820]">
-        <span className="panel-title whitespace-nowrap">Ask LOGICA</span>
+        <span className="panel-title whitespace-nowrap">{t("chat.title")}</span>
         <ProviderSelect value={provider} onChange={setChatProvider} className="ml-1 h-6 text-[12px]" />
         <span className="truncate text-[11px] text-slate-400" title={models[provider]}>
           {models[provider]}
         </span>
-        <button className="icon-btn ml-auto" title="Clear conversation" onClick={clearChat}>
+        <button className="icon-btn ml-auto" title={t("chat.clear")} onClick={clearChat}>
           <Trash2 size={12} />
         </button>
-        <button className="icon-btn" title="Close" onClick={() => useWorkspace.getState().updateLayout({ showChat: false })}>
+        <button className="icon-btn" title={t("chat.close")} onClick={() => useWorkspace.getState().updateLayout({ showChat: false })}>
           <X size={13} />
         </button>
       </div>
       <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
         {messages.length === 0 && (
           <div className="space-y-2 text-[12.5px] text-slate-500">
-            <p>Ask about the text at your cursor. The current file, section, surrounding paragraphs, selection, abstract and outline are included automatically.</p>
+            <p>{t("chat.intro")}</p>
             <div className="space-y-1">
-              {EXAMPLES.map((example) => (
+              {EXAMPLES.map((key) => t(key)).map((example) => (
                 <button
                   key={example}
                   className="block w-full rounded-md border border-slate-200 px-2 py-1 text-left hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
@@ -139,7 +137,7 @@ export function ChatPanel() {
           ref={inputRef}
           data-testid="chat-input"
           className="input h-auto min-h-[60px] w-full resize-none py-1.5 leading-snug"
-          placeholder="Ask about the current paragraph or selection…  (Enter to send, Shift+Enter for a new line)"
+          placeholder={t("chat.placeholder")}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -150,14 +148,14 @@ export function ChatPanel() {
           }}
         />
         <div className="mt-1.5 flex items-center">
-          <span className="text-[11px] text-slate-400">Suggestions are applied only after you review the diff.</span>
+          <span className="text-[11px] text-slate-400">{t("chat.footer")}</span>
           {running ? (
             <button className="btn ml-auto" onClick={stopChat} data-testid="chat-stop">
-              <Square size={11} /> Stop
+              <Square size={11} /> {t("chat.stop")}
             </button>
           ) : (
             <button className="btn-primary ml-auto" onClick={send} disabled={!draft.trim()} data-testid="chat-send">
-              <Send size={12} /> Send
+              <Send size={12} /> {t("chat.send")}
             </button>
           )}
         </div>

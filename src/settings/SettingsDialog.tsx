@@ -10,12 +10,13 @@ import {
 import { AIError } from "../ai/errors";
 import { mergeModels } from "../ai/models/modelConfig";
 import { CHATGPT_USAGE_URL } from "../ai/providers/openai/openaiProvider";
-import { PROVIDER_LABELS, PROVIDERS } from "../ai/providers/registry";
+import { PROVIDERS } from "../ai/providers/registry";
 import { aiService } from "../ai/service";
 import { PROVIDER_IDS, type AuthMethodKind, type ProviderId } from "../ai/types";
 import { ProviderSelect } from "../components/ProviderSelect";
 import { closeSettings, useUI, type SettingsTab } from "../components/uiStore";
 import { detectCompilers, type DetectedTool } from "../latex/compiler/compileApi";
+import { useT, type MessageKey } from "../i18n";
 import { errorKind, errorMessage, openExternal } from "../lib/backend";
 import { isConnected, refreshAllConnections, refreshConnection, setConnection, useConnections } from "./connectionStore";
 import { useSettings, type CompilerSetting, type ThemeSetting } from "./settingsStore";
@@ -56,6 +57,7 @@ function Badge({ tone, children, testId }: { tone: "ok" | "bad" | "idle"; childr
 }
 
 function ApiKeyAuth({ provider, busy, setBusy }: { provider: ProviderId; busy: boolean; setBusy: (b: boolean) => void }) {
+  const t = useT();
   const connection = useConnections((s) => s[provider]);
   const [key, setKey] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -97,16 +99,16 @@ function ApiKeyAuth({ provider, busy, setBusy }: { provider: ProviderId; busy: b
   return (
     <div>
       <button className="inline-flex items-center gap-0.5 text-[12px] text-sky-600 hover:underline" onClick={() => void openExternal(method.helpUrl)}>
-        Get a key <ExternalLink size={11} />
+        {t("settings.getKey")} <ExternalLink size={11} />
       </button>
       {connected ? (
         <div className="mt-2 flex items-center gap-2">
-          <span className="font-mono text-[12px] text-slate-500">Stored key {status?.hint}</span>
+          <span className="font-mono text-[12px] text-slate-500">{t("settings.storedKey", { hint: status?.hint ?? "" })}</span>
           <button className="btn" onClick={() => void testConnection(provider)} disabled={busy || connection.loading}>
-            Test connection
+            {t("settings.testConnection")}
           </button>
           <button className="btn-danger" onClick={() => void disconnect()} disabled={busy} data-testid={`disconnect-${provider}`}>
-            Disconnect
+            {t("settings.disconnect")}
           </button>
         </div>
       ) : (
@@ -128,20 +130,21 @@ function ApiKeyAuth({ provider, busy, setBusy }: { provider: ProviderId; busy: b
             data-testid={`key-${provider}`}
           />
           <button type="submit" className="btn-primary" disabled={!key.trim() || busy} data-testid={`connect-${provider}`}>
-            Connect
+            {t("settings.connect")}
           </button>
         </form>
       )}
       {status?.error && <div className="mt-1.5 text-[12px] text-red-600">{status.error}</div>}
       {error && <div className="mt-1.5 text-[12px] text-red-600">{error}</div>}
       <div className="mt-1.5 text-[11.5px] text-slate-400">
-        The key is stored in your OS credential store (Keychain, Credential Manager or Secret Service) and is never written to disk by LOGICA.
+        {t("settings.keyStorageNote")}
       </div>
     </div>
   );
 }
 
 function ChatGPTAuth({ busy, setBusy }: { busy: boolean; setBusy: (b: boolean) => void }) {
+  const t = useT();
   const chatgpt = useConnections((s) => s.openai.chatgpt);
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -171,7 +174,7 @@ function ChatGPTAuth({ busy, setBusy }: { busy: boolean; setBusy: (b: boolean) =
       const { revoked } = await signOutOfChatGPT();
       setConnection("openai", { verified: undefined, testError: undefined });
       await refreshConnection("openai");
-      setNote(revoked ? null : "Signed out locally, but OpenAI could not confirm the disconnection. You can remove LOGICA under Connected apps in ChatGPT settings.");
+      setNote(revoked ? null : t("settings.signOutNotConfirmed"));
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -184,49 +187,50 @@ function ChatGPTAuth({ busy, setBusy }: { busy: boolean; setBusy: (b: boolean) =
       {chatgpt?.connected ? (
         <div className="space-y-2">
           <div className="text-[12.5px]" data-testid="chatgpt-account">
-            Signed in as <span className="font-medium">{chatgpt.name ?? chatgpt.email ?? "ChatGPT user"}</span>
+            {t("settings.signedInAs")} <span className="font-medium">{chatgpt.name ?? chatgpt.email ?? "ChatGPT user"}</span>
             {chatgpt.name && chatgpt.email ? <span className="text-slate-500"> ({chatgpt.email})</span> : null}
           </div>
           {!chatgpt.planUsage && (
             <div className="text-[12px] text-amber-700 dark:text-amber-300">
-              ChatGPT plan usage was not allowed for LOGICA. Sign out and sign in again, then allow plan usage.
+              {t("settings.planUsageMissing")}
             </div>
           )}
           <div className="flex items-center gap-2">
             <button className="btn" onClick={() => void testConnection("openai")} disabled={busy}>
-              Test connection
+              {t("settings.testConnection")}
             </button>
             <button className="btn" onClick={() => void openExternal(CHATGPT_USAGE_URL)}>
-              Manage usage <ExternalLink size={11} />
+              {t("settings.manageUsage")} <ExternalLink size={11} />
             </button>
             <button className="btn-danger" onClick={() => void signOut()} disabled={busy} data-testid="chatgpt-sign-out">
-              Sign out
+              {t("settings.signOut")}
             </button>
           </div>
         </div>
       ) : waiting ? (
         <div className="flex items-center gap-2 text-[12.5px] text-slate-600 dark:text-slate-300">
-          <Loader2 size={13} className="animate-spin" /> Finish signing in in your browser…
+          <Loader2 size={13} className="animate-spin" /> {t("settings.finishInBrowser")}
           <button className="btn" onClick={() => void cancelChatGPTSignIn()} data-testid="chatgpt-cancel">
-            Cancel
+            {t("settings.cancel")}
           </button>
         </div>
       ) : (
         <button className="btn-primary" onClick={() => void signIn()} disabled={busy} data-testid="chatgpt-sign-in">
-          Sign in with ChatGPT
+          {t("settings.signInChatGPT")}
         </button>
       )}
       {chatgpt?.error && <div className="mt-1.5 text-[12px] text-red-600">{chatgpt.error}</div>}
       {error && <div className="mt-1.5 text-[12px] text-red-600" data-testid="chatgpt-error">{error}</div>}
       {note && <div className="mt-1.5 text-[12px] text-amber-700 dark:text-amber-300">{note}</div>}
       <div className="mt-1.5 text-[11.5px] text-slate-400">
-        Uses your ChatGPT plan (for eligible plans) instead of an API key. Sign-in happens on chatgpt.com in your browser; LOGICA never sees your password and keeps the access tokens only in your OS credential store.
+        {t("settings.chatgptNote")}
       </div>
     </div>
   );
 }
 
 function ProviderCard({ provider }: { provider: ProviderId }) {
+  const t = useT();
   const connection = useConnections((s) => s[provider]);
   const selectedModel = useSettings((s) => s.ai.models[provider]);
   const fetched = useSettings((s) => s.ai.fetchedModels[provider]);
@@ -260,11 +264,11 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
 
   const storeMissing = activeMethod === "chatgpt" ? connection.chatgpt?.storeAvailable === false : connection.status?.storeAvailable === false;
   let badge: React.ReactNode;
-  if (connection.loading || busy) badge = <span className="flex items-center gap-1 text-slate-500"><Loader2 size={13} className="animate-spin" /> Checking…</span>;
-  else if (storeMissing) badge = <Badge tone="bad">Secure storage unavailable</Badge>;
-  else if (connected && connection.verified === false) badge = <Badge tone="bad">Connection failed</Badge>;
-  else if (connected) badge = <Badge tone="ok" testId={`status-${provider}`}>Connected</Badge>;
-  else badge = <Badge tone="idle" testId={`status-${provider}`}>Not connected</Badge>;
+  if (connection.loading || busy) badge = <span className="flex items-center gap-1 text-slate-500"><Loader2 size={13} className="animate-spin" /> {t("settings.checking")}</span>;
+  else if (storeMissing) badge = <Badge tone="bad">{t("settings.storeUnavailable")}</Badge>;
+  else if (connected && connection.verified === false) badge = <Badge tone="bad">{t("settings.connectionFailed")}</Badge>;
+  else if (connected) badge = <Badge tone="ok" testId={`status-${provider}`}>{t("settings.connected")}</Badge>;
+  else badge = <Badge tone="idle" testId={`status-${provider}`}>{t("settings.notConnected")}</Badge>;
 
   return (
     <section className="rounded-lg border border-slate-200 p-3 dark:border-slate-700" data-testid={`provider-${provider}`}>
@@ -272,7 +276,7 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
         <h3 className="text-[13.5px] font-semibold">{provider === "anthropic" ? "Claude / Anthropic" : "OpenAI"}</h3>
         <div className="ml-auto text-[12px]">{badge}</div>
       </div>
-      <Row label="Authentication">
+      <Row label={t("settings.authentication")}>
         <div className="mb-2 flex flex-wrap items-center gap-3 text-[12.5px]">
           <KeyRound size={13} className="text-slate-400" />
           {methods.map((m) => (
@@ -285,7 +289,7 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
                 onChange={() => chooseMethod(m.kind)}
                 data-testid={`auth-${provider}-${m.kind}`}
               />
-              {m.label}
+              {t(AUTH_LABELS[m.kind])}
             </label>
           ))}
         </div>
@@ -296,7 +300,7 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
         )}
         {connection.testError && <div className="mt-1.5 text-[12px] text-red-600">{connection.testError}</div>}
       </Row>
-      <Row label="Model">
+      <Row label={t("settings.model")}>
         <div className="flex items-center gap-2">
           <select
             className="select max-w-[300px] flex-1"
@@ -315,14 +319,14 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
               </option>
             ))}
           </select>
-          <button className="btn" title="Load the models available to your account" disabled={!connected || connection.loading} onClick={() => void testConnection(provider)}>
-            <RefreshCw size={12} /> Refresh list
+          <button className="btn" title={t("settings.refreshListTitle")} disabled={!connected || connection.loading} onClick={() => void testConnection(provider)}>
+            <RefreshCw size={12} /> {t("settings.refreshList")}
           </button>
         </div>
         <div className="mt-2 flex items-center gap-2">
-          <input className="input max-w-[300px] flex-1 font-mono" placeholder="Other model id" value={customId} onChange={(e) => setCustomId(e.target.value)} />
+          <input className="input max-w-[300px] flex-1 font-mono" placeholder={t("settings.otherModel")} value={customId} onChange={(e) => setCustomId(e.target.value)} />
           <button className="btn" onClick={addCustom} disabled={!customId.trim()}>
-            Add
+            {t("settings.add")}
           </button>
         </div>
       </Row>
@@ -331,41 +335,43 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
 }
 
 function AISettings() {
+  const t = useT();
   const defaultProvider = useSettings((s) => s.ai.defaultProvider);
   useEffect(() => {
     void refreshAllConnections();
   }, []);
   return (
     <div className="space-y-3">
-      <Row label="Default provider" hint="Used for inline edits and chat unless you switch it for a request.">
+      <Row label={t("settings.defaultProvider")} hint={t("settings.defaultProviderHint")}>
         <ProviderSelect value={defaultProvider} onChange={(p) => useSettings.getState().updateAI({ defaultProvider: p })} />
       </Row>
       {PROVIDER_IDS.map((p) => (
         <ProviderCard key={p} provider={p} />
       ))}
       <p className="text-[11.5px] text-slate-400">
-        LOGICA connects only through official {PROVIDER_LABELS.openai} and Anthropic sign-in methods and APIs. Browser sessions or cookies from ChatGPT or Claude.ai are never read.
+        {t("settings.officialOnly")}
       </p>
     </div>
   );
 }
 
 function EditorSettingsPanel() {
+  const t = useT();
   const editor = useSettings((s) => s.editor);
   const update = useSettings.getState().updateEditor;
   return (
     <div>
-      <Row label="Theme">
+      <Row label={t("settings.theme")}>
         <select className="select" value={editor.theme} onChange={(e) => update({ theme: e.target.value as ThemeSetting })}>
-          <option value="system">System</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
+          <option value="system">{t("settings.themeSystem")}</option>
+          <option value="light">{t("settings.themeLight")}</option>
+          <option value="dark">{t("settings.themeDark")}</option>
         </select>
       </Row>
-      <Row label="Font">
+      <Row label={t("settings.font")}>
         <input className="input w-full font-mono" value={editor.fontFamily} onChange={(e) => update({ fontFamily: e.target.value })} />
       </Row>
-      <Row label="Font size">
+      <Row label={t("settings.fontSize")}>
         <input
           type="number"
           min={10}
@@ -375,19 +381,19 @@ function EditorSettingsPanel() {
           onChange={(e) => update({ fontSize: Math.max(10, Math.min(28, Number(e.target.value) || 14)) })}
         />
       </Row>
-      <Row label="Tab size">
+      <Row label={t("settings.tabSize")}>
         <select className="select" value={editor.tabSize} onChange={(e) => update({ tabSize: Number(e.target.value) })}>
           {[2, 4, 8].map((n) => (
             <option key={n} value={n}>
-              {n} spaces
+              {t("settings.spaces", { count: n })}
             </option>
           ))}
         </select>
       </Row>
-      <Row label="Word wrap">
+      <Row label={t("settings.wordWrap")}>
         <label className="flex items-center gap-2 pt-1 text-[12.5px]">
           <input type="checkbox" checked={editor.wordWrap} onChange={(e) => update({ wordWrap: e.target.checked })} />
-          Wrap long lines
+          {t("settings.wrapLines")}
         </label>
       </Row>
     </div>
@@ -395,6 +401,7 @@ function EditorSettingsPanel() {
 }
 
 function LatexSettingsPanel() {
+  const t = useT();
   const latex = useSettings((s) => s.latex);
   const update = useSettings.getState().updateLatex;
   const [tools, setTools] = useState<DetectedTool[] | null>(null);
@@ -405,39 +412,39 @@ function LatexSettingsPanel() {
   }, []);
   return (
     <div>
-      <Row label="Compiler" hint="Auto uses the first available of latexmk, pdflatex, xelatex.">
+      <Row label={t("settings.compiler")} hint={t("settings.compilerHint")}>
         <select className="select" value={latex.compiler} onChange={(e) => update({ compiler: e.target.value as CompilerSetting })}>
-          <option value="auto">Auto</option>
+          <option value="auto">{t("settings.compilerAuto")}</option>
           <option value="latexmk">latexmk</option>
           <option value="pdflatex">pdflatex</option>
           <option value="xelatex">xelatex</option>
-          <option value="custom">Custom command</option>
+          <option value="custom">{t("settings.compilerCustom")}</option>
         </select>
         <div className="mt-1.5 text-[11.5px] text-slate-500">
           {tools === null
-            ? "Detecting installed tools…"
+            ? t("settings.detecting")
             : tools.length === 0
-              ? "No LaTeX tools found on PATH. Install TeX Live, MacTeX or MiKTeX."
-              : `Found: ${tools.map((t) => t.name).join(", ")}`}
+              ? t("settings.noTools")
+              : t("settings.found", { tools: tools.map((tool) => tool.name).join(", ") })}
         </div>
       </Row>
       {latex.compiler !== "custom" && latex.compiler !== "auto" && (
-        <Row label="Compiler path" hint="Leave empty to find it on PATH.">
+        <Row label={t("settings.compilerPath")} hint={t("settings.compilerPathHint")}>
           <input className="input w-full font-mono" placeholder={`/path/to/${latex.compiler}`} value={latex.compilerPath} onChange={(e) => update({ compilerPath: e.target.value })} />
         </Row>
       )}
       {latex.compiler === "custom" && (
-        <Row label="Compile command" hint="Runs in the main file's folder. {main} = main file name, {name} = name without .tex. The PDF must be {name}.pdf.">
+        <Row label={t("settings.compileCommand")} hint={t("settings.compileCommandHint")}>
           <input className="input w-full font-mono" value={latex.customCommand} onChange={(e) => update({ customCommand: e.target.value })} />
         </Row>
       )}
-      <Row label="Auto compile">
+      <Row label={t("settings.autoCompile")}>
         <label className="flex items-center gap-2 pt-1 text-[12.5px]">
           <input type="checkbox" checked={latex.autoCompile} onChange={(e) => update({ autoCompile: e.target.checked })} />
-          Compile after saving
+          {t("settings.compileAfterSave")}
         </label>
       </Row>
-      <Row label="Timeout">
+      <Row label={t("settings.timeout")}>
         <div className="flex items-center gap-2">
           <input
             type="number"
@@ -447,20 +454,26 @@ function LatexSettingsPanel() {
             value={latex.timeoutSecs}
             onChange={(e) => update({ timeoutSecs: Math.max(10, Math.min(1800, Number(e.target.value) || 120)) })}
           />
-          <span className="text-[12px] text-slate-500">seconds</span>
+          <span className="text-[12px] text-slate-500">{t("settings.seconds")}</span>
         </div>
       </Row>
     </div>
   );
 }
 
-const TABS: { id: SettingsTab; label: string }[] = [
-  { id: "ai", label: "AI" },
-  { id: "editor", label: "Editor" },
-  { id: "latex", label: "LaTeX" },
+const TABS: { id: SettingsTab; label: MessageKey }[] = [
+  { id: "ai", label: "settings.tabAI" },
+  { id: "editor", label: "settings.tabEditor" },
+  { id: "latex", label: "settings.tabLatex" },
 ];
 
+const AUTH_LABELS: Record<AuthMethodKind, MessageKey> = {
+  api_key: "settings.apiKey",
+  chatgpt: "settings.signInChatGPT",
+};
+
 export function SettingsDialog() {
+  const t = useT();
   const open = useUI((s) => s.settingsOpen);
   const tab = useUI((s) => s.settingsTab);
   useEffect(() => {
@@ -474,19 +487,19 @@ export function SettingsDialog() {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-6" onMouseDown={(e) => e.target === e.currentTarget && closeSettings()}>
       <div className="flex max-h-full w-[760px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-[#151c26]" data-testid="settings-dialog">
         <div className="flex items-center border-b border-slate-200 px-4 py-2.5 dark:border-slate-700">
-          <h2 className="text-[14px] font-semibold">Settings</h2>
+          <h2 className="text-[14px] font-semibold">{t("settings.title")}</h2>
           <div className="ml-6 flex gap-1">
-            {TABS.map((t) => (
+            {TABS.map((item) => (
               <button
-                key={t.id}
-                className={`rounded-md px-2.5 py-1 text-[12.5px] ${tab === t.id ? "bg-slate-100 font-medium dark:bg-slate-700" : "text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800"}`}
-                onClick={() => useUI.setState({ settingsTab: t.id })}
+                key={item.id}
+                className={`rounded-md px-2.5 py-1 text-[12.5px] ${tab === item.id ? "bg-slate-100 font-medium dark:bg-slate-700" : "text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800"}`}
+                onClick={() => useUI.setState({ settingsTab: item.id })}
               >
-                {t.label}
+                {t(item.label)}
               </button>
             ))}
           </div>
-          <button className="icon-btn ml-auto" onClick={closeSettings} title="Close (Esc)">
+          <button className="icon-btn ml-auto" onClick={closeSettings} title={t("settings.closeTitle")}>
             <X size={15} />
           </button>
         </div>

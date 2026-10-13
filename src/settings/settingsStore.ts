@@ -5,6 +5,7 @@
 import { create } from "zustand";
 import { DEFAULT_MODEL_ID } from "../ai/models/modelConfig";
 import type { AuthMethodKind, ModelConfig, ProviderId } from "../ai/types";
+import { detectLanguage, type Language } from "../i18n/detect";
 
 export type ThemeSetting = "system" | "light" | "dark";
 export type CompilerSetting = "auto" | "latexmk" | "pdflatex" | "xelatex" | "custom";
@@ -37,13 +38,19 @@ export interface LatexSettings {
   timeoutSecs: number;
 }
 
+export interface UISettings {
+  language: Language;
+}
+
 export interface Settings {
+  ui: UISettings;
   ai: AISettings;
   editor: EditorSettings;
   latex: LatexSettings;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  ui: { language: detectLanguage() },
   ai: {
     defaultProvider: "openai",
     openaiAuth: "chatgpt",
@@ -68,6 +75,7 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 interface SettingsStore extends Settings {
+  updateUI(patch: Partial<UISettings>): void;
   updateAI(patch: Partial<AISettings>): void;
   updateEditor(patch: Partial<EditorSettings>): void;
   updateLatex(patch: Partial<LatexSettings>): void;
@@ -76,6 +84,7 @@ interface SettingsStore extends Settings {
 
 export const useSettings = create<SettingsStore>()((set) => ({
   ...DEFAULT_SETTINGS,
+  updateUI: (patch) => set((s) => ({ ui: { ...s.ui, ...patch } })),
   updateAI: (patch) => set((s) => ({ ai: { ...s.ai, ...patch } })),
   updateEditor: (patch) => set((s) => ({ editor: { ...s.editor, ...patch } })),
   updateLatex: (patch) => set((s) => ({ latex: { ...s.latex, ...patch } })),
@@ -83,15 +92,17 @@ export const useSettings = create<SettingsStore>()((set) => ({
 }));
 
 export function currentSettings(): Settings {
-  const { ai, editor, latex } = useSettings.getState();
-  return { ai, editor, latex };
+  const { ui, ai, editor, latex } = useSettings.getState();
+  return { ui, ai, editor, latex };
 }
 
 /** Merge persisted settings over defaults, tolerating missing or old fields. */
 export function mergeSettings(saved: unknown): Settings {
   const s = (saved && typeof saved === "object" ? saved : {}) as Partial<Settings>;
   const ai = (s.ai ?? {}) as Partial<AISettings>;
+  const ui = (s.ui ?? {}) as Partial<UISettings>;
   return {
+    ui: { language: ui.language === "ko" || ui.language === "en" ? ui.language : DEFAULT_SETTINGS.ui.language },
     ai: {
       ...DEFAULT_SETTINGS.ai,
       ...ai,

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { findSection, type PaperSection } from "../latex/parser/documentModel";
 import { navigateTo, navigateToSection } from "../project/projectActions";
 import { useProject } from "../project/projectStore";
+import { useT } from "../i18n";
 import { useWorkspace } from "../storage/workspaceStore";
 
 function SectionNode({
@@ -20,6 +21,7 @@ function SectionNode({
   currentId: string | null;
   onToggle: (id: string) => void;
 }) {
+  const t = useT();
   const isCollapsed = collapsed.has(section.id);
   const isCurrent = section.id === currentId;
   const ref = useRef<HTMLDivElement>(null);
@@ -51,7 +53,7 @@ function SectionNode({
               e.stopPropagation();
               onToggle(section.id);
             }}
-            aria-label={isCollapsed ? "Expand" : "Collapse"}
+            aria-label={t(isCollapsed ? "outline.expand" : "outline.collapse")}
           >
             {isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
           </button>
@@ -61,7 +63,7 @@ function SectionNode({
         {section.number && <span className="shrink-0 tabular-nums text-slate-400">{section.number}</span>}
         <span className="truncate">{section.title}</span>
         {section.wordCount > 0 && (
-          <span className="ml-auto shrink-0 pl-2 text-[11px] text-slate-400 tabular-nums" title="Words in this section">
+          <span className="ml-auto shrink-0 pl-2 text-[11px] text-slate-400 tabular-nums" title={t("outline.words")}>
             {section.wordCount}
           </span>
         )}
@@ -83,6 +85,7 @@ function SectionNode({
 }
 
 export function OutlinePanel() {
+  const t = useT();
   const doc = useProject((s) => s.doc);
   const root = useProject((s) => s.root);
   const currentId = useProject((s) => s.currentSectionId);
@@ -117,11 +120,11 @@ export function OutlinePanel() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-1 px-3 pt-2 pb-1">
-        <span className="panel-title">Paper</span>
-        <button className="icon-btn ml-auto" title="Expand all" onClick={() => root && useWorkspace.getState().setCollapsed(root, [])}>
+        <span className="panel-title">{t("outline.paper")}</span>
+        <button className="icon-btn ml-auto" title={t("outline.expandAll")} onClick={() => root && useWorkspace.getState().setCollapsed(root, [])}>
           <ChevronsUpDown size={13} />
         </button>
-        <button className="icon-btn" title="Collapse all" onClick={() => root && useWorkspace.getState().setCollapsed(root, withChildren)}>
+        <button className="icon-btn" title={t("outline.collapseAll")} onClick={() => root && useWorkspace.getState().setCollapsed(root, withChildren)}>
           <ChevronsDownUp size={13} />
         </button>
       </div>
@@ -136,7 +139,7 @@ export function OutlinePanel() {
             className="flex h-[26px] cursor-pointer items-center rounded pr-2 pl-[28px] text-[12.5px] text-slate-600 italic hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800/70"
             onClick={() => void navigateTo(doc.abstractLocation!.filePath, doc.abstractLocation!.line)}
           >
-            Abstract
+            {t("outline.abstract")}
           </div>
         )}
         {doc.sections.map((section) => (
@@ -152,7 +155,7 @@ export function OutlinePanel() {
         ))}
         {doc.flatSections.length === 0 && (
           <div className="px-2 py-3 text-[12px] text-slate-400">
-            {doc.mainFile ? "No \\section commands found yet." : "Set the main file in the Files tab to build the outline."}
+            {t(doc.mainFile ? "outline.noSections" : "outline.noMain")}
           </div>
         )}
       </div>

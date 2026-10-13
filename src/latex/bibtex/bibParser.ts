@@ -5,6 +5,7 @@
  * `@entry` so one broken entry never hides the rest of the bibliography.
  */
 import { latexToPlain } from "../parser/text";
+import { t } from "../../i18n";
 
 export interface BibEntry {
   key: string;
@@ -151,7 +152,7 @@ export function parseBibtex(text: string, filePath: string): BibParseResult {
     }
     const line = lineAt(text, m.index);
     if (end < 0) {
-      errors.push({ filePath, line, message: `Unterminated @${type} entry` });
+      errors.push({ filePath, line, message: t("bib.unterminated", { type }) });
       // Resynchronise at the next entry.
       continue;
     }
@@ -159,7 +160,7 @@ export function parseBibtex(text: string, filePath: string): BibParseResult {
     const comma = body.indexOf(",");
     const key = (comma < 0 ? body : body.slice(0, comma)).trim();
     if (!key || /[\s{}"]/.test(key)) {
-      errors.push({ filePath, line, message: `Entry without a valid citation key (@${type})` });
+      errors.push({ filePath, line, message: t("bib.noKey", { type }) });
       entryStart.lastIndex = end + 1;
       continue;
     }

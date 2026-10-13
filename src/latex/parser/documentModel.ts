@@ -9,6 +9,7 @@
  */
 import { parseFile, type FileFacts } from "./parseFile";
 import { dirname, joinPath } from "./text";
+import { t } from "../../i18n";
 
 export interface PaperFile {
   path: string;
@@ -170,7 +171,7 @@ export function buildPaperDocument(input: {
   if (!mainFile) {
     issues.push({
       severity: "warning",
-      message: "No main file found (main.tex or a file with \\documentclass and \\begin{document}).",
+      message: t("issue.noMain"),
     });
   }
   const baseDir = mainFile ? dirname(mainFile) : "";
@@ -186,7 +187,7 @@ export function buildPaperDocument(input: {
     if (visited.has(path)) {
       issues.push({
         severity: "warning",
-        message: `${path} is included more than once; only the first inclusion is shown.`,
+        message: t("issue.includedTwice", { path }),
         filePath: parent,
         line: includeLine,
       });
@@ -198,7 +199,7 @@ export function buildPaperDocument(input: {
     if (text === undefined) {
       issues.push({
         severity: "error",
-        message: `Included file not found: ${path}`,
+        message: t("issue.includeMissing", { path }),
         filePath: parent,
         line: includeLine,
       });
@@ -211,7 +212,7 @@ export function buildPaperDocument(input: {
       pushSpan(path, from, inc.line);
       const target = resolveInclude(baseDir, inc.target, inc.command, exists);
       if (depth >= MAX_INCLUDE_DEPTH) {
-        issues.push({ severity: "error", message: "Include nesting is too deep", filePath: path, line: inc.line });
+        issues.push({ severity: "error", message: t("issue.tooDeep"), filePath: path, line: inc.line });
       } else {
         walk(target, depth + 1, path, inc.line);
       }
@@ -387,7 +388,7 @@ export function buildPaperDocument(input: {
     if (prev && visited.has(label.filePath) && visited.has(prev.filePath)) {
       issues.push({
         severity: "warning",
-        message: `Duplicate label "${label.key}" (also at ${prev.filePath}:${prev.line})`,
+        message: t("issue.duplicateLabel", { key: label.key, location: `${prev.filePath}:${prev.line}` }),
         filePath: label.filePath,
         line: label.line,
       });

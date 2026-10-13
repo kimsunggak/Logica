@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { t } from "../i18n";
 
 interface Props {
   name: string;
@@ -28,10 +29,10 @@ export class ErrorBoundary extends Component<Props, State> {
     if (!this.state.error) return this.props.children;
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-[12px] text-slate-500">
-        <div>The {this.props.name} panel hit an error.</div>
+        <div>{t("error.panel", { name: this.props.name })}</div>
         <div className="max-w-full truncate font-mono text-[11px] text-red-600">{this.state.error.message}</div>
         <button className="btn" onClick={() => this.setState({ error: null })}>
-          Reload panel
+          {t("error.reloadPanel")}
         </button>
       </div>
     );
