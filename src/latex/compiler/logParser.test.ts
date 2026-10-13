@@ -68,3 +68,13 @@ describe("character hints", () => {
     expect(parsed.errors[0].hint).toContain("kotex");
   });
 });
+
+describe("missing figure", () => {
+  it("explains a figure XeTeX/Tectonic cannot load", () => {
+    const log = "! Unable to load picture or PDF file 'figures/routing-framework.pdf'.\n<to be read again>\n}\nl.42 ...ludegraphics[width=\\linewidth]{figures/routing-framework}\n";
+    const parsed = parseLatexLog(log, "main.tex");
+    expect(parsed.errors[0].message).toContain("figures/routing-framework.pdf");
+    expect(parsed.errors[0].hint).toContain("figures/routing-framework.pdf");
+    expect(parsed.errors[0].line).toBe(42);
+  });
+});

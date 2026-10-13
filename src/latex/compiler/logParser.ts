@@ -69,6 +69,10 @@ function hintFor(message: string): { hint?: string; pkg?: string } {
   if (/Unicode character .* not set up|Unicode character .*\(U\+[0-9A-F]+\)/.test(message)) {
     return { hint: t("log.unicode") };
   }
+  const picture = /Unable to load picture or PDF file '([^']+)'/.exec(message);
+  if (picture) {
+    return { hint: t("log.pictureMissing", { file: picture[1] }) };
+  }
   if (/Undefined control sequence/.test(message)) {
     return { hint: t("log.undefinedCommand") };
   }
