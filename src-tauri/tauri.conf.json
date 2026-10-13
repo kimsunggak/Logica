@@ -38,6 +38,9 @@
     "targets": "all",
     "category": "Productivity",
     "externalBin": ["binaries/tectonic"],
+    "resources": {
+      "licenses/tectonic-LICENSE.txt": "licenses/tectonic-LICENSE.txt"
+    },
     "shortDescription": "AI-native LaTeX writing workspace",
     "icon": [
       "icons/32x32.png",
