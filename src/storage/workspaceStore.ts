@@ -24,8 +24,10 @@ export interface ProjectMemory {
 
 export interface LayoutState {
   sidebarWidth: number;
-  pdfWidth: number;
-  chatWidth: number;
+  /** Shares of the free width (flex-grow) for the editor, preview and chat. */
+  editorWeight: number;
+  pdfWeight: number;
+  chatWeight: number;
   /** Expanded (true) or collapsed to a strip (false), per panel. */
   showOutline: boolean;
   showEditor: boolean;
@@ -42,8 +44,10 @@ export interface WorkspaceData {
 
 export const DEFAULT_LAYOUT: LayoutState = {
   sidebarWidth: 260,
-  pdfWidth: 440,
-  chatWidth: 360,
+  // Preview and chat start 50:50 when both are open.
+  editorWeight: 0.4,
+  pdfWeight: 0.3,
+  chatWeight: 0.3,
   showOutline: true,
   showEditor: true,
   showPdf: true,
@@ -109,6 +113,19 @@ export function currentWorkspace(): WorkspaceData {
   return { lastProject, projects, layout };
 }
 
+/** Saved layout over the defaults; unknown (retired) keys and invalid sizes are dropped. */
+function mergeLayout(saved: unknown): LayoutState {
+  const layout: LayoutState = { ...DEFAULT_LAYOUT };
+  if (!saved || typeof saved !== "object") return layout;
+  for (const key of Object.keys(DEFAULT_LAYOUT) as (keyof LayoutState)[]) {
+    const value = (saved as Record<string, unknown>)[key];
+    const fallback = DEFAULT_LAYOUT[key];
+    const valid = typeof fallback === "number" ? typeof value === "number" && Number.isFinite(value) && value > 0 : typeof value === typeof fallback;
+    if (valid) (layout as unknown as Record<string, unknown>)[key] = value;
+  }
+  return layout;
+}
+
 export function mergeWorkspace(saved: unknown): WorkspaceData {
   const w = (saved && typeof saved === "object" ? saved : {}) as Partial<WorkspaceData>;
   const projects: Record<string, ProjectMemory> = {};
@@ -124,6 +141,6 @@ export function mergeWorkspace(saved: unknown): WorkspaceData {
   return {
     lastProject: typeof w.lastProject === "string" ? w.lastProject : undefined,
     projects,
-    layout: { ...DEFAULT_LAYOUT, ...(w.layout ?? {}) },
+    layout: mergeLayout(w.layout),
   };
 }

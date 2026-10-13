@@ -336,6 +336,7 @@ const en = {
   "pane.collapse": "Collapse {pane}",
   "pane.expand": "Expand {pane}",
   "pane.expandAll": "Expand all panels",
+  "pane.splitHint": "Drag to resize. Double-click to split evenly.",
   "pane.allCollapsed": "All panels are collapsed. Expand one from the bar on the left.",
 } as const;
 
@@ -658,6 +659,7 @@ const ko: Record<MessageKey, string> = {
   "pane.collapse": "{pane} 접기",
   "pane.expand": "{pane} 펼치기",
   "pane.expandAll": "모든 창 펼치기",
+  "pane.splitHint": "드래그해서 크기 조절, 더블클릭하면 반반으로 나눕니다.",
   "pane.allCollapsed": "모든 창이 접혀 있습니다. 왼쪽 막대에서 펼칠 창을 선택하세요.",
 };
 

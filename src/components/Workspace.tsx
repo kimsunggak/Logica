@@ -5,46 +5,34 @@ import { PdfPreview } from "../pdf/PdfPreview";
 import { useWorkspace, type LayoutState } from "../storage/workspaceStore";
 import { useT } from "../i18n";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { CollapsedStrip, expandAllPanes, PaneBar, type PaneId } from "./panes";
+import { CollapsedStrip, expandAllPanes, PaneBar } from "./panes";
 import { ResizeHandle } from "./ResizeHandle";
 import { Sidebar } from "./Sidebar";
+import { equalPair, resizePair } from "./splitLayout";
 
-const LIMITS = {
-  sidebarWidth: [180, 480],
-  pdfWidth: [260, 1000],
-  chatWidth: [280, 640],
-} as const;
+const SIDEBAR_LIMITS = [160, 480] as const;
 
-type Resizable = keyof typeof LIMITS;
-
-function clamp(key: Resizable, value: number) {
-  const [min, max] = LIMITS[key];
-  return Math.round(Math.max(min, Math.min(max, value)));
-}
+/** Panes that share the free width by weight, in screen order. */
+type SplitPane = "editor" | "pdf" | "chat";
+const SPLIT_PANES: SplitPane[] = ["editor", "pdf", "chat"];
+const WEIGHT_KEY = { editor: "editorWeight", pdf: "pdfWeight", chat: "chatWeight" } as const;
+const MIN_WIDTH: Record<SplitPane | "outline", number> = { outline: 160, editor: 280, pdf: 220, chat: 240 };
 
 /**
- * Outline | Editor | PDF | AI chat. Each panel can be collapsed to a strip.
- * The editor takes the remaining space; when it is collapsed the open side
- * panels share that space (in proportion to their widths), and when only the
- * outline is left, it fills the window.
+ * Outline | Editor | Preview | AI chat. Each panel can be collapsed to a strip.
+ * The outline is a sidebar of fixed width; the open editor, preview and chat
+ * divide the rest by weight, so they always fit side by side without
+ * overlapping. Dragging a border moves width between the two panes it
+ * separates; double-clicking it splits them 50:50. When only the outline is
+ * left, it fills the window.
  */
 export function Workspace() {
   const t = useT();
   const layout = useWorkspace((s) => s.layout);
   const [draft, setDraft] = useState<Partial<LayoutState>>({});
-  const start = useRef<LayoutState>(layout);
   const effective = { ...layout, ...draft };
-
-  const resizer = (key: Resizable, direction: 1 | -1) => ({
-    onResize: (delta: number) => {
-      if (Object.keys(draft).length === 0) start.current = layout;
-      setDraft({ [key]: clamp(key, start.current[key] + direction * delta) });
-    },
-    onResizeEnd: () => {
-      useWorkspace.getState().updateLayout(draft);
-      setDraft({});
-    },
-  });
+  const paneRefs = useRef<Partial<Record<SplitPane, HTMLDivElement | null>>>({});
+  const dragStart = useRef<{ px: [number, number]; weights: [number, number]; sidebar: number } | null>(null);
 
   const open = {
     outline: effective.showOutline,
@@ -52,43 +40,95 @@ export function Workspace() {
     pdf: effective.showPdf,
     chat: effective.showChat,
   };
-  // Which open panels absorb the free space.
-  const fill: Set<PaneId> = open.editor
-    ? new Set(["editor"])
-    : open.pdf || open.chat
-      ? new Set((["pdf", "chat"] as const).filter((id) => open[id]))
-      : open.outline
-        ? new Set(["outline"])
-        : new Set();
-  const sizeOf = (id: PaneId, width: number): CSSProperties =>
-    fill.has(id) ? { flex: `${width} 1 0`, minWidth: id === "editor" ? 320 : 200 } : { width, flexShrink: 0 };
+  const openSplit = SPLIT_PANES.filter((id) => open[id]);
+  const weight = (id: SplitPane) => effective[WEIGHT_KEY[id]];
+  // Normalised so the open panes' flex-grow sums to 1: below 1, flex would leave part of the width empty.
+  const openWeight = openSplit.reduce((sum, id) => sum + weight(id), 0) || 1;
+  const splitStyle = (id: SplitPane): CSSProperties => ({ flex: `${weight(id) / openWeight} 1 0px`, minWidth: MIN_WIDTH[id] });
+
+  const commit = () => {
+    if (Object.keys(draft).length) useWorkspace.getState().updateLayout(draft);
+    setDraft({});
+    dragStart.current = null;
+  };
+
+  /** Border between two neighbouring weighted panes. */
+  const splitHandle = (a: SplitPane, b: SplitPane) => (
+    <ResizeHandle
+      key={`${a}-${b}`}
+      testId={`split-${a}-${b}`}
+      title={t("pane.splitHint")}
+      onResize={(delta) => {
+        if (!dragStart.current) {
+          const pxA = paneRefs.current[a]?.getBoundingClientRect().width ?? 0;
+          const pxB = paneRefs.current[b]?.getBoundingClientRect().width ?? 0;
+          dragStart.current = { px: [pxA, pxB], weights: [weight(a), weight(b)], sidebar: 0 };
+        }
+        const start = dragStart.current;
+        const [wa, wb] = resizePair(start.px, start.weights, delta, [MIN_WIDTH[a], MIN_WIDTH[b]]);
+        setDraft({ [WEIGHT_KEY[a]]: wa, [WEIGHT_KEY[b]]: wb });
+      }}
+      onResizeEnd={commit}
+      onDoubleClick={() => {
+        const [wa, wb] = equalPair([layout[WEIGHT_KEY[a]], layout[WEIGHT_KEY[b]]]);
+        useWorkspace.getState().updateLayout({ [WEIGHT_KEY[a]]: wa, [WEIGHT_KEY[b]]: wb });
+      }}
+    />
+  );
+
+  const sidebarHandle = (
+    <ResizeHandle
+      testId="split-outline"
+      onResize={(delta) => {
+        if (!dragStart.current) dragStart.current = { px: [0, 0], weights: [0, 0], sidebar: layout.sidebarWidth };
+        const [min, max] = SIDEBAR_LIMITS;
+        setDraft({ sidebarWidth: Math.round(Math.max(min, Math.min(max, dragStart.current.sidebar + delta))) });
+      }}
+      onResizeEnd={commit}
+    />
+  );
+
+  /** Separator before a weighted pane: a drag handle when an open weighted pane is directly before it. */
+  const before = (id: SplitPane) => {
+    const index = openSplit.indexOf(id);
+    return index > 0 ? splitHandle(openSplit[index - 1], id) : null;
+  };
 
   return (
-    <div className="flex min-h-0 flex-1">
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
       <PaneBar />
 
       {open.outline ? (
         <>
-          <div style={sizeOf("outline", effective.sidebarWidth)}>
+          <div
+            className="min-w-0"
+            style={openSplit.length ? { width: effective.sidebarWidth, flexShrink: 0, minWidth: MIN_WIDTH.outline } : { flex: "1 1 0px" }}
+          >
             <ErrorBoundary name="outline">
               <Sidebar />
             </ErrorBoundary>
           </div>
-          {!fill.has("outline") && <ResizeHandle {...resizer("sidebarWidth", 1)} />}
+          {openSplit.length > 0 && sidebarHandle}
         </>
       ) : (
         <CollapsedStrip pane="outline" />
       )}
 
       {/* The editor stays mounted while collapsed so its view and undo history survive. */}
-      <div className={open.editor ? "min-w-0" : "hidden"} style={open.editor ? sizeOf("editor", 1) : undefined}>
+      <div
+        ref={(el) => {
+          paneRefs.current.editor = el;
+        }}
+        className={open.editor ? "min-w-0 overflow-hidden" : "hidden"}
+        style={open.editor ? splitStyle("editor") : undefined}
+      >
         <ErrorBoundary name="editor">
           <EditorPane />
         </ErrorBoundary>
       </div>
       {!open.editor && <CollapsedStrip pane="editor" />}
 
-      {fill.size === 0 && (
+      {!open.outline && openSplit.length === 0 && (
         <div className="flex flex-1 items-center justify-center p-6" data-testid="all-collapsed">
           <div className="max-w-xs text-center text-[12.5px] text-slate-400">
             <p>{t("pane.allCollapsed")}</p>
@@ -99,10 +139,15 @@ export function Workspace() {
         </div>
       )}
 
-      {open.pdf &&
-        (fill.has("pdf") ? <div className="w-px shrink-0 bg-slate-200 dark:bg-slate-800" /> : <ResizeHandle {...resizer("pdfWidth", -1)} />)}
+      {open.pdf && before("pdf")}
       {/* Kept mounted while collapsed: the rendered pages and zoom come back instantly. */}
-      <div className={open.pdf ? "" : "hidden"} style={open.pdf ? sizeOf("pdf", effective.pdfWidth) : undefined}>
+      <div
+        ref={(el) => {
+          paneRefs.current.pdf = el;
+        }}
+        className={open.pdf ? "min-w-0 overflow-hidden" : "hidden"}
+        style={open.pdf ? splitStyle("pdf") : undefined}
+      >
         <ErrorBoundary name="PDF">
           <PdfPreview />
         </ErrorBoundary>
@@ -111,8 +156,14 @@ export function Workspace() {
 
       {open.chat ? (
         <>
-          {fill.has("chat") ? <div className="w-px shrink-0 bg-slate-200 dark:bg-slate-800" /> : <ResizeHandle {...resizer("chatWidth", -1)} />}
-          <div style={sizeOf("chat", effective.chatWidth)}>
+          {before("chat")}
+          <div
+            ref={(el) => {
+              paneRefs.current.chat = el;
+            }}
+            className="min-w-0 overflow-hidden"
+            style={splitStyle("chat")}
+          >
             <ErrorBoundary name="AI chat">
               <ChatPanel />
             </ErrorBoundary>

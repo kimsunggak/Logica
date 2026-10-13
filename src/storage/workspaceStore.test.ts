@@ -37,3 +37,15 @@ describe("recent projects", () => {
     expect(roots).not.toContain("/p2");
   });
 });
+
+describe("saved layout", () => {
+  it("drops retired pixel widths and invalid sizes, keeping valid choices", async () => {
+    const { mergeWorkspace, DEFAULT_LAYOUT } = await import("./workspaceStore");
+    const layout = mergeWorkspace({ layout: { pdfWidth: 440, chatWidth: 360, chatWeight: -1, pdfWeight: 0.5, showChat: true } }).layout;
+    expect(layout).not.toHaveProperty("pdfWidth");
+    expect(layout).not.toHaveProperty("chatWidth");
+    expect(layout.chatWeight).toBe(DEFAULT_LAYOUT.chatWeight);
+    expect(layout.pdfWeight).toBe(0.5);
+    expect(layout.showChat).toBe(true);
+  });
+});
