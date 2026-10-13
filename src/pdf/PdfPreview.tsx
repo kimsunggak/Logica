@@ -1,17 +1,12 @@
 import { Loader2, Maximize2, ZoomIn, ZoomOut } from "lucide-react";
-// The legacy build ships polyfills for recent JS built-ins that older system
-// webviews (e.g. WKWebView on older macOS, WebKitGTK) do not have yet.
-import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
-import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import { useEffect, useRef, useState } from "react";
 import { t as translateNow, useT } from "../i18n";
 import { errorMessage } from "../lib/backend";
 import { readBinaryFile } from "../project/projectApi";
+import { pdfjs } from "./pdfjs";
 import { useProject } from "../project/projectStore";
 import { CollapseButton } from "../components/panes";
-
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 interface LoadedPdf {
   task: PDFDocumentLoadingTask;

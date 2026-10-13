@@ -16,6 +16,10 @@ export interface ProjectMemory {
   cursors: Record<string, CursorMemory>;
   /** Ids of collapsed outline sections. */
   collapsed: string[];
+  /** Paper title from \\title{...}, shown on the home screen. */
+  title?: string;
+  /** When the project was last opened (ms since epoch). */
+  lastOpened?: number;
 }
 
 export interface LayoutState {
@@ -52,6 +56,8 @@ const MAX_REMEMBERED_PROJECTS = 20;
 
 interface WorkspaceStore extends WorkspaceData {
   setLastProject(root: string): void;
+  /** Remove a project from the recent list (its files are untouched). */
+  forgetProject(root: string): void;
   project(root: string): ProjectMemory;
   updateProject(root: string, patch: Partial<ProjectMemory>): void;
   setCursor(root: string, path: string, cursor: CursorMemory): void;
@@ -66,10 +72,15 @@ export const useWorkspace = create<WorkspaceStore>()((set, get) => ({
   layout: DEFAULT_LAYOUT,
   setLastProject: (root) =>
     set((s) => {
-      const projects = { ...s.projects, [root]: s.projects[root] ?? EMPTY_PROJECT };
-      const keys = Object.keys(projects);
-      if (keys.length > MAX_REMEMBERED_PROJECTS) delete projects[keys[0]];
+      const projects = { ...s.projects, [root]: { ...(s.projects[root] ?? EMPTY_PROJECT), lastOpened: Date.now() } };
+      const byAge = Object.keys(projects).sort((a, b) => (projects[a].lastOpened ?? 0) - (projects[b].lastOpened ?? 0));
+      for (const key of byAge.slice(0, Math.max(0, byAge.length - MAX_REMEMBERED_PROJECTS))) delete projects[key];
       return { lastProject: root, projects };
+    }),
+  forgetProject: (root) =>
+    set((s) => {
+      const { [root]: _removed, ...projects } = s.projects;
+      return { projects, lastProject: s.lastProject === root ? undefined : s.lastProject };
     }),
   project: (root) => get().projects[root] ?? EMPTY_PROJECT,
   updateProject: (root, patch) =>

@@ -1,7 +1,7 @@
-import { Bot, Download, FilePlus, FileText, FolderOpen, Loader2, Play, Save, Settings } from "lucide-react";
+import { Bot, Download, FilePlus, FileText, FolderOpen, House, Loader2, Play, Save, Settings } from "lucide-react";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
 import { pickProjectFolder } from "../lib/backend";
-import { compileProject, exportPdf, newPaper, openProject, saveAll } from "../project/projectActions";
+import { closeProject, compileProject, exportPdf, newPaper, openProject, saveAll } from "../project/projectActions";
 import { useProject } from "../project/projectStore";
 import { isConnected, isKnown, useConnections } from "../settings/connectionStore";
 import { useSettings } from "../settings/settingsStore";
@@ -67,15 +67,30 @@ export function TopBar() {
 
   return (
     <header className="flex h-10 shrink-0 items-center gap-1.5 border-b border-slate-200 bg-white px-2 dark:border-slate-800 dark:bg-[#0f141b]">
-      <span className="mr-2 pl-1 text-[13px] font-bold tracking-[0.18em] text-slate-800 dark:text-slate-100">LOGICA</span>
-      <button className="btn-ghost" onClick={() => void chooseAndOpenProject()} title={t("top.openProjectTitle", { mod: MOD })} data-testid="open-project">
-        <FolderOpen size={14} /> {t("top.openProject")}
-      </button>
-      <button className="btn-ghost" onClick={() => void newPaper()} title={t("top.newPaperTitle")} data-testid="new-paper">
-        <FilePlus size={14} /> {t("top.newPaper")}
+      <button
+        className="mr-2 pl-1 text-[13px] font-bold tracking-[0.18em] text-slate-800 disabled:cursor-default dark:text-slate-100"
+        onClick={() => void closeProject()}
+        disabled={!root}
+        title={root ? t("top.home") : undefined}
+      >
+        LOGICA
       </button>
       {root && (
         <>
+          <button className="btn-ghost" onClick={() => void closeProject()} title={t("top.home")} data-testid="go-home">
+            <House size={14} /> {t("top.home")}
+          </button>
+          <button
+            className="btn-ghost"
+            onClick={() => void chooseAndOpenProject()}
+            title={t("top.openProjectTitle", { mod: MOD })}
+            data-testid="open-project"
+          >
+            <FolderOpen size={14} /> {t("top.openProject")}
+          </button>
+          <button className="btn-ghost" onClick={() => void newPaper()} title={t("top.newPaperTitle")} data-testid="new-paper">
+            <FilePlus size={14} /> {t("top.newPaper")}
+          </button>
           <span className="max-w-[220px] truncate px-1 text-[12.5px] text-slate-500" title={root}>
             {name}
           </span>
@@ -112,18 +127,26 @@ export function TopBar() {
         <span className="hidden max-w-[150px] truncate text-[11.5px] text-slate-400 xl:inline" title={model}>
           {model}
         </span>
-        <div className="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700" />
-        <button className={`btn-ghost ${showPdf ? "bg-slate-100 dark:bg-slate-800" : ""}`} onClick={() => toggle("showPdf")} title={t("top.pdfTitle")}>
-          <FileText size={14} /> {t("top.pdf")}
-        </button>
-        <button
-          className={`btn-ghost ${showChat ? "bg-slate-100 dark:bg-slate-800" : ""}`}
-          onClick={() => toggle("showChat")}
-          title={t("top.aiTitle", { mod: MOD })}
-          data-testid="toggle-chat"
-        >
-          <Bot size={14} /> {t("top.ai")}
-        </button>
+        {root && (
+          <>
+            <div className="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700" />
+            <button
+              className={`btn-ghost ${showPdf ? "bg-slate-100 dark:bg-slate-800" : ""}`}
+              onClick={() => toggle("showPdf")}
+              title={t("top.pdfTitle")}
+            >
+              <FileText size={14} /> {t("top.pdf")}
+            </button>
+            <button
+              className={`btn-ghost ${showChat ? "bg-slate-100 dark:bg-slate-800" : ""}`}
+              onClick={() => toggle("showChat")}
+              title={t("top.aiTitle", { mod: MOD })}
+              data-testid="toggle-chat"
+            >
+              <Bot size={14} /> {t("top.ai")}
+            </button>
+          </>
+        )}
         <button className="btn-ghost" onClick={() => openSettings()} title={t("top.settingsTitle", { mod: MOD })} data-testid="open-settings">
           <Settings size={14} />
         </button>

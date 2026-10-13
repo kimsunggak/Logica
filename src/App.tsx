@@ -3,7 +3,7 @@ import { clearChat } from "./chat/chatStore";
 import { Notices } from "./components/Notices";
 import { TopBar, chooseAndOpenProject } from "./components/TopBar";
 import { openSettings } from "./components/uiStore";
-import { Welcome } from "./components/Welcome";
+import { Home } from "./components/Home";
 import { Workspace } from "./components/Workspace";
 import { editorSession } from "./editor/editorSession";
 import { rejectInlineEdit, useInlineEdit } from "./editor/inlineEdit/inlineEditStore";
@@ -12,8 +12,6 @@ import { confirmDialog, isDesktop } from "./lib/backend";
 import {
   checkExternalChanges,
   connectEditorSession,
-  newPaper,
-  openProject,
   rebuildDocumentNow,
   refreshFileList,
   saveActive,
@@ -47,7 +45,7 @@ export default function App() {
   const editorSettings = useSettings((s) => s.editor);
   const dark = useDarkMode();
 
-  // Startup: restore state, wire the editor, reopen the last project.
+  // Startup: restore state and wire the editor; the home screen comes first.
   useEffect(() => {
     let stopPersistence: (() => void) | undefined;
     let cancelled = false;
@@ -59,10 +57,6 @@ export default function App() {
       stopPersistence = startPersistence();
       setReady(true);
       void refreshAllConnections();
-      const last = useWorkspace.getState().lastProject;
-      // First launch: open a one-page starter paper so the editor and preview are never empty.
-      if (last) await openProject(last);
-      else await newPaper(true);
     })();
     return () => {
       cancelled = true;
@@ -158,7 +152,7 @@ export default function App() {
   return (
     <div className="flex h-full flex-col">
       <TopBar />
-      {ready && root ? <Workspace /> : <Welcome />}
+      {!ready ? <div className="flex-1" /> : root ? <Workspace /> : <Home />}
       <SettingsDialog />
       <Notices />
     </div>

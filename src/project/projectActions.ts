@@ -117,6 +117,20 @@ async function showExistingPdf(root: string, mainFile: string): Promise<boolean>
   return true;
 }
 
+/** Leave the project for the home screen. Pending edits are saved first. */
+export async function closeProject(): Promise<boolean> {
+  if (!useProject.getState().root) return true;
+  await saveQuietly();
+  if (hasUnsavedChanges() && !(await confirmDialog(t("project.unsavedHome")))) return false;
+  clearTimeout(liveTimer);
+  clearTimeout(rebuildTimer);
+  for (const path of editorSession.openPaths()) editorSession.close(path);
+  diskTexts.clear();
+  diskMtimes.clear();
+  useProject.setState((s) => ({ ...initialProjectState, notices: s.notices }));
+  return true;
+}
+
 /**
  * Start a paper from the one-page template. On first launch (`reuse`) the
  * existing "My Paper" is reopened instead of creating another one.
@@ -300,6 +314,10 @@ export function rebuildDocumentNow() {
     doc.issues.push({ severity: "warning", message: t("issue.bibtex", { message: error.message }), filePath: error.filePath, line: error.line });
   }
   useProject.setState({ doc, bibEntries, bibErrors, mainFile: mainFile ?? doc.mainFile });
+  const workspace = useWorkspace.getState();
+  if (doc.title !== undefined && workspace.projects[root] && workspace.projects[root].title !== doc.title) {
+    workspace.updateProject(root, { title: doc.title });
+  }
   const { activePath } = useProject.getState();
   const state = activePath ? editorSession.stateOf(activePath) : undefined;
   if (activePath && state) updateCursor(activePath, state);
