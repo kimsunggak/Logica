@@ -173,7 +173,8 @@ async fn save_client_id(client_id: String) -> CmdResult<()> {
 
 // ------------------------------------------------------------------ token endpoint
 
-#[derive(Debug, Default)]
+// No Debug on purpose: it holds tokens and must never end up in a log or panic message.
+#[derive(Default)]
 struct TokenResponse {
     access_token: String,
     refresh_token: Option<String>,
