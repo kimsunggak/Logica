@@ -33,6 +33,11 @@ export interface AIMessage {
 
 export type AITask = "inline-edit" | "chat";
 
+export interface ProjectFile {
+  path: string;
+  text: string;
+}
+
 export interface AIRequest {
   id: string;
   task: AITask;
@@ -41,6 +46,10 @@ export interface AIRequest {
   context: AIContext;
   /** Earlier chat turns (chat only). */
   history?: AIMessage[];
+  /** Source files the chat agent may edit (chat only, size-limited). */
+  projectFiles?: ProjectFile[];
+  /** Paper files left out of `projectFiles` to stay within the budget. */
+  omittedFiles?: string[];
   model: string;
   maxOutputTokens?: number;
 }

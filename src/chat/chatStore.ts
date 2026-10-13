@@ -9,11 +9,12 @@ import { paragraphContext } from "../ai/context/paragraphs";
 import { AIError } from "../ai/errors";
 import { MAX_OUTPUT_TOKENS } from "../ai/models/modelConfig";
 import { aiService, newRequestId } from "../ai/service";
-import type { AIMessage, ProviderId } from "../ai/types";
+import { lineOf, locateEdit, type ProposedEdit } from "../ai/agent/edits";
+import type { AIMessage, ProjectFile, ProviderId } from "../ai/types";
 import { editorSession } from "../editor/editorSession";
 import { sectionAt, sectionTrail } from "../latex/parser/documentModel";
-import { currentTexts } from "../project/projectActions";
-import { useProject } from "../project/projectStore";
+import { currentTexts, navigateTo, openFile } from "../project/projectActions";
+import { notify, useProject } from "../project/projectStore";
 import { useSettings } from "../settings/settingsStore";
 import { t } from "../i18n";
 
@@ -37,7 +38,11 @@ export interface ChatMessage {
   contextLabel?: string;
   /** The user instruction an assistant message answers. */
   instruction?: string;
+  /** Outcome of each proposed edit block, by its index in the answer. */
+  editStates?: Record<number, EditState>;
 }
+
+export type EditState = "applied" | "rejected" | "failed";
 
 interface ChatState {
   messages: ChatMessage[];
@@ -49,6 +54,33 @@ interface ChatState {
 export const useChat = create<ChatState>()(() => ({ messages: [], provider: null, runningId: null }));
 
 const MAX_HISTORY_MESSAGES = 12;
+/** Characters of paper source sent to the agent (roughly 40k tokens). */
+const AGENT_FILE_BUDGET = 150_000;
+
+/**
+ * The paper's source files for the agent: the active file first, then the
+ * files included from the main file, as long as they fit the budget.
+ */
+function agentFiles(activePath: string | undefined): { files: ProjectFile[]; omitted: string[] } {
+  const { doc } = useProject.getState();
+  const texts = currentTexts();
+  const paths = (doc?.files ?? []).filter((f) => f.included && !f.missing).map((f) => f.path);
+  if (activePath && texts.has(activePath)) paths.unshift(activePath);
+  const files: ProjectFile[] = [];
+  const omitted: string[] = [];
+  let used = 0;
+  for (const path of new Set(paths)) {
+    const text = texts.get(path);
+    if (text === undefined) continue;
+    if (used + text.length > AGENT_FILE_BUDGET) {
+      omitted.push(path);
+      continue;
+    }
+    files.push({ path, text });
+    used += text.length;
+  }
+  return { files, omitted };
+}
 
 export function chatProvider(): ProviderId {
   return useChat.getState().provider ?? useSettings.getState().ai.defaultProvider;
@@ -92,6 +124,7 @@ export async function sendChatMessage(text: string): Promise<void> {
     .slice(-MAX_HISTORY_MESSAGES)
     .map((m) => ({ role: m.role, content: m.content }));
 
+  const { files, omitted } = agentFiles(snapshot?.path);
   const requestId = newRequestId();
   const userMessage: ChatMessage = { id: `${requestId}-u`, role: "user", content: instruction, status: "done", contextLabel };
   const assistantMessage: ChatMessage = {
@@ -116,6 +149,8 @@ export async function sendChatMessage(text: string): Promise<void> {
         selectedText: snapshot && snapshot.from !== snapshot.to ? snapshot.text : undefined,
         context,
         history,
+        projectFiles: files,
+        omittedFiles: omitted,
         model,
         maxOutputTokens: MAX_OUTPUT_TOKENS.chat,
       },
@@ -148,17 +183,72 @@ export function setChatProvider(provider: ProviderId) {
   useChat.setState({ provider });
 }
 
+export interface Block {
+  kind: "text" | "code";
+  lang?: string;
+  /** Rest of the fence line after the language (the file path of an edit block). */
+  meta?: string;
+  text: string;
+}
+
 /** Split an assistant answer into text and fenced code blocks. */
-export function splitBlocks(content: string): { kind: "text" | "code"; lang?: string; text: string }[] {
-  const parts: { kind: "text" | "code"; lang?: string; text: string }[] = [];
-  const fence = /```([a-zA-Z]*)\n([\s\S]*?)(?:```|$)/g;
+export function splitBlocks(content: string): Block[] {
+  const parts: Block[] = [];
+  const fence = /```([^\n`]*)\n([\s\S]*?)(?:\n```|$)/g;
   let last = 0;
   for (const m of content.matchAll(fence)) {
     const index = m.index ?? 0;
     if (index > last) parts.push({ kind: "text", text: content.slice(last, index) });
-    parts.push({ kind: "code", lang: m[1] || undefined, text: m[2].replace(/\n$/, "") });
+    const [lang, ...meta] = m[1].trim().split(/\s+/);
+    parts.push({ kind: "code", lang: lang || undefined, meta: meta.join(" ") || undefined, text: m[2].replace(/\n$/, "") });
     last = index + m[0].length;
   }
   if (last < content.length) parts.push({ kind: "text", text: content.slice(last) });
   return parts.filter((p) => p.text.trim());
+}
+
+// ---------------------------------------------------------------- agent edits
+
+function setEditState(messageId: string, index: number, state: EditState) {
+  useChat.setState((s) => ({
+    messages: s.messages.map((m) => (m.id === messageId ? { ...m, editStates: { ...m.editStates, [index]: state } } : m)),
+  }));
+}
+
+/** Apply one proposed edit to its file (opened in the background if needed). */
+async function applyEdit(edit: ProposedEdit): Promise<{ path: string; line: number } | null> {
+  if (!editorSession.has(edit.path) && !(await openFile(edit.path, { activate: false }))) return null;
+  const text = editorSession.textOf(edit.path);
+  const at = text === undefined ? null : locateEdit(text, edit.original);
+  if (!text || !at) return null;
+  editorSession.applyEdit(edit.path, at.from, at.to, edit.revised);
+  return { path: edit.path, line: lineOf(text, at.from) };
+}
+
+export async function applyChatEdit(messageId: string, index: number, edit: ProposedEdit) {
+  const done = await applyEdit(edit);
+  setEditState(messageId, index, done ? "applied" : "failed");
+  if (done) await navigateTo(done.path, done.line);
+}
+
+export function rejectChatEdit(messageId: string, index: number) {
+  setEditState(messageId, index, "rejected");
+}
+
+/** Apply every edit of an answer that is still pending, in order. */
+export async function applyAllChatEdits(messageId: string, edits: { index: number; edit: ProposedEdit }[]) {
+  let applied = 0;
+  let failed = 0;
+  for (const { index, edit } of edits) {
+    const done = await applyEdit(edit);
+    setEditState(messageId, index, done ? "applied" : "failed");
+    if (done) applied++;
+    else failed++;
+  }
+  if (applied) notify("success", t("agent.appliedCount", { count: applied }));
+  if (failed) notify("error", t("agent.failedCount", { count: failed }));
+}
+
+export function rejectAllChatEdits(messageId: string, indexes: number[]) {
+  for (const index of indexes) setEditState(messageId, index, "rejected");
 }

@@ -29,7 +29,8 @@ export const DEFAULT_MODEL_ID: Record<ProviderId, string> = {
 /** Output token budget per task. */
 export const MAX_OUTPUT_TOKENS = {
   "inline-edit": 8192,
-  chat: 8192,
+  // Agent answers may carry edits for several places and files.
+  chat: 16384,
 } as const;
 
 /**

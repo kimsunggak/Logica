@@ -164,10 +164,34 @@ function between(text: string, tag: string): string | undefined {
   return m?.[1];
 }
 
+function editBlock(path: string, original: string, revised: string): string {
+  return `\`\`\`edit ${path}\n<<<<<<< ORIGINAL\n${original}\n=======\n${revised}\n>>>>>>> REVISED\n\`\`\``;
+}
+
+/** Chat agent: edit blocks for the current paragraph, or for every file on a paper-wide request. */
+function simulateAgent(userMessage: string, instruction: string, target: string | undefined): string {
+  const files = [...userMessage.matchAll(/<file path="([^"]+)">\n([\s\S]*?)\n<\/file>/g)].map((m) => ({ path: m[1], text: m[2] }));
+  const blocks: string[] = [];
+  if (/whole|entire|across|all|전체|모든|통일/i.test(instruction)) {
+    for (const file of files) {
+      const line = file.text
+        .split("\n")
+        .find((l) => l.length > 40 && !/^\s*[\\%]/.test(l) && demoRewrite(l, instruction) !== l.trim());
+      if (line && blocks.length < 4) blocks.push(editBlock(file.path, line.trim(), demoRewrite(line, instruction)));
+    }
+  } else if (target) {
+    const path = between(userMessage, "current_file") ?? files[0]?.path ?? "main.tex";
+    blocks.push(editBlock(path, target, demoRewrite(target, instruction)));
+  }
+  if (blocks.length === 0) return "Place the cursor in a paragraph or select text, and I will suggest an edit for it.";
+  return `I tightened the wording and kept citations, labels and LaTeX commands unchanged.\n\n${blocks.join("\n\n")}`;
+}
+
 function simulateAnswer(userMessage: string): string {
   const instruction = between(userMessage, "instruction") ?? between(userMessage, "user_message") ?? "";
   const selected = between(userMessage, "selected_text");
   if (userMessage.includes("<instruction>") && selected !== undefined) return demoRewrite(selected, instruction);
+  if (userMessage.includes("<project_files>")) return simulateAgent(userMessage, instruction, selected ?? between(userMessage, "current_paragraph"));
   const target = selected ?? between(userMessage, "current_paragraph");
   if (!target) return "Place the cursor in a paragraph or select text, and I will suggest an edit for it.";
   return `Here is a tighter version that keeps the citations and LaTeX commands unchanged:\n\n\`\`\`latex\n${demoRewrite(target, instruction)}\n\`\`\`\n\nReview it as a diff before applying.`;
