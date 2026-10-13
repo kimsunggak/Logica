@@ -8,7 +8,7 @@ import type { AuthMethodKind, ModelConfig, ProviderId } from "../ai/types";
 import { detectLanguage, type Language } from "../i18n/detect";
 
 export type ThemeSetting = "system" | "light" | "dark";
-export type CompilerSetting = "auto" | "latexmk" | "pdflatex" | "xelatex" | "custom";
+export type CompilerSetting = "auto" | "latexmk" | "pdflatex" | "xelatex" | "tectonic" | "custom";
 
 export interface AISettings {
   defaultProvider: ProviderId;

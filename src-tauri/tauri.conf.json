@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "app.logica.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run tectonic && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run tectonic && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -37,6 +37,7 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
+    "externalBin": ["binaries/tectonic"],
     "shortDescription": "AI-native LaTeX writing workspace",
     "icon": [
       "icons/32x32.png",

@@ -59,6 +59,14 @@ export function PdfPreview() {
   const version = useProject((s) => s.compile.pdfVersion);
   const status = useProject((s) => s.compile.status);
   const compileError = useProject((s) => s.compile.error);
+  // A first compilation may download packages; explain the wait if it is long.
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    setSlow(false);
+    if (status !== "running") return;
+    const timer = setTimeout(() => setSlow(true), 4000);
+    return () => clearTimeout(timer);
+  }, [status]);
   const [pdf, setPdf] = useState<LoadedPdf | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState<"fit" | number>("fit");
@@ -140,7 +148,9 @@ export function PdfPreview() {
         {!pdf && !error && (
           <div className="mt-10 text-center text-[12px] text-slate-500">
             {status === "running"
-              ? t("pdf.compiling")
+              ? slow
+                ? `${t("pdf.compiling")} ${t("pdf.firstCompile")}`
+                : t("pdf.compiling")
               : compileError
                 ? compileError
                 : status === "failed"

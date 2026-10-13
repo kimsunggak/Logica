@@ -454,7 +454,9 @@ export async function compileProject(trigger: CompileTrigger = "manual"): Promis
           ? t("compile.timedOut", { seconds: settings.timeoutSecs })
           : /script engine|perl/i.test(result.output) && result.compiler === "latexmk"
             ? t("compile.perlMissing")
-            : t("compile.failedGeneric"),
+            : result.compiler === "tectonic" && /couldn't get it from the internet|error sending request|failed to download/i.test(result.output)
+              ? t("compile.bundledOffline")
+              : t("compile.failedGeneric"),
       });
     }
     useProject.setState((s) => ({

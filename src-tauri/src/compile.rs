@@ -19,6 +19,8 @@ use crate::project::{canonical_root, mtime_ms, resolve};
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 const OUTPUT_TAIL_CHARS: usize = 20_000;
 const KNOWN_TOOLS: &[&str] = &["latexmk", "pdflatex", "xelatex", "lualatex", "bibtex", "biber"];
+/// The bundled engine may download support files on its first runs.
+const TECTONIC_MIN_TIMEOUT_SECS: u64 = 600;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -124,10 +126,30 @@ fn find_tool(name: &str, explicit: Option<&str>, path_var: &OsString) -> CmdResu
     })
 }
 
+/// Tectonic, shipped with LOGICA as a Tauri sidecar next to the executable.
+/// `LOGICA_TECTONIC` points elsewhere (development and tests).
+fn bundled_tectonic() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("LOGICA_TECTONIC").map(PathBuf::from) {
+        return path.is_file().then_some(path);
+    }
+    let exe = std::env::current_exe().ok()?;
+    let path = exe.parent()?.join(format!("tectonic{}", std::env::consts::EXE_SUFFIX));
+    path.is_file().then_some(path)
+}
+
+/// Automatic choice: a TeX distribution installed on the computer first (best
+/// package coverage), then the engine bundled with LOGICA.
+fn pick_auto(installed: impl Fn(&str) -> bool, bundled: bool) -> Option<&'static str> {
+    ["latexmk", "pdflatex", "xelatex"]
+        .into_iter()
+        .find(|name| installed(name))
+        .or(bundled.then_some("tectonic"))
+}
+
 #[tauri::command]
 pub async fn detect_compilers() -> Vec<DetectedTool> {
     let path_var = search_path();
-    KNOWN_TOOLS
+    let mut tools: Vec<DetectedTool> = KNOWN_TOOLS
         .iter()
         .filter_map(|name| {
             find_tool(name, None, &path_var).ok().map(|p| DetectedTool {
@@ -135,7 +157,14 @@ pub async fn detect_compilers() -> Vec<DetectedTool> {
                 path: p.to_string_lossy().into_owned(),
             })
         })
-        .collect()
+        .collect();
+    if let Some(path) = bundled_tectonic() {
+        tools.push(DetectedTool {
+            name: "tectonic".into(),
+            path: path.to_string_lossy().into_owned(),
+        });
+    }
+    tools
 }
 
 struct StepOutput {
@@ -293,15 +322,11 @@ pub async fn compile_latex(request: CompileRequest) -> CmdResult<CompileResult> 
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let path_var = search_path();
-    let timeout = Duration::from_secs(request.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS).clamp(5, 3600));
-    let deadline = tokio::time::Instant::now() + timeout;
     let explicit = request.compiler_path.as_deref();
 
     let auto = request.compiler == "auto";
     let mut compiler = if auto {
-        ["latexmk", "pdflatex", "xelatex"]
-            .into_iter()
-            .find(|name| find_tool(name, None, &path_var).is_ok())
+        pick_auto(|name| find_tool(name, None, &path_var).is_ok(), bundled_tectonic().is_some())
             .ok_or_else(|| {
                 CmdError::new(
                     "compiler_not_found",
@@ -312,6 +337,11 @@ pub async fn compile_latex(request: CompileRequest) -> CmdResult<CompileResult> 
     } else {
         request.compiler.clone()
     };
+    let mut timeout_secs = request.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS).clamp(5, 3600);
+    if compiler == "tectonic" {
+        timeout_secs = timeout_secs.max(TECTONIC_MIN_TIMEOUT_SECS);
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
 
     // Each step is (program, args). Engines run several passes so that
     // bibliography and cross references resolve without latexmk.
@@ -344,6 +374,25 @@ pub async fn compile_latex(request: CompileRequest) -> CmdResult<CompileResult> 
                 } else {
                     success &= out.success;
                 }
+            }
+            "tectonic" => {
+                let bin = match explicit.map(str::trim).filter(|s| !s.is_empty()) {
+                    Some(_) => find_tool("tectonic", explicit, &path_var)?,
+                    None => bundled_tectonic().ok_or_else(|| {
+                        CmdError::new("compiler_not_found", "The TeX engine bundled with LOGICA is missing. Reinstall LOGICA.")
+                    })?,
+                };
+                // Tectonic reruns TeX and runs BibTeX by itself; keep the .log for the error list.
+                let args = vec![
+                    "-X".to_string(),
+                    "compile".into(),
+                    file_name.clone(),
+                    "--keep-logs".into(),
+                    "--synctex".into(),
+                ];
+                let out = run(bin, args).await?;
+                success &= out.success;
+                combined_output.push_str(&out.output);
             }
             "pdflatex" | "xelatex" => {
                 let engine = find_tool(&compiler, explicit, &path_var)?;
@@ -410,6 +459,14 @@ pub async fn compile_latex(request: CompileRequest) -> CmdResult<CompileResult> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prefers_installed_tex_over_the_bundled_engine() {
+        assert_eq!(pick_auto(|n| n == "pdflatex", true), Some("pdflatex"));
+        assert_eq!(pick_auto(|n| n == "latexmk" || n == "xelatex", true), Some("latexmk"));
+        assert_eq!(pick_auto(|_| false, true), Some("tectonic"));
+        assert_eq!(pick_auto(|_| false, false), None);
+    }
 
     #[test]
     fn detects_latexmk_without_perl() {
@@ -487,6 +544,41 @@ mod tests {
         assert!(result.success, "{}", result.output);
         assert_eq!(result.compiler, "pdflatex");
         assert!(result.output.contains("using pdflatex instead"));
+    }
+
+    /// Uses a stand-in for the bundled engine (the real one downloads its
+    /// support files from the internet). Changes the process environment, so
+    /// it runs alone: `cargo test bundled_engine -- --ignored --test-threads=1`
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore]
+    async fn bundled_engine_is_called_like_tectonic() {
+        use std::os::unix::fs::PermissionsExt;
+        if !have("pdflatex") {
+            eprintln!("pdflatex not installed; skipping");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("logica-fake-tectonic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join("tectonic");
+        // Accept exactly the command line LOGICA uses, then build the PDF like Tectonic would.
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\n[ \"$1 $2 $4 $5\" = \"-X compile --keep-logs --synctex\" ] || { echo \"bad args: $*\" >&2; exit 2; }\nexport PATH=/usr/bin:/bin\npdflatex -interaction=nonstopmode -synctex=1 \"$3\" >/dev/null && pdflatex -interaction=nonstopmode -synctex=1 \"$3\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("LOGICA_TECTONIC", &fake);
+        let root = sample_project("tectonic");
+        let tools = detect_compilers().await;
+        let result = compile_latex(request(&root, "tectonic")).await;
+        std::env::remove_var("LOGICA_TECTONIC");
+        assert!(tools.iter().any(|t| t.name == "tectonic"));
+        let result = result.unwrap();
+        assert!(result.success, "{}", result.output);
+        assert_eq!(result.compiler, "tectonic");
+        assert_eq!(result.pdf_path.as_deref(), Some("main.pdf"));
+        assert!(!result.log.is_empty());
     }
 
     #[tokio::test]

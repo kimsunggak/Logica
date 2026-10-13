@@ -5,6 +5,8 @@ node_modules/
 dist/
 src-tauri/target/
 src-tauri/gen/schemas/
+# bundled TeX engine, downloaded by scripts/fetch-tectonic.mjs
+src-tauri/binaries/
 
 # secrets: never commit credentials
 .env

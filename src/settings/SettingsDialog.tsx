@@ -418,6 +418,7 @@ function LatexSettingsPanel() {
           <option value="latexmk">latexmk</option>
           <option value="pdflatex">pdflatex</option>
           <option value="xelatex">xelatex</option>
+          <option value="tectonic">{t("settings.compilerBundled")}</option>
           <option value="custom">{t("settings.compilerCustom")}</option>
         </select>
         <div className="mt-1.5 text-[11.5px] text-slate-500">
@@ -425,10 +426,12 @@ function LatexSettingsPanel() {
             ? t("settings.detecting")
             : tools.length === 0
               ? t("settings.noTools")
-              : t("settings.found", { tools: tools.map((tool) => tool.name).join(", ") })}
+              : t("settings.found", {
+                  tools: tools.map((tool) => (tool.name === "tectonic" ? t("settings.bundledName") : tool.name)).join(", "),
+                })}
         </div>
       </Row>
-      {latex.compiler !== "custom" && latex.compiler !== "auto" && (
+      {latex.compiler !== "custom" && latex.compiler !== "auto" && latex.compiler !== "tectonic" && (
         <Row label={t("settings.compilerPath")} hint={t("settings.compilerPathHint")}>
           <input className="input w-full font-mono" placeholder={`/path/to/${latex.compiler}`} value={latex.compilerPath} onChange={(e) => update({ compilerPath: e.target.value })} />
         </Row>
