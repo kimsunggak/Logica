@@ -18,8 +18,8 @@ const en = {
   "top.connected": "{provider} connected",
   "top.notConnected": "{provider} not connected",
   "top.defaultProvider": "Default AI provider",
-  "top.pdf": "PDF",
-  "top.pdfTitle": "Show/hide PDF",
+  "top.pdf": "Preview",
+  "top.pdfTitle": "Show/hide the preview",
   "top.ai": "AI",
   "top.aiTitle": "Show/hide AI chat ({mod}Shift+L)",
   "top.settingsTitle": "Settings ({mod},)",
@@ -76,13 +76,12 @@ const en = {
   "compile.notFound": "No LaTeX compiler found (latexmk, pdflatex or xelatex). Install MiKTeX, TeX Live or MacTeX, or set the compiler path in Settings.",
 
   // pdf
-  "pdf.title": "PDF",
   "pdf.compiling": "Compiling…",
   "pdf.pages": "{count} pages",
   "pdf.zoomOut": "Zoom out",
   "pdf.zoomIn": "Zoom in",
   "pdf.fit": "Fit width",
-  "pdf.empty": "No PDF yet. Press Compile to build the paper.",
+  "pdf.empty": "No preview yet. Start typing, or press Compile.",
   "pdf.loadError": "Could not load the PDF: {error}",
 
   // project notices
@@ -310,7 +309,7 @@ const en = {
   // panels (collapse / expand)
   "pane.outline": "Outline/Files",
   "pane.editor": "Editor",
-  "pane.pdf": "PDF",
+  "pane.pdf": "Preview",
   "pane.chat": "AI chat",
   "pane.bar": "Panels",
   "pane.collapse": "Collapse {pane}",
@@ -336,8 +335,8 @@ const ko: Record<MessageKey, string> = {
   "top.connected": "{provider} 연결됨",
   "top.notConnected": "{provider} 연결 안 됨",
   "top.defaultProvider": "기본 AI provider",
-  "top.pdf": "PDF",
-  "top.pdfTitle": "PDF 보이기/숨기기",
+  "top.pdf": "미리보기",
+  "top.pdfTitle": "미리보기 보이기/숨기기",
   "top.ai": "AI",
   "top.aiTitle": "AI 채팅 보이기/숨기기 ({mod}Shift+L)",
   "top.settingsTitle": "설정 ({mod},)",
@@ -389,13 +388,12 @@ const ko: Record<MessageKey, string> = {
   "compile.noMain": "컴파일할 main 파일이 없습니다. 파일 탭에서 지정하세요.",
   "compile.notFound": "LaTeX 컴파일러(latexmk, pdflatex, xelatex)를 찾을 수 없습니다. MiKTeX, TeX Live 또는 MacTeX를 설치하거나 설정에서 컴파일러 경로를 지정하세요.",
 
-  "pdf.title": "PDF",
   "pdf.compiling": "컴파일 중…",
   "pdf.pages": "{count}쪽",
   "pdf.zoomOut": "축소",
   "pdf.zoomIn": "확대",
   "pdf.fit": "너비에 맞추기",
-  "pdf.empty": "아직 PDF가 없습니다. 컴파일을 눌러 논문을 만드세요.",
+  "pdf.empty": "아직 미리보기가 없습니다. 글을 쓰거나 컴파일을 누르세요.",
   "pdf.loadError": "PDF를 불러오지 못했습니다: {error}",
 
   "project.openError": "프로젝트를 열 수 없습니다: {error}",
@@ -612,7 +610,7 @@ const ko: Record<MessageKey, string> = {
 
   "pane.outline": "목차/파일",
   "pane.editor": "편집기",
-  "pane.pdf": "PDF",
+  "pane.pdf": "미리보기",
   "pane.chat": "AI 채팅",
   "pane.bar": "창",
   "pane.collapse": "{pane} 접기",

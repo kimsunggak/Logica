@@ -74,5 +74,7 @@ body {
 
 /* PDF pages */
 .pdf-page {
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
+  box-shadow:
+    0 1px 3px rgba(15, 23, 42, 0.16),
+    0 6px 20px rgba(15, 23, 42, 0.1);
 }

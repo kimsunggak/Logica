@@ -51,7 +51,7 @@ function PdfPage({ page, scale }: { page: PDFPageProxy; scale: number }) {
   }, [page, scale, visible]);
 
   return (
-    <div ref={holderRef} className="pdf-page mx-auto mb-3 bg-white" style={{ width: viewport.width, height: viewport.height }}>
+    <div ref={holderRef} className="pdf-page mx-auto mb-4 bg-white" style={{ width: viewport.width, height: viewport.height }}>
       <canvas ref={canvasRef} style={{ width: viewport.width, height: viewport.height, display: "block" }} />
     </div>
   );
@@ -113,35 +113,36 @@ export function PdfPreview() {
   const scale = zoom === "fit" ? fitScale : zoom;
   const setScale = (value: number) => setZoom(Math.max(0.3, Math.min(4, Math.round(value * 10) / 10)));
 
+  // Only the paper is shown; zoom and collapse float over it in a small bar.
   return (
-    <div className="flex h-full flex-col bg-slate-100 dark:bg-[#0b0f14]">
-      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-slate-200 bg-slate-50 px-2 dark:border-slate-800 dark:bg-[#121820]">
-        <span className="panel-title">{t("pdf.title")}</span>
+    <div className="relative h-full bg-slate-200/70 dark:bg-[#0b0f14]">
+      <div
+        className="absolute top-2 right-3 z-10 flex items-center gap-0.5 rounded-md border border-slate-200 bg-white/90 px-1 py-0.5 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/90"
+        data-testid="pdf-toolbar"
+      >
         {status === "running" && (
-          <span className="ml-2 flex items-center gap-1 text-[11.5px] text-slate-500">
-            <Loader2 size={12} className="animate-spin" /> {t("pdf.compiling")}
+          <span className="flex items-center px-1 text-sky-600" title={t("pdf.compiling")} data-testid="pdf-compiling">
+            <Loader2 size={12} className="animate-spin" />
           </span>
         )}
-        {pdf && <span className="ml-2 text-[11.5px] text-slate-400">{t("pdf.pages", { count: pdf.doc.numPages })}</span>}
-        <div className="ml-auto flex items-center gap-0.5">
-          <button className="icon-btn" title={t("pdf.zoomOut")} onClick={() => setScale(scale - 0.1)} disabled={!pdf}>
-            <ZoomOut size={13} />
-          </button>
-          <span className="w-10 text-center text-[11px] text-slate-500 tabular-nums">{Math.round(scale * 100)}%</span>
-          <button className="icon-btn" title={t("pdf.zoomIn")} onClick={() => setScale(scale + 0.1)} disabled={!pdf}>
-            <ZoomIn size={13} />
-          </button>
-          <button className="icon-btn" title={t("pdf.fit")} onClick={() => setZoom("fit")} disabled={!pdf}>
-            <Maximize2 size={12} />
-          </button>
-          <div className="mx-0.5 h-4 w-px bg-slate-200 dark:bg-slate-700" />
-          <CollapseButton pane="pdf" />
-        </div>
+        {pdf && <span className="px-1 text-[11px] text-slate-400 tabular-nums">{t("pdf.pages", { count: pdf.doc.numPages })}</span>}
+        <button className="icon-btn h-6 w-6" title={t("pdf.zoomOut")} onClick={() => setScale(scale - 0.1)} disabled={!pdf}>
+          <ZoomOut size={13} />
+        </button>
+        <span className="w-9 text-center text-[11px] text-slate-500 tabular-nums">{Math.round(scale * 100)}%</span>
+        <button className="icon-btn h-6 w-6" title={t("pdf.zoomIn")} onClick={() => setScale(scale + 0.1)} disabled={!pdf}>
+          <ZoomIn size={13} />
+        </button>
+        <button className="icon-btn h-6 w-6" title={t("pdf.fit")} onClick={() => setZoom("fit")} disabled={!pdf}>
+          <Maximize2 size={12} />
+        </button>
+        <div className="mx-0.5 h-4 w-px bg-slate-200 dark:bg-slate-700" />
+        <CollapseButton pane="pdf" className="h-6 w-6" />
       </div>
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto p-3" data-testid="pdf-preview">
+      <div ref={scrollRef} className="h-full overflow-auto px-3 pt-11 pb-3" data-testid="pdf-preview">
         {error && <div className="text-[12px] text-red-600">{error}</div>}
         {!pdf && !error && (
-          <div className="mt-10 text-center text-[12px] text-slate-400">
+          <div className="mt-10 text-center text-[12px] text-slate-500">
             {status === "running" ? t("pdf.compiling") : t("pdf.empty")}
           </div>
         )}
