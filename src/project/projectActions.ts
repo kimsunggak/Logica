@@ -12,7 +12,7 @@ import { keyAtOffset, REF_COMMANDS } from "../latex/parser/parseFile";
 import { confirmDialog, errorKind, errorMessage } from "../lib/backend";
 import { useSettings } from "../settings/settingsStore";
 import { useWorkspace } from "../storage/workspaceStore";
-import { exportPdfFile, listProjectFiles, pathExists, readTextFile, statFiles, writeTextFile } from "./projectApi";
+import { createStarterProject, exportPdfFile, listProjectFiles, pathExists, readTextFile, statFiles, writeTextFile } from "./projectApi";
 import { initialProjectState, notify, openFileMeta, updateOpenFile, useProject, type CompileTrigger } from "./projectStore";
 import { t } from "../i18n";
 
@@ -95,7 +95,11 @@ export async function openProject(root: string): Promise<void> {
   rebuildDocumentNow();
   const doc = useProject.getState().doc;
   if (!doc?.mainFile) notify("info", t("project.noMain"));
-  else void showExistingPdf(listing.root, doc.mainFile);
+  else
+    void showExistingPdf(listing.root, doc.mainFile).then((found) => {
+      // Nothing compiled yet (e.g. a new paper): build the preview right away.
+      if (!found && useSettings.getState().latex.livePreview && useProject.getState().root === listing.root) void compileProject("live");
+    });
 
   const toOpen = memory.openFiles.filter((p) => diskTexts.has(p));
   const active = memory.activeFile && diskTexts.has(memory.activeFile) ? memory.activeFile : toOpen[0] ?? doc?.mainFile;
@@ -104,11 +108,24 @@ export async function openProject(root: string): Promise<void> {
 }
 
 /** Show the PDF from a previous compilation, if there is one. */
-async function showExistingPdf(root: string, mainFile: string) {
+async function showExistingPdf(root: string, mainFile: string): Promise<boolean> {
   const pdfPath = mainFile.replace(/\.tex$/, ".pdf");
-  if (await pathExists(root, pdfPath).catch(() => false)) {
-    if (useProject.getState().root !== root) return;
+  if (!(await pathExists(root, pdfPath).catch(() => false))) return false;
+  if (useProject.getState().root === root) {
     useProject.setState((s) => ({ compile: { ...s.compile, pdfPath, pdfVersion: s.compile.pdfVersion + 1 } }));
+  }
+  return true;
+}
+
+/**
+ * Start a paper from the one-page template. On first launch (`reuse`) the
+ * existing "My Paper" is reopened instead of creating another one.
+ */
+export async function newPaper(reuse = false): Promise<void> {
+  try {
+    await openProject(await createStarterProject(reuse));
+  } catch (err) {
+    notify("error", t("project.newError", { error: errorMessage(err) }));
   }
 }
 

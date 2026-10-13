@@ -1,5 +1,6 @@
-import { FolderOpen } from "lucide-react";
+import { FilePlus, FolderOpen } from "lucide-react";
 import { isDemoMode } from "../lib/backend";
+import { newPaper } from "../project/projectActions";
 import { useProject } from "../project/projectStore";
 import { useT } from "../i18n";
 import { chooseAndOpenProject } from "./TopBar";
@@ -12,9 +13,14 @@ export function Welcome() {
       <div className="max-w-md text-center">
         <h1 className="text-[22px] font-bold tracking-[0.2em]">LOGICA</h1>
         <p className="mt-2 text-[13px] text-slate-500">{t("welcome.tagline")}</p>
-        <button className="btn-primary mt-6 h-9 px-4 text-[13px]" onClick={() => void chooseAndOpenProject()} disabled={loading}>
-          <FolderOpen size={15} /> {loading ? t("welcome.opening") : t("welcome.open")}
-        </button>
+        <div className="mt-6 flex justify-center gap-2">
+          <button className="btn-primary h-9 px-4 text-[13px]" onClick={() => void newPaper()} disabled={loading}>
+            <FilePlus size={15} /> {loading ? t("welcome.opening") : t("welcome.new")}
+          </button>
+          <button className="btn h-9 px-4 text-[13px]" onClick={() => void chooseAndOpenProject()} disabled={loading}>
+            <FolderOpen size={15} /> {t("welcome.open")}
+          </button>
+        </div>
         <p className="mt-4 text-[12px] text-slate-400">
           {t("welcome.hint")}
         </p>

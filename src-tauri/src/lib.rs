@@ -34,6 +34,7 @@ pub fn run() {
             project::read_binary_file,
             project::path_exists,
             project::export_pdf,
+            project::create_starter_project,
             compile::detect_compilers,
             compile::compile_latex,
             credentials::credential_status,

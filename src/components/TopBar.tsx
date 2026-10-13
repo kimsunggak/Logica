@@ -1,7 +1,7 @@
-import { Bot, Download, FileText, FolderOpen, Loader2, Play, Save, Settings } from "lucide-react";
+import { Bot, Download, FilePlus, FileText, FolderOpen, Loader2, Play, Save, Settings } from "lucide-react";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
 import { pickProjectFolder } from "../lib/backend";
-import { compileProject, exportPdf, openProject, saveAll } from "../project/projectActions";
+import { compileProject, exportPdf, newPaper, openProject, saveAll } from "../project/projectActions";
 import { useProject } from "../project/projectStore";
 import { isConnected, isKnown, useConnections } from "../settings/connectionStore";
 import { useSettings } from "../settings/settingsStore";
@@ -70,6 +70,9 @@ export function TopBar() {
       <span className="mr-2 pl-1 text-[13px] font-bold tracking-[0.18em] text-slate-800 dark:text-slate-100">LOGICA</span>
       <button className="btn-ghost" onClick={() => void chooseAndOpenProject()} title={t("top.openProjectTitle", { mod: MOD })} data-testid="open-project">
         <FolderOpen size={14} /> {t("top.openProject")}
+      </button>
+      <button className="btn-ghost" onClick={() => void newPaper()} title={t("top.newPaperTitle")} data-testid="new-paper">
+        <FilePlus size={14} /> {t("top.newPaper")}
       </button>
       {root && (
         <>

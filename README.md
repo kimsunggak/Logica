@@ -17,12 +17,12 @@ LOGICA는 개인 연구용 로컬 LaTeX 논문 작성 도구입니다. 논문 �
 
 | 영역 | 기능 |
 | --- | --- |
-| 프로젝트 | 폴더 열기, `main.tex` 자동 탐지(또는 직접 지정), `\input` / `\include` 추적, 여러 파일 탭 편집, 외부 수정 감지 |
+| 프로젝트 | 첫 실행 시 `문서/LOGICA/My Paper`에 한 페이지짜리 기본 논문을 만들어 바로 열기, **새 논문** 버튼, 폴더 열기, `main.tex` 자동 탐지(또는 직접 지정), `\input` / `\include` 추적, 여러 파일 탭 편집, 외부 수정 감지 |
 | Outline | `\part` ~ `\subsubsection` 트리, 번호(부록은 A, B, ...), 접기/펼치기, 현재 커서 section 강조, 클릭 시 원본 위치로 이동, section별 단어 수, 현재 section의 파일:줄 표시 |
 | Editor | CodeMirror 6, LaTeX 문법 강조, 줄 번호, 괄호 매칭, undo/redo, 검색/바꾸기, 저장 상태 표시, `\section` `\cite` `\ref` `\eqref` `\label` 등 자동완성 |
-| PDF | `latexmk` > `pdflatex` > `xelatex` 순 자동 선택(또는 직접 지정/사용자 명령), 타임아웃, 주요 오류만 추출(파일:줄 클릭 이동), 자동 컴파일 옵션 |
+| 미리보기와 PDF | 입력을 멈추면 자동 저장 후 컴파일하는 실시간 미리보기(설정에서 끌 수 있음), 논문 페이지만 보이는 미리보기, **PDF 내보내기**로 원하는 위치에 저장, `latexmk` > `pdflatex` > `xelatex` 순 자동 선택(또는 직접 지정/사용자 명령), 타임아웃, 주요 오류만 추출(파일:줄 클릭 이동) |
 | AI 인라인 편집 | 텍스트 선택 후 `Cmd/Ctrl+K`, 기본 명령(Improve writing, Make concise, Make academic, Improve clarity, Fix grammar, Rewrite, 직접 입력), streaming 표시, Stop, diff 확인 후 Accept / Reject / Regenerate(다른 provider로 재생성 가능) |
-| AI 채팅 | 현재 파일, section, 커서 주변 문단, 선택 영역, abstract, outline을 자동으로 포함하는 논문 편집 보조 채팅. 제안된 LaTeX 블록은 diff로 검토 후 적용 |
+| AI 채팅 (에이전트) | 논문 전체 원고와 커서 위치를 보고 여러 곳, 여러 파일의 수정안을 한 번에 제안. 수정마다 diff와 LaTeX 검사 결과를 보여 주고 하나씩 또는 모두 적용/거절 |
 | Citation / Reference | `references.bib` 파싱, `\cite{` 입력 시 key/제목/저자/연도 자동완성, `\ref{` 라벨 자동완성, `\ref` `\eqref` `\cite` `\input` 위에서 `F12` 또는 `Cmd/Ctrl+클릭`으로 정의 위치 이동 |
 | 상태 복원 | 마지막 프로젝트, 열린 파일, 파일별 커서 위치, outline 접힘 상태, 패널 크기와 표시 여부, 테마, provider와 model 선택 |
 
@@ -53,10 +53,10 @@ npm run tauri build      # 배포용 빌드 (src-tauri/target/release/bundle)
 
 ## 사용 방법
 
-1. **Open Project**로 LaTeX 프로젝트 폴더를 엽니다. `main.tex`가 없으면 Files 탭에서 별(★) 버튼으로 main 파일을 지정합니다.
+1. 처음 실행하면 한 페이지짜리 기본 논문이 열리고 미리보기가 바로 만들어집니다. 기존 논문은 **Open Project**로 폴더를 엽니다. `main.tex`가 없으면 Files 탭에서 별(★) 버튼으로 main 파일을 지정합니다.
 2. 왼쪽 Outline에서 section을 클릭하면 해당 파일과 줄로 이동합니다.
 3. 중앙 편집기에서 직접 수정하고 `Cmd/Ctrl+S`로 저장합니다.
-4. **Compile**(`Cmd/Ctrl+Enter`)으로 PDF를 만듭니다. 오류는 편집기 아래에 파일:줄과 함께 표시되며 클릭하면 이동합니다.
+4. 입력을 멈추면 자동으로 저장하고 컴파일해 미리보기가 갱신됩니다. **Compile**(`Cmd/Ctrl+Enter`)로 직접 컴파일할 수도 있습니다. 오류는 편집기 아래에 파일:줄과 함께 표시되며 클릭하면 이동합니다. 완성본은 **PDF 내보내기**로 저장합니다.
 5. Settings(`Cmd/Ctrl+,`) > AI에서 OpenAI 또는 Claude API key를 연결하고 model을 고릅니다.
 6. 문장이나 문단을 선택하고 `Cmd/Ctrl+K`를 눌러 지시를 입력합니다. 결과가 streaming으로 표시된 뒤 diff가 나타나며, **Accept**를 눌러야만 원고가 바뀝니다.
 

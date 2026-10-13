@@ -63,6 +63,7 @@ export function PdfPreview() {
   const pdfPath = useProject((s) => s.compile.pdfPath);
   const version = useProject((s) => s.compile.pdfVersion);
   const status = useProject((s) => s.compile.status);
+  const compileError = useProject((s) => s.compile.error);
   const [pdf, setPdf] = useState<LoadedPdf | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState<"fit" | number>("fit");
@@ -143,7 +144,13 @@ export function PdfPreview() {
         {error && <div className="text-[12px] text-red-600">{error}</div>}
         {!pdf && !error && (
           <div className="mt-10 text-center text-[12px] text-slate-500">
-            {status === "running" ? t("pdf.compiling") : t("pdf.empty")}
+            {status === "running"
+              ? t("pdf.compiling")
+              : compileError
+                ? compileError
+                : status === "failed"
+                  ? t("pdf.failed")
+                  : t("pdf.empty")}
           </div>
         )}
         {pdf?.pages.map((page) => <PdfPage key={page.pageNumber} page={page} scale={scale} />)}

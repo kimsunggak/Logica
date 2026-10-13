@@ -50,6 +50,11 @@ export function readBinaryFile(root: string, path: string): Promise<ArrayBuffer>
   return call<ArrayBuffer>("read_binary_file", { root, path });
 }
 
+/** Create a one-page starter paper (Documents/LOGICA/My Paper…) and return its folder. */
+export function createStarterProject(reuse: boolean): Promise<string> {
+  return call<string>("create_starter_project", { reuse });
+}
+
 /** Native save dialog plus copy; resolves to the saved path, or null if cancelled. */
 export function exportPdfFile(root: string, path: string, title: string): Promise<string | null> {
   return call<string | null>("export_pdf", { root, path, title });

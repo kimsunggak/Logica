@@ -292,6 +292,38 @@ pub async fn path_exists(root: String, path: String) -> CmdResult<bool> {
     Ok(resolve(&root_path, &path).map(|p| p.exists()).unwrap_or(false))
 }
 
+const STARTER_MAIN: &str = include_str!("../templates/main.tex");
+
+/// Create a one-page starter paper under Documents/LOGICA and return its
+/// folder. With `reuse`, an existing "My Paper" with a main.tex is returned
+/// as is; otherwise the next free "My Paper N" folder is created.
+#[tauri::command]
+pub async fn create_starter_project(app: tauri::AppHandle, reuse: bool) -> CmdResult<String> {
+    use tauri::Manager;
+
+    let paths = app.path();
+    let base = paths
+        .document_dir()
+        .or_else(|_| paths.home_dir())
+        .map_err(|e| CmdError::new("io", e.to_string()))?
+        .join("LOGICA");
+    let folder = starter_folder(&base, reuse);
+    std::fs::create_dir_all(&folder)?;
+    let main = folder.join("main.tex");
+    if !main.exists() {
+        std::fs::write(&main, STARTER_MAIN)?;
+    }
+    Ok(folder.to_string_lossy().into_owned())
+}
+
+fn starter_folder(base: &Path, reuse: bool) -> PathBuf {
+    let first = base.join("My Paper");
+    if (reuse && first.join("main.tex").is_file()) || !first.exists() {
+        return first;
+    }
+    (2..).map(|n| base.join(format!("My Paper {n}"))).find(|p| !p.exists()).expect("unbounded range")
+}
+
 /// Save a copy of the compiled PDF where the user chooses. The destination
 /// comes from the native save dialog shown here, never from the webview.
 /// Returns the saved path, or None when the dialog was cancelled.
@@ -341,6 +373,20 @@ mod tests {
         write_text_file(root.clone(), "a.tex".into(), "three".into(), Some(second.mtime), Some(true)).await.unwrap();
         let file = read_text_file(root, "a.tex".into()).await.unwrap();
         assert_eq!(file.content, "three");
+    }
+
+    #[test]
+    fn starter_folders_are_reused_or_numbered() {
+        let base = std::env::temp_dir().join(format!("logica-starter-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        assert_eq!(starter_folder(&base, true), base.join("My Paper"));
+        std::fs::create_dir_all(base.join("My Paper")).unwrap();
+        std::fs::write(base.join("My Paper/main.tex"), STARTER_MAIN).unwrap();
+        assert_eq!(starter_folder(&base, true), base.join("My Paper"));
+        assert_eq!(starter_folder(&base, false), base.join("My Paper 2"));
+        std::fs::create_dir_all(base.join("My Paper 2")).unwrap();
+        assert_eq!(starter_folder(&base, false), base.join("My Paper 3"));
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

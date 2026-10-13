@@ -16,8 +16,10 @@ import relatedTex from "../../examples/sample-paper/sections/related_work.tex?ra
 import methodTex from "../../examples/sample-paper/sections/method.tex?raw";
 import experimentsTex from "../../examples/sample-paper/sections/experiments.tex?raw";
 import referencesBib from "../../examples/sample-paper/references.bib?raw";
+import starterMain from "../../src-tauri/templates/main.tex?raw";
 
 const DEMO_ROOT = "/demo/sample-paper";
+const STARTER_BASE = "/demo/My Paper";
 const STATE_KEY = "logica-demo-state";
 
 interface DemoFile {
@@ -228,7 +230,14 @@ function anthropicStream(text: string): string[] {
 // ------------------------------------------------------------------ backend
 
 export function createDemoBackend(): DemoBackend {
-  const files = new Map<string, DemoFile>();
+  // One in-memory file map per project folder; `files` is the one the current call targets.
+  const projects = new Map<string, Map<string, DemoFile>>();
+  let files = new Map<string, DemoFile>();
+  projects.set(DEMO_ROOT, files);
+  const starter = (root: string) => {
+    if (!projects.has(root)) projects.set(root, new Map([["main.tex", { content: starterMain, mtime: Date.now() }]]));
+    return root;
+  };
   const now = Date.now();
   const seed: [string, string][] = [
     ["main.tex", mainTex],
@@ -283,8 +292,8 @@ export function createDemoBackend(): DemoBackend {
   };
 
   const handlers: Record<string, (args: Record<string, any>) => Promise<unknown> | unknown> = {
-    list_project_files: () => ({
-      root: DEMO_ROOT,
+    list_project_files: ({ root }) => ({
+      root,
       truncated: false,
       entries: [...files.entries()]
         .filter(([p]) => /\.(tex|bib)$/.test(p))
@@ -307,6 +316,12 @@ export function createDemoBackend(): DemoBackend {
       return file.content.slice().buffer;
     },
     path_exists: ({ path }) => files.has(path),
+    create_starter_project: ({ reuse }) => {
+      if (reuse || !projects.has(STARTER_BASE)) return starter(STARTER_BASE);
+      let n = 2;
+      while (projects.has(`${STARTER_BASE} ${n}`)) n++;
+      return starter(`${STARTER_BASE} ${n}`);
+    },
     export_pdf: ({ path }) => {
       // The browser has no save dialog API here; download the file instead.
       const file = files.get(path);
@@ -428,6 +443,13 @@ export function createDemoBackend(): DemoBackend {
     async invoke(cmd, args = {}) {
       const handler = handlers[cmd];
       if (!handler) fail("unknown_command", `Demo backend does not implement ${cmd}`);
+      const root = args.root ?? (args.request as { root?: unknown } | undefined)?.root;
+      if (typeof root === "string") {
+        // Starter papers live in memory only; recreate one remembered from an earlier page load.
+        if (!projects.has(root) && root.startsWith(STARTER_BASE)) starter(root);
+        if (!projects.has(root)) fail("not_found", `No such folder: ${root}`);
+        files = projects.get(root)!;
+      }
       return handler(args);
     },
     async openFolderDialog() {

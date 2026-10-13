@@ -12,6 +12,7 @@ import { confirmDialog, isDesktop } from "./lib/backend";
 import {
   checkExternalChanges,
   connectEditorSession,
+  newPaper,
   openProject,
   rebuildDocumentNow,
   refreshFileList,
@@ -59,7 +60,9 @@ export default function App() {
       setReady(true);
       void refreshAllConnections();
       const last = useWorkspace.getState().lastProject;
+      // First launch: open a one-page starter paper so the editor and preview are never empty.
       if (last) await openProject(last);
+      else await newPaper(true);
     })();
     return () => {
       cancelled = true;

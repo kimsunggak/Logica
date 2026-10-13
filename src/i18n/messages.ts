@@ -5,6 +5,8 @@
 const en = {
   // top bar
   "top.openProject": "Open Project",
+  "top.newPaper": "New Paper",
+  "top.newPaperTitle": "Create a one-page starter paper in Documents/LOGICA",
   "top.openProjectTitle": "Open project folder ({mod}O)",
   "top.save": "Save",
   "top.saveTitle": "Save all ({mod}Shift+S)",
@@ -28,6 +30,7 @@ const en = {
   // welcome
   "welcome.tagline": "Researcher writes. AI edits on demand.",
   "welcome.open": "Open a LaTeX project folder",
+  "welcome.new": "Start a new paper",
   "welcome.opening": "Opening…",
   "welcome.hint": "LOGICA reads main.tex, follows \\input and \\include, and builds the paper outline.",
   "welcome.demo": "Browser preview mode: files, compilation and AI responses are simulated. Run npm run tauri dev for the desktop app.",
@@ -82,10 +85,12 @@ const en = {
   "pdf.zoomIn": "Zoom in",
   "pdf.fit": "Fit width",
   "pdf.empty": "No preview yet. Start typing, or press Compile.",
+  "pdf.failed": "The preview could not be built. Check the errors in the compile log below the editor.",
   "pdf.loadError": "Could not load the PDF: {error}",
 
   // project notices
   "project.openError": "Could not open project: {error}",
+  "project.newError": "Could not create a new paper: {error}",
   "project.truncated": "Large folder: only the first 5000 files are listed.",
   "project.noMain": "No main.tex found. Choose the main file in the Files tab.",
   "project.fileOpenError": "Could not open {path}: {error}",
@@ -322,6 +327,8 @@ export type MessageKey = keyof typeof en;
 
 const ko: Record<MessageKey, string> = {
   "top.openProject": "프로젝트 열기",
+  "top.newPaper": "새 논문",
+  "top.newPaperTitle": "문서/LOGICA 폴더에 한 페이지짜리 기본 논문을 만듭니다",
   "top.openProjectTitle": "프로젝트 폴더 열기 ({mod}O)",
   "top.save": "저장",
   "top.saveTitle": "모두 저장 ({mod}Shift+S)",
@@ -344,6 +351,7 @@ const ko: Record<MessageKey, string> = {
 
   "welcome.tagline": "글은 연구자가 쓰고, AI는 요청할 때만 고칩니다.",
   "welcome.open": "LaTeX 프로젝트 폴더 열기",
+  "welcome.new": "새 논문 시작",
   "welcome.opening": "여는 중…",
   "welcome.hint": "LOGICA는 main.tex를 읽고 \\input과 \\include를 따라가 논문 목차를 만듭니다.",
   "welcome.demo": "브라우저 미리보기 모드: 파일, 컴파일, AI 응답이 모두 시뮬레이션입니다. 데스크톱 앱은 npm run tauri dev로 실행하세요.",
@@ -394,9 +402,11 @@ const ko: Record<MessageKey, string> = {
   "pdf.zoomIn": "확대",
   "pdf.fit": "너비에 맞추기",
   "pdf.empty": "아직 미리보기가 없습니다. 글을 쓰거나 컴파일을 누르세요.",
+  "pdf.failed": "미리보기를 만들지 못했습니다. 편집기 아래 컴파일 로그에서 오류를 확인하세요.",
   "pdf.loadError": "PDF를 불러오지 못했습니다: {error}",
 
   "project.openError": "프로젝트를 열 수 없습니다: {error}",
+  "project.newError": "새 논문을 만들 수 없습니다: {error}",
   "project.truncated": "폴더가 커서 처음 5000개 파일만 표시합니다.",
   "project.noMain": "main.tex를 찾지 못했습니다. 파일 탭에서 main 파일을 지정하세요.",
   "project.fileOpenError": "{path}를 열 수 없습니다: {error}",
