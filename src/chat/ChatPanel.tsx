@@ -1,4 +1,4 @@
-import { Check, CheckCheck, FileText, GitCompare, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
+import { BookOpen, Check, CheckCheck, FileText, GitCompare, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
@@ -103,6 +103,36 @@ function EditCard({ messageId, index, edit, state }: { messageId: string; index:
   );
 }
 
+/** The sections a question was answered from; each opens that place in the editor. */
+function Sources({ message }: { message: ChatMessage }) {
+  const t = useT();
+  if (!message.sources?.length && !message.focus) return null;
+  return (
+    <div className="space-y-1 text-[11.5px] text-slate-500" data-testid="chat-sources">
+      {message.focus && (
+        <div className="truncate" title={message.focus}>
+          {t("chat.focus")}: {message.focus}
+        </div>
+      )}
+      {!!message.sources?.length && (
+        <div className="flex flex-wrap items-center gap-1">
+          <BookOpen size={12} className="shrink-0" />
+          {message.sources.map((source) => (
+            <button
+              key={`${source.path}:${source.line}`}
+              className="max-w-full truncate rounded border border-slate-200 px-1.5 py-0.5 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+              title={`${source.path}:${source.line}`}
+              onClick={() => void navigateTo(source.path, source.line)}
+            >
+              {source.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AssistantMessage({ message }: { message: ChatMessage }) {
   const t = useT();
   if (message.status === "error") {
@@ -121,6 +151,8 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   const pending = [...edits.values()].filter(({ index }) => !message.editStates?.[index]);
   return (
     <div className="space-y-2 text-[13px] leading-relaxed">
+      {message.stage === "selecting" && <div className="text-[11.5px] text-slate-500">{t("chat.selecting")}</div>}
+      <Sources message={message} />
       {edits.size > 1 && (
         <div className="flex items-center gap-1.5 text-[11.5px] text-slate-500" data-testid="agent-edits-bar">
           <span>{t("agent.edits", { count: edits.size })}</span>

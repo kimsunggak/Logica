@@ -31,6 +31,9 @@ export const MAX_OUTPUT_TOKENS = {
   "inline-edit": 8192,
   // Agent answers may carry edits for several places and files.
   chat: 16384,
+  // A short JSON reply naming sections.
+  select: 1024,
+  answer: 8192,
 } as const;
 
 /**

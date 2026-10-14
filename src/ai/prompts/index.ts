@@ -4,7 +4,9 @@
  */
 import type { AIMessage, AIRequest } from "../types";
 import { buildChatPrompt } from "./chat";
+import { buildAnswerPrompt } from "./refine";
 import { buildInlineEditPrompt } from "./rewrite";
+import { buildSelectPrompt } from "./select";
 
 export interface PromptPayload {
   system: string;
@@ -24,7 +26,14 @@ function normalizeMessages(messages: AIMessage[]): AIMessage[] {
 }
 
 export function buildPrompt(request: AIRequest): PromptPayload {
-  const payload = request.task === "chat" ? buildChatPrompt(request) : buildInlineEditPrompt(request);
+  const payload =
+    request.task === "chat"
+      ? buildChatPrompt(request)
+      : request.task === "select"
+        ? buildSelectPrompt(request)
+        : request.task === "answer"
+          ? buildAnswerPrompt(request)
+          : buildInlineEditPrompt(request);
   return { system: payload.system, messages: normalizeMessages(payload.messages) };
 }
 

@@ -10,10 +10,12 @@ import { AIError } from "../ai/errors";
 import { MAX_OUTPUT_TOKENS } from "../ai/models/modelConfig";
 import { aiService, newRequestId } from "../ai/service";
 import { lineOf, locateEdit, type ProposedEdit } from "../ai/agent/edits";
+import { buildPaperMap } from "../ai/agent/paperMap";
+import { parseSelection, selectedSources, type Selection } from "../ai/agent/selection";
 import { deleteSession, listSessions, loadSession, newSessionId, saveSession, SESSION_VERSION, type SessionSummary } from "./chatHistory";
-import type { AIMessage, ProjectFile, ProviderId } from "../ai/types";
+import type { AIContext, AIMessage, AIRequest, AIResponse, ProjectFile, ProviderId } from "../ai/types";
 import { editorSession } from "../editor/editorSession";
-import { sectionAt, sectionTrail } from "../latex/parser/documentModel";
+import { outlineText, sectionAt, sectionTrail, type PaperDocument } from "../latex/parser/documentModel";
 import { currentTexts, navigateTo, openFile } from "../project/projectActions";
 import { notify, useProject } from "../project/projectStore";
 import { useSettings } from "../settings/settingsStore";
@@ -24,6 +26,13 @@ export interface ChatAnchor {
   from: number;
   to: number;
   text: string;
+}
+
+/** A paper section an answer was based on. */
+export interface ChatSource {
+  label: string;
+  path: string;
+  line: number;
 }
 
 export interface ChatMessage {
@@ -41,6 +50,12 @@ export interface ChatMessage {
   instruction?: string;
   /** Outcome of each proposed edit block, by its index in the answer. */
   editStates?: Record<number, EditState>;
+  /** Set while the relevant sections of the paper are being chosen. */
+  stage?: "selecting";
+  /** Sections a question was answered from. */
+  sources?: ChatSource[];
+  /** The question as the section selector understood it. */
+  focus?: string;
 }
 
 export type EditState = "applied" | "rejected" | "failed";
@@ -105,6 +120,127 @@ function updateMessage(id: string, patch: Partial<ChatMessage>) {
   useChat.setState((s) => ({ messages: s.messages.map((m) => (m.id === id ? { ...m, ...patch } : m)) }));
 }
 
+/** Earlier turns the section selector sees (to resolve follow-up questions). */
+const SELECT_HISTORY_MESSAGES = 4;
+const SELECT_TEXT_LIMIT = 1500;
+
+/** Provider request currently running for the chat (selection or answer). */
+let activeRequest: string | null = null;
+/** Turns the author stopped, so the next step is not started. */
+const stopped = new Set<string>();
+
+interface Turn {
+  id: string;
+  provider: ProviderId;
+  model: string;
+  instruction: string;
+  selectedText?: string;
+  context: AIContext;
+  history: AIMessage[];
+  doc: PaperDocument | null;
+  cursor?: { path: string; line: number };
+}
+
+async function run(turn: Turn, request: Omit<AIRequest, "model" | "instruction">, onText?: (text: string) => void): Promise<AIResponse> {
+  activeRequest = request.id;
+  try {
+    return await aiService.generate(
+      turn.provider,
+      { ...request, model: turn.model, instruction: turn.instruction },
+      onText ? { onDelta: (_d, full) => onText(full) } : undefined,
+    );
+  } finally {
+    activeRequest = null;
+    if (stopped.has(turn.id)) throw new AIError("cancelled", t("chat.stopped"), { provider: turn.provider });
+  }
+}
+
+/** Step 1: decide between a question and an edit, and pick the sections it needs. */
+async function selectSections(turn: Turn, doc: PaperDocument): Promise<Selection> {
+  const map = buildPaperMap(doc, currentTexts());
+  const cursor = turn.cursor ? sectionAt(doc, turn.cursor.path, turn.cursor.line) : null;
+  const cursorKey = cursor ? map.entries.find((e) => e.section.id === cursor.id)?.key : undefined;
+  const cursorEntry = map.entries.find((e) => e.key === cursorKey);
+  const selected = turn.selectedText && turn.selectedText.length > SELECT_TEXT_LIMIT ? `${turn.selectedText.slice(0, SELECT_TEXT_LIMIT)}…` : turn.selectedText;
+  const response = await run(turn, {
+    id: `${turn.id}-select`,
+    task: "select",
+    selectedText: selected,
+    context: {
+      currentFile: turn.context.currentFile,
+      currentSection: cursorEntry ? `[${cursorEntry.key}] ${cursorEntry.label}` : undefined,
+    },
+    history: turn.history.slice(-SELECT_HISTORY_MESSAGES),
+    paperMap: map.text,
+    maxOutputTokens: MAX_OUTPUT_TOKENS.select,
+  });
+  return parseSelection(response.text, map.entries, cursorKey);
+}
+
+/** Step 2 (question): answer from the selected sections only. */
+async function answerQuestion(turn: Turn, doc: PaperDocument, selection: Selection) {
+  const sources = selectedSources(doc, selection.entries, currentTexts());
+  const used = new Set(sources.map((s) => s.key));
+  updateMessage(turn.id, {
+    stage: undefined,
+    focus: selection.focus,
+    sources: selection.entries
+      .filter((e) => used.has(e.key))
+      .map((e) => ({ label: e.label, path: e.section.filePath, line: e.section.startLine })),
+  });
+  const response = await run(
+    turn,
+    {
+      id: turn.id,
+      task: "answer",
+      selectedText: turn.selectedText,
+      context: {
+        paperTitle: turn.context.paperTitle ?? doc.title,
+        outline: turn.context.outline ?? (doc.flatSections.length ? outlineText(doc) : undefined),
+        currentSection: turn.context.currentSection,
+      },
+      history: turn.history,
+      sources,
+      focus: selection.focus,
+      maxOutputTokens: MAX_OUTPUT_TOKENS.answer,
+    },
+    (full) => updateMessage(turn.id, { content: full }),
+  );
+  finish(turn.id, response);
+}
+
+/** Step 2 (edit): the agent sees the paper files and proposes edit blocks. */
+async function proposeEdits(turn: Turn) {
+  updateMessage(turn.id, { stage: undefined });
+  const { files, omitted } = agentFiles(turn.cursor?.path);
+  const response = await run(
+    turn,
+    {
+      id: turn.id,
+      task: "chat",
+      selectedText: turn.selectedText,
+      context: turn.context,
+      history: turn.history,
+      projectFiles: files,
+      omittedFiles: omitted,
+      maxOutputTokens: MAX_OUTPUT_TOKENS.chat,
+    },
+    (full) => updateMessage(turn.id, { content: full }),
+  );
+  finish(turn.id, response);
+}
+
+function finish(id: string, response: AIResponse) {
+  updateMessage(id, {
+    content: response.text + (response.finishReason === "length" ? `\n\n${t("chat.truncated")}` : ""),
+    status: "done",
+  });
+}
+
+function hasSections(doc: PaperDocument | null): doc is PaperDocument {
+  return !!doc && doc.flatSections.some((s) => s.order >= 0);
+}
+
 export async function sendChatMessage(text: string): Promise<void> {
   const instruction = text.trim();
   if (!instruction || useChat.getState().runningId) return;
@@ -115,7 +251,7 @@ export async function sendChatMessage(text: string): Promise<void> {
 
   let anchor: ChatAnchor | undefined;
   let contextLabel = t("chat.noFile");
-  let context = {};
+  let context: AIContext = {};
   if (snapshot) {
     context = buildChatContext(
       doc,
@@ -139,8 +275,18 @@ export async function sendChatMessage(text: string): Promise<void> {
     .slice(-MAX_HISTORY_MESSAGES)
     .map((m) => ({ role: m.role, content: m.content }));
 
-  const { files, omitted } = agentFiles(snapshot?.path);
   const requestId = newRequestId();
+  const turn: Turn = {
+    id: requestId,
+    provider,
+    model,
+    instruction,
+    selectedText: snapshot && snapshot.from !== snapshot.to ? snapshot.text : undefined,
+    context,
+    history,
+    doc,
+    cursor: snapshot ? { path: snapshot.path, line: snapshot.docText.slice(0, snapshot.from).split("\n").length } : undefined,
+  };
   const userMessage: ChatMessage = { id: `${requestId}-u`, role: "user", content: instruction, status: "done", contextLabel };
   const assistantMessage: ChatMessage = {
     id: requestId,
@@ -151,42 +297,30 @@ export async function sendChatMessage(text: string): Promise<void> {
     model,
     anchor,
     instruction,
+    stage: hasSections(doc) ? "selecting" : undefined,
   };
   useChat.setState((s) => ({ messages: [...s.messages, userMessage, assistantMessage], runningId: requestId }));
 
   try {
-    const response = await aiService.generate(
-      provider,
-      {
-        id: requestId,
-        task: "chat",
-        instruction,
-        selectedText: snapshot && snapshot.from !== snapshot.to ? snapshot.text : undefined,
-        context,
-        history,
-        projectFiles: files,
-        omittedFiles: omitted,
-        model,
-        maxOutputTokens: MAX_OUTPUT_TOKENS.chat,
-      },
-      { onDelta: (_d, full) => updateMessage(requestId, { content: full }) },
-    );
-    updateMessage(requestId, {
-      content: response.text + (response.finishReason === "length" ? `\n\n${t("chat.truncated")}` : ""),
-      status: "done",
-    });
+    // Without a section structure there is nothing to choose from: the agent reads the files directly.
+    const selection = hasSections(doc) ? await selectSections(turn, doc) : null;
+    if (selection && selection.intent === "ask") await answerQuestion(turn, doc!, selection);
+    else await proposeEdits(turn);
   } catch (err) {
     const error = err instanceof AIError ? err : new AIError("unknown", String(err));
-    if (error.kind === "cancelled") updateMessage(requestId, { status: "cancelled" });
-    else updateMessage(requestId, { status: "error", content: error.message });
+    if (error.kind === "cancelled") updateMessage(requestId, { status: "cancelled", stage: undefined });
+    else updateMessage(requestId, { status: "error", stage: undefined, content: error.message });
   } finally {
+    stopped.delete(requestId);
     useChat.setState({ runningId: null });
   }
 }
 
 export function stopChat() {
   const { runningId } = useChat.getState();
-  if (runningId) void aiService.cancel(runningId);
+  if (!runningId) return;
+  stopped.add(runningId);
+  if (activeRequest) void aiService.cancel(activeRequest);
 }
 
 // ---------------------------------------------------------------- saved sessions
@@ -218,7 +352,7 @@ export async function switchChatSession(id: string): Promise<void> {
   const file = await loadSession<ChatMessage>(root, id).catch(() => null);
   if (!file || useChat.getState().root !== root) return;
   // An answer that was still streaming when the app closed is shown as stopped.
-  const messages = file.messages.map((m) => (m.status === "streaming" ? { ...m, status: "cancelled" as const } : m));
+  const messages = file.messages.map((m) => (m.status === "streaming" ? { ...m, status: "cancelled" as const, stage: undefined } : m));
   useChat.setState({ messages, sessionId: id, createdAt: file.createdAt });
 }
 
