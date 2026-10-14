@@ -13,9 +13,9 @@ import type { Language } from "./detect";
 export type { Language } from "./detect";
 export { detectLanguage } from "./detect";
 
-export const LANGUAGES: { id: Language; label: string }[] = [
-  { id: "ko", label: "한국어" },
-  { id: "en", label: "English" },
+export const LANGUAGES: { id: Language; label: string; short: string }[] = [
+  { id: "ko", label: "한국어", short: "한" },
+  { id: "en", label: "English", short: "EN" },
 ];
 
 export type Params = Record<string, string | number>;

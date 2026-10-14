@@ -75,13 +75,14 @@ function ExternalChangeBanner() {
   const meta = useProject((s) => s.openFiles.find((f) => f.path === s.activePath));
   if (!activePath || !meta?.external) return null;
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-[12px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
-      <AlertTriangle size={14} />
+    // Buttons never wrap their text, so in a narrow editor they move to the next row instead.
+    <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-[12px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
+      <AlertTriangle size={14} className="shrink-0" />
       {meta.external === "deleted" ? (
-        <span>{t("editor.deletedOnDisk")}</span>
+        <span className="min-w-0 flex-[1_1_12rem]">{t("editor.deletedOnDisk")}</span>
       ) : (
         <>
-          <span>{t("editor.changedOnDisk")}</span>
+          <span className="min-w-0 flex-[1_1_12rem]">{t("editor.changedOnDisk")}</span>
           <button className="btn h-6" onClick={() => void resolveExternalChange(activePath, "reload")}>
             {t("editor.loadDisk")}
           </button>
