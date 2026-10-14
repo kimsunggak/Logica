@@ -4,8 +4,8 @@
  *   👤 User → Intent Module → Answer Agent → 💬 Answer
  *
  * The Intent Module works out what the user wants to know; the Answer Agent
- * answers from the whole paper with that intent. Every step is traced for
- * the debug view.
+ * answers from the whole paper with that intent. In development every step
+ * is reported to the localhost visual debugger (see `src/debug/trace.ts`).
  */
 import { create } from "zustand";
 import { buildChatContext } from "../ai/context/contextBuilder";
@@ -16,7 +16,8 @@ import { aiService, newRequestId } from "../ai/service";
 import { lineOf, locateEdit, type ProposedEdit } from "../ai/agent/edits";
 import { parseIntent } from "../ai/agent/intent";
 import { deleteSession, listSessions, loadSession, newSessionId, saveSession, SESSION_VERSION, type SessionSummary } from "./chatHistory";
-import { emptyTrace, promptText, type PipelineTrace, type StepId, type StepTrace, type TraceField } from "./pipeline";
+import { buildPrompt } from "../ai/prompts";
+import { failSpan, spanData, startSpan, endSpan, step, traced, type Span } from "../debug/trace";
 import type { AIContext, AIMessage, AIRequest, AIResponse, ProjectFile, ProviderId, QuestionIntent } from "../ai/types";
 import { editorSession } from "../editor/editorSession";
 import { outlineText, sectionAt, sectionTrail } from "../latex/parser/documentModel";
@@ -66,10 +67,6 @@ interface ChatState {
   createdAt: number;
   /** Saved conversations of this project, most recent first. */
   sessions: SessionSummary[];
-  /** Pipeline traces of recent answers, by message id (kept in memory only). */
-  traces: Record<string, PipelineTrace>;
-  /** Whether the pipeline debug view is shown. */
-  debug: boolean;
 }
 
 export const useChat = create<ChatState>()(() => ({
@@ -80,8 +77,6 @@ export const useChat = create<ChatState>()(() => ({
   sessionId: newSessionId(),
   createdAt: Date.now(),
   sessions: [],
-  traces: {},
-  debug: false,
 }));
 
 const MAX_HISTORY_MESSAGES = 12;
@@ -89,8 +84,6 @@ const MAX_HISTORY_MESSAGES = 12;
 const INTENT_HISTORY_MESSAGES = 4;
 /** Characters of paper source sent to the Answer Agent (roughly 40k tokens). */
 const PAPER_BUDGET = 150_000;
-/** Traces kept for the debug view. */
-const MAX_TRACES = 20;
 
 /**
  * The whole paper for the Answer Agent: the main file and the files it
@@ -138,17 +131,6 @@ function updateMessage(id: string, patch: Partial<ChatMessage>) {
   useChat.setState((s) => ({ messages: s.messages.map((m) => (m.id === id ? { ...m, ...patch } : m)) }));
 }
 
-function setStep(id: string, step: StepId, patch: Partial<StepTrace>) {
-  useChat.setState((s) => {
-    const trace = s.traces[id];
-    return trace ? { traces: { ...s.traces, [id]: { ...trace, [step]: { ...trace[step], ...patch } } } } : {};
-  });
-}
-
-export function setChatDebug(debug: boolean) {
-  useChat.setState({ debug });
-}
-
 /** Provider request currently running for the chat. */
 let activeRequest: string | null = null;
 /** Answers the author stopped, so the next step is not started. */
@@ -165,10 +147,40 @@ interface Turn {
   activePath?: string;
 }
 
-async function run(turn: Turn, request: AIRequest, onText?: (text: string) => void): Promise<AIResponse> {
+/** The exact system prompt and messages a provider receives, for the debugger. */
+function promptText(request: AIRequest): string {
+  const payload = buildPrompt(request);
+  return [`[system]\n${payload.system}`, ...payload.messages.map((m) => `[${m.role}]\n${m.content}`)].join("\n\n");
+}
+
+/** One model call through the AI service (the Rust transport reports its own span under it). */
+async function run(turn: Turn, parent: Span, request: AIRequest, onText?: (text: string) => void): Promise<AIResponse> {
   activeRequest = request.id;
+  const span = startSpan(
+    turn.id,
+    parent,
+    "llm",
+    "aiService.generate",
+    () => ({ provider: turn.provider, model: turn.model, task: request.task, request_id: request.id, prompt_chars: promptText(request).length }),
+    request.id,
+  );
+  let first = true;
+  const started = performance.now();
   try {
-    return await aiService.generate(turn.provider, request, onText ? { onDelta: (_d, full) => onText(full) } : undefined);
+    const response = await aiService.generate(turn.provider, request, {
+      onDelta: (_d, full) => {
+        if (first) {
+          first = false;
+          spanData(span, "llm", "first_text", () => ({ ms: Math.round(performance.now() - started) }));
+        }
+        onText?.(full);
+      },
+    });
+    endSpan(span, "llm", () => ({ text: response.text, finishReason: response.finishReason, usage: response.usage }));
+    return response;
+  } catch (err) {
+    failSpan(span, "llm", err);
+    throw err;
   } finally {
     activeRequest = null;
     if (stopped.has(turn.id)) throw new AIError("cancelled", t("chat.stopped"), { provider: turn.provider });
@@ -179,82 +191,93 @@ function base(turn: Turn): Pick<AIRequest, "instruction" | "selectedText" | "mod
   return { instruction: turn.instruction, selectedText: turn.selectedText, model: turn.model };
 }
 
-function intentFields(intent: QuestionIntent): TraceField[] {
-  return [
-    { label: "debug.intentType", value: t(`intent.${intent.type}`) },
-    { label: "debug.intentText", value: intent.text },
-  ];
+/** What the user is looking at, as handed from the user input to the Intent Module. */
+function editorLocation(turn: Turn) {
+  return {
+    file: turn.context.currentFile ?? null,
+    section: turn.context.currentSection ?? null,
+    selected_text: turn.selectedText ?? null,
+    cursor_paragraph: turn.selectedText ? null : (turn.context.currentParagraph ?? null),
+  };
 }
 
 /** Step 1: work out what the user wants to know. */
-async function runIntentModule(turn: Turn, received: TraceField[]): Promise<QuestionIntent> {
-  const request: AIRequest = {
-    ...base(turn),
-    id: `${turn.id}-intent`,
-    task: "intent",
-    context: {
-      paperTitle: turn.context.paperTitle,
-      outline: turn.context.outline,
-      currentFile: turn.context.currentFile,
-      currentSection: turn.context.currentSection,
-      currentParagraph: turn.context.currentParagraph,
+function runIntentModule(turn: Turn, root: Span): Promise<QuestionIntent> {
+  const history = turn.history.slice(-INTENT_HISTORY_MESSAGES);
+  return traced(
+    turn.id,
+    root,
+    "intent",
+    "runIntentModule",
+    () => ({ question: turn.instruction, ...editorLocation(turn), history_pairs: history.length / 2 }),
+    async (span) => {
+      const request: AIRequest = {
+        ...base(turn),
+        id: `${turn.id}-intent`,
+        task: "intent",
+        context: {
+          paperTitle: turn.context.paperTitle,
+          outline: turn.context.outline,
+          currentFile: turn.context.currentFile,
+          currentSection: turn.context.currentSection,
+          currentParagraph: turn.context.currentParagraph,
+        },
+        history,
+        maxOutputTokens: MAX_OUTPUT_TOKENS.intent,
+      };
+      step(turn.id, span, "intent", "buildIntentPrompt", () => ({ task: "intent", history_pairs: history.length / 2 }), () => promptText(request));
+      const response = await run(turn, span, request);
+      const intent = parseIntent(response.text, turn.instruction);
+      step(turn.id, span, "intent", "parseIntent", response.text, intent);
+      return intent;
     },
-    history: turn.history.slice(-INTENT_HISTORY_MESSAGES),
-    maxOutputTokens: MAX_OUTPUT_TOKENS.intent,
-  };
-  const started = Date.now();
-  setStep(turn.id, "intent", { status: "running", input: [...received, { label: "debug.prompt", value: promptText(request) }] });
-  const response = await run(turn, request);
-  const intent = parseIntent(response.text, turn.instruction);
-  setStep(turn.id, "intent", {
-    status: "done",
-    ms: Date.now() - started,
-    output: [{ label: "debug.reply", value: response.text }, ...intentFields(intent)],
-    next: [{ label: "debug.question", value: turn.instruction }, ...intentFields(intent)],
-  });
-  return intent;
+  );
 }
 
 /** Step 2: answer from the whole paper with the intent. */
-async function runAnswerAgent(turn: Turn, intent: QuestionIntent): Promise<AIResponse> {
-  const { files, omitted } = paperFiles(turn.activePath);
-  const request: AIRequest = {
-    ...base(turn),
-    id: turn.id,
-    task: "answer",
-    context: {
-      currentFile: turn.context.currentFile,
-      currentSection: turn.context.currentSection,
-      currentParagraph: turn.context.currentParagraph,
+function runAnswerAgent(turn: Turn, root: Span, intent: QuestionIntent): Promise<AIResponse> {
+  return traced(
+    turn.id,
+    root,
+    "agent",
+    "runAnswerAgent",
+    () => ({ question: turn.instruction, intent, history_pairs: turn.history.length / 2 }),
+    async (span) => {
+      const { files, omitted } = paperFiles(turn.activePath);
+      step(
+        turn.id,
+        span,
+        "agent",
+        "paperFiles",
+        { budget_chars: PAPER_BUDGET, active_file: turn.activePath ?? null },
+        () => ({
+          files: files.map((f) => ({ path: f.path, chars: f.text.length })),
+          omitted,
+          total_chars: files.reduce((n, f) => n + f.text.length, 0),
+          text: files.map((f) => `% ---- ${f.path}\n${f.text}`).join("\n"),
+        }),
+      );
+      const request: AIRequest = {
+        ...base(turn),
+        id: turn.id,
+        task: "answer",
+        context: {
+          currentFile: turn.context.currentFile,
+          currentSection: turn.context.currentSection,
+          currentParagraph: turn.context.currentParagraph,
+        },
+        history: turn.history,
+        projectFiles: files,
+        omittedFiles: omitted,
+        intent,
+        maxOutputTokens: MAX_OUTPUT_TOKENS.answer,
+      };
+      step(turn.id, span, "agent", "buildAnswerPrompt", () => ({ task: "answer", intent, files: files.length }), () => promptText(request));
+      updateMessage(turn.id, { stage: "agent", intent });
+      return run(turn, span, request, (full) => updateMessage(turn.id, { content: full }));
     },
-    history: turn.history,
-    projectFiles: files,
-    omittedFiles: omitted,
-    intent,
-    maxOutputTokens: MAX_OUTPUT_TOKENS.answer,
-  };
-  const paper = files.map((f) => `${f.path}  ${t("debug.chars", { count: f.text.length.toLocaleString() })}`);
-  if (omitted.length) paper.push(`${t("debug.omitted")}: ${omitted.join(", ")}`);
-  const started = Date.now();
-  updateMessage(turn.id, { stage: "agent", intent });
-  setStep(turn.id, "agent", {
-    status: "running",
-    input: [
-      { label: "debug.question", value: turn.instruction },
-      ...intentFields(intent),
-      { label: "debug.paper", value: paper.join("\n") || t("debug.noPaper") },
-      { label: "debug.history", value: t("debug.turns", { count: turn.history.length / 2 }) },
-      { label: "debug.prompt", value: promptText(request) },
-    ],
-  });
-  const response = await run(turn, request, (full) => updateMessage(turn.id, { content: full }));
-  setStep(turn.id, "agent", {
-    status: "done",
-    ms: Date.now() - started,
-    output: [{ label: "debug.reply", value: response.text }],
-    next: [{ label: "debug.answer", value: response.text }],
-  });
-  return response;
+    (response) => ({ text: response.text, finishReason: response.finishReason }),
+  );
 }
 
 export async function sendChatMessage(text: string): Promise<void> {
@@ -299,25 +322,6 @@ export async function sendChatMessage(text: string): Promise<void> {
     activePath: snapshot?.path,
   };
 
-  const trace = emptyTrace();
-  const where = snapshot ? contextLabel : t("chat.noFile");
-  const around = turn.selectedText
-    ? { label: "debug.selection" as const, value: turn.selectedText }
-    : context.currentParagraph
-      ? { label: "debug.paragraph" as const, value: context.currentParagraph }
-      : null;
-  trace.user = {
-    status: "done",
-    input: [{ label: "debug.question", value: instruction }],
-    output: [{ label: "debug.location", value: where }, ...(around ? [around] : [])],
-    next: [
-      { label: "debug.question", value: instruction },
-      { label: "debug.location", value: where },
-      ...(around ? [around] : []),
-      { label: "debug.history", value: t("debug.turns", { count: Math.min(turn.history.length, INTENT_HISTORY_MESSAGES) / 2 }) },
-    ],
-  };
-
   const userMessage: ChatMessage = { id: `${requestId}-u`, role: "user", content: instruction, status: "done", contextLabel };
   const assistantMessage: ChatMessage = {
     id: requestId,
@@ -330,38 +334,27 @@ export async function sendChatMessage(text: string): Promise<void> {
     instruction,
     stage: "intent",
   };
-  useChat.setState((s) => {
-    const kept = Object.entries(s.traces).slice(-(MAX_TRACES - 1));
-    return {
-      messages: [...s.messages, userMessage, assistantMessage],
-      runningId: requestId,
-      traces: { ...Object.fromEntries(kept), [requestId]: trace },
-    };
-  });
+  useChat.setState((s) => ({ messages: [...s.messages, userMessage, assistantMessage], runningId: requestId }));
 
-  let step: StepId = "intent";
+  // One trace per question; its id is the answer's message id.
+  const root = startSpan(requestId, null, "pipeline", "sendChatMessage", () => ({ question: instruction, provider, model }));
+  step(requestId, root, "user", "receiveUserInput", instruction, () => ({ question: instruction, ...editorLocation(turn), history_pairs: turn.history.length / 2 }));
   try {
-    const intent = await runIntentModule(turn, trace.user.next);
-    step = "agent";
-    const response = await runAnswerAgent(turn, intent);
-    step = "answer";
+    const intent = await runIntentModule(turn, root);
+    const response = await runAnswerAgent(turn, root, intent);
     const content = response.text + (response.finishReason === "length" ? `\n\n${t("chat.truncated")}` : "");
     updateMessage(requestId, { content, status: "done", stage: undefined });
-    setStep(requestId, "answer", {
-      status: "done",
-      input: [{ label: "debug.answer", value: content }],
-      output: [
-        { label: "debug.finish", value: response.finishReason },
-        ...(response.usage?.inputTokens !== undefined
-          ? [{ label: "debug.tokens" as const, value: `${response.usage.inputTokens} in, ${response.usage.outputTokens ?? "?"} out` }]
-          : []),
-      ],
-    });
+    step(requestId, root, "answer", "showFinalAnswer", content, () => ({
+      finishReason: response.finishReason,
+      usage: response.usage,
+      edit_blocks: splitBlocks(content).filter((b) => b.kind === "code" && b.lang === "edit").length,
+    }));
+    endSpan(root, "pipeline", { status: "done" });
   } catch (err) {
     const error = err instanceof AIError ? err : new AIError("unknown", String(err));
     if (error.kind === "cancelled") updateMessage(requestId, { status: "cancelled", stage: undefined });
     else updateMessage(requestId, { status: "error", stage: undefined, content: error.message });
-    setStep(requestId, step, { status: "error", output: [{ label: "debug.error", value: error.message }] });
+    failSpan(root, "pipeline", error);
   } finally {
     stopped.delete(requestId);
     useChat.setState({ runningId: null });

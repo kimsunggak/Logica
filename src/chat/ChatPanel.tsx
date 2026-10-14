@@ -1,4 +1,4 @@
-import { Bug, Check, CheckCheck, FileText, GitCompare, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
+import { Check, CheckCheck, FileText, GitCompare, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
@@ -13,7 +13,6 @@ import { useProject } from "../project/projectStore";
 import { useT, type MessageKey } from "../i18n";
 import { useSettings } from "../settings/settingsStore";
 import { CollapseButton } from "../components/panes";
-import { PipelineDebug } from "./PipelineDebug";
 import {
   applyAllChatEdits,
   applyChatEdit,
@@ -24,7 +23,6 @@ import {
   rejectAllChatEdits,
   rejectChatEdit,
   sendChatMessage,
-  setChatDebug,
   setChatProvider,
   splitBlocks,
   stopChat,
@@ -287,7 +285,6 @@ export function ChatPanel() {
   const messages = useChat((s) => s.messages);
   const running = useChat((s) => s.runningId !== null);
   const providerOverride = useChat((s) => s.provider);
-  const debug = useChat((s) => s.debug);
   const defaultProvider = useSettings((s) => s.ai.defaultProvider);
   const models = useSettings((s) => s.ai.models);
   const provider = providerOverride ?? defaultProvider;
@@ -318,15 +315,6 @@ export function ChatPanel() {
           {models[provider]}
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-0.5">
-          <button
-            className={`icon-btn ${debug ? "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100" : ""}`}
-            title={t("chat.debug")}
-            aria-pressed={debug}
-            onClick={() => setChatDebug(!debug)}
-            data-testid="chat-debug"
-          >
-            <Bug size={13} />
-          </button>
           <SessionHistory />
           <button className="icon-btn" title={t("chat.new")} onClick={newChatSession} data-testid="chat-new">
             <MessageSquarePlus size={13} />
@@ -334,7 +322,6 @@ export function ChatPanel() {
           <CollapseButton pane="chat" />
         </div>
       </div>
-      {debug && <PipelineDebug />}
       <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
         {messages.length === 0 && (
           <div className="space-y-2 text-[12.5px] text-slate-500">

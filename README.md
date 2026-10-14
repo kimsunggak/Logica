@@ -210,6 +210,14 @@ cd src-tauri && cargo test -- --ignored   # 실제 Anthropic API에 잘못된 ke
 # Sign in with ChatGPT 전체 흐름(PKCE, callback, token 교환, refresh 회전)은 cargo test에서 로컬 mock OAuth 서버로 검증합니다.
 ```
 
+### 런타임 디버거 (개발용)
+
+`npm run tauri dev`로 앱을 띄우면 터미널에 `LOGICA debug visualizer: http://127.0.0.1:1430`이 함께 출력됩니다. 이 주소를 브라우저에서 열면 앱에서 보낸 채팅 질문이 User Input, Intent Module, Answer Agent, Final Answer를 거치는 과정을 실시간으로 볼 수 있습니다. 실행 중인 단계 강조, 함수 호출 순서(caller와 callee), 단계별 입력과 출력, 모델에 보낸 프롬프트와 응답, Rust의 AI 요청 처리까지 질문 하나를 trace 하나로 묶어 보여 주며, 같은 이벤트가 터미널에도 한 줄씩 찍힙니다.
+
+- 이벤트는 웹뷰(`src/debug/trace.ts`)와 Rust(`src-tauri/src/ai.rs`)의 실제 실행에서 만들어지고, `src-tauri/src/debug_trace.rs`가 Server-Sent Events로 페이지에 보냅니다.
+- 키, 토큰, `Bearer` 값은 이벤트를 만드는 단계와 backend에서 두 번 가립니다. 서버는 `127.0.0.1`에만 열리고 다른 Host 이름의 요청은 거부합니다.
+- 디버그 빌드에서만 동작합니다. 배포 빌드는 서버를 열지 않고 이벤트도 보내지 않습니다. 포트는 `LOGICA_DEBUG_PORT`로 바꿀 수 있습니다.
+
 ## 알려진 제한
 
 - PDF와 소스 사이 SyncTeX 양방향 이동은 아직 없습니다.

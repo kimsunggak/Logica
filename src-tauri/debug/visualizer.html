@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOGICA Runtime Debugger</title>
+<style>
+/* Layout: 왼쪽 실행 목록, 가운데 실행 그래프와 타임라인, 오른쪽 데이터 인스펙터 */
+:root {
+  --bg: #f4f6f9; --panel: #ffffff; --ink: #18202e; --ink-2: #5a6578; --line: #d8dee8; --soft: #eef1f6;
+  --run: #1f6feb; --run-soft: #e3edff; --ok: #1a7f4b; --ok-soft: #e1f4ea; --err: #c4302b; --err-soft: #fde7e6;
+  --wait: #9aa4b5; --llm: #8250df; --llm-soft: #f1eafe;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "D2Coding", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1218; --panel: #151b24; --ink: #e5e9f0; --ink-2: #9aa5b8; --line: #2a3342; --soft: #1c2430;
+    --run: #5b9dff; --run-soft: #17284a; --ok: #49c483; --ok-soft: #14301f; --err: #ff7b72; --err-soft: #3a1918;
+    --wait: #5e6a7d; --llm: #b48cff; --llm-soft: #271d3d;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 13px/1.5 var(--sans); display: flex; flex-direction: column; }
+button { font: inherit; color: inherit; }
+header { display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+header h1 { font-size: 15px; margin: 0; letter-spacing: .01em; }
+header .sub { color: var(--ink-2); font-size: 12px; }
+.pill { font: 11px/1 var(--mono); padding: 4px 8px; border-radius: 999px; border: 1px solid var(--line); }
+.pill.on { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+.pill.off { color: var(--err); border-color: var(--err); background: var(--err-soft); }
+.spacer { flex: 1; }
+.ctl { display: flex; gap: 8px; align-items: center; }
+.ctl label { display: flex; gap: 6px; align-items: center; color: var(--ink-2); cursor: pointer; }
+.btn { border: 1px solid var(--line); background: var(--soft); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+.btn:hover { border-color: var(--ink-2); }
+:focus-visible { outline: 2px solid var(--run); outline-offset: 2px; }
+
+.app { flex: 1; min-height: 0; display: grid; grid-template-columns: 250px minmax(0, 1fr) 420px; }
+@media (max-width: 1100px) { .app { grid-template-columns: 210px minmax(0, 1fr); } .inspector { grid-column: 1 / -1; border-left: none; border-top: 1px solid var(--line); } }
+.col { min-height: 0; overflow: auto; }
+.traces { border-right: 1px solid var(--line); background: var(--panel); }
+.inspector { border-left: 1px solid var(--line); background: var(--panel); }
+.section-title { font: 600 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); padding: 12px 14px 8px; }
+
+.trace { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: transparent; padding: 9px 14px; cursor: pointer; }
+.trace:hover { background: var(--soft); }
+.trace.sel { background: var(--run-soft); box-shadow: inset 3px 0 0 var(--run); }
+.trace .q { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.trace .m { display: flex; gap: 8px; color: var(--ink-2); font: 11px var(--mono); margin-top: 2px; }
+.empty { color: var(--ink-2); padding: 14px; }
+
+.center { display: flex; flex-direction: column; min-height: 0; }
+.graph-wrap { padding: 4px 12px 0; }
+#graph { width: 100%; max-width: 760px; height: auto; display: block; margin: 0 auto; }
+svg text { font-family: var(--sans); fill: var(--ink); }
+.node rect { fill: var(--panel); stroke: var(--wait); stroke-width: 1.5; }
+.node.waiting rect { stroke-dasharray: 4 3; }
+.node.running rect { stroke: var(--run); stroke-width: 2.5; fill: var(--run-soft); }
+.node.completed rect { stroke: var(--ok); stroke-width: 2; }
+.node.error rect { stroke: var(--err); stroke-width: 2.5; fill: var(--err-soft); }
+.node.llm rect { stroke: var(--llm); }
+.node.llm.running rect { fill: var(--llm-soft); stroke: var(--llm); }
+.node.sel rect { stroke-width: 3.5; }
+.node { cursor: pointer; }
+.node .title { font-size: 14px; font-weight: 600; }
+.node .meta { font: 11px var(--mono); fill: var(--ink-2); }
+.node .fn { font: 11px var(--mono); fill: var(--ink-2); }
+.node .fn.running { fill: var(--run); } .node .fn.error { fill: var(--err); } .node .fn.completed { fill: var(--ok); }
+.node.running rect { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { stroke-opacity: .35; } }
+.edge { fill: none; stroke: var(--wait); stroke-width: 1.6; }
+.edge.done { stroke: var(--ok); }
+.edge.active { stroke: var(--run); stroke-width: 2.2; stroke-dasharray: 6 5; animation: flow .7s linear infinite; }
+.edge.call { stroke-dasharray: 3 4; }
+.edge.call.active { stroke: var(--llm); stroke-dasharray: 6 5; }
+@keyframes flow { to { stroke-dashoffset: -11; } }
+@media (prefers-reduced-motion: reduce) { .node.running rect, .edge.active { animation: none; } }
+.elabel { font: 10.5px var(--mono); fill: var(--ink-2); }
+.ah { fill: var(--wait); } .ah.done { fill: var(--ok); } .ah.active { fill: var(--run); }
+
+.timeline { flex: 1; min-height: 160px; border-top: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; }
+.tabs { display: flex; gap: 4px; padding: 8px 12px 0; }
+.tab { border: 1px solid var(--line); border-bottom: none; background: var(--soft); border-radius: 6px 6px 0 0; padding: 4px 10px; cursor: pointer; color: var(--ink-2); }
+.tab.on { background: var(--panel); color: var(--ink); font-weight: 600; }
+.tl-body { flex: 1; min-height: 0; overflow: auto; border-top: 1px solid var(--line); }
+.row { display: grid; grid-template-columns: 96px 70px minmax(160px, 260px) minmax(0, 1fr); gap: 8px; align-items: center; padding: 3px 12px; font: 11.5px var(--mono); cursor: pointer; border-bottom: 1px solid var(--soft); }
+.row:hover { background: var(--soft); }
+.row.sel { background: var(--run-soft); }
+.row .fnname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar-track { position: relative; height: 12px; }
+.bar { position: absolute; top: 1px; height: 10px; border-radius: 3px; min-width: 3px; background: var(--ok); }
+.bar.running { background: var(--run); } .bar.error { background: var(--err); } .bar.llm { background: var(--llm); }
+.dim { color: var(--ink-2); }
+.log { display: grid; grid-template-columns: 96px 64px 64px 60px minmax(140px, 220px) 90px minmax(0, 1fr); gap: 8px; padding: 3px 12px; font: 11.5px var(--mono); border-bottom: 1px solid var(--soft); cursor: pointer; }
+.log:hover { background: var(--soft); }
+.ev-start { color: var(--run); } .ev-end { color: var(--ok); } .ev-error { color: var(--err); } .ev-data { color: var(--llm); }
+
+.badge { font: 10.5px/1 var(--mono); padding: 2px 6px; border-radius: 4px; background: var(--soft); color: var(--ink-2); white-space: nowrap; }
+.badge.running { background: var(--run-soft); color: var(--run); } .badge.completed { background: var(--ok-soft); color: var(--ok); } .badge.error { background: var(--err-soft); color: var(--err); }
+.badge.rust { background: var(--llm-soft); color: var(--llm); }
+
+.insp-head { padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.insp-head h2 { margin: 0; font-size: 15px; }
+.span { border-bottom: 1px solid var(--line); padding: 10px 14px; }
+.span.sel { background: color-mix(in srgb, var(--run-soft) 55%, transparent); }
+.span-h { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.span-h .fnname { font: 600 12.5px var(--mono); }
+.kv { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 2px 8px; margin: 8px 0 4px; font: 11.5px var(--mono); }
+.kv dt { color: var(--ink-2); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+.blk { margin-top: 8px; }
+.blk > .lbl { font: 600 11px var(--mono); color: var(--ink-2); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 3px; }
+.blk.next > .lbl { color: var(--ok); }
+pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid var(--line); border-radius: 6px; font: 11.5px/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+.more { border: 0; background: none; color: var(--run); padding: 2px 0; cursor: pointer; font-size: 11.5px; }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; color: var(--ink-2); font-size: 11.5px; padding: 0 12px 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; border: 2px solid; }
+</style>
+</head>
+<body>
+<header>
+  <h1>LOGICA Runtime Debugger</h1>
+  <span class="sub">npm run tauri dev 로 실행 중인 앱의 채팅 파이프라인을 실시간으로 봅니다</span>
+  <span class="spacer"></span>
+  <span id="conn" class="pill off">연결 대기</span>
+  <div class="ctl">
+    <label><input type="checkbox" id="follow" checked> 최신 실행 따라가기</label>
+    <button class="btn" id="clear" type="button">지우기</button>
+  </div>
+</header>
+<div class="app">
+  <aside class="col traces">
+    <div class="section-title">실행 (질문 1개 = trace 1개)</div>
+    <div id="traceList"><div class="empty">앱에서 질문하면 여기에 나타납니다.</div></div>
+  </aside>
+  <main class="center">
+    <div class="section-title">Execution Graph</div>
+    <div class="graph-wrap"><svg id="graph" viewBox="0 0 720 470" role="img" aria-label="User Input, Intent Module, Answer Agent, Final Answer 순서의 실행 그래프와 LLM 호출"></svg></div>
+    <div class="legend">
+      <span><i style="border-color:var(--wait);border-style:dashed"></i>waiting</span>
+      <span><i style="border-color:var(--run);background:var(--run-soft)"></i>running</span>
+      <span><i style="border-color:var(--ok)"></i>completed</span>
+      <span><i style="border-color:var(--err);background:var(--err-soft)"></i>error</span>
+      <span><i style="border-color:var(--llm)"></i>LLM 호출 (webview + Rust)</span>
+    </div>
+    <section class="timeline">
+      <div class="tabs">
+        <button class="tab on" data-tab="calls" type="button">함수 호출 순서</button>
+        <button class="tab" data-tab="log" type="button">이벤트 로그</button>
+      </div>
+      <div class="tl-body" id="timeline"></div>
+    </section>
+  </main>
+  <aside class="col inspector" id="inspector"></aside>
+</div>
+<script>
+"use strict";
+const MODULES = {
+  user:   { title: "👤 User Input",  next: "Intent Module" },
+  intent: { title: "Intent Module",  next: "Answer Agent" },
+  agent:  { title: "Answer Agent",   next: "Final Answer" },
+  answer: { title: "💬 Final Answer", next: null },
+  llm:    { title: "LLM",            next: null },
+};
+// Top-level span of each module: its output is what the module hands on.
+const MAIN_FN = { user: "receiveUserInput", intent: "runIntentModule", agent: "runAnswerAgent", answer: "showFinalAnswer" };
+const PREVIEW = 1500;
+
+let traces = new Map();   // trace_id -> trace
+let seen = new Set();     // seq numbers of this connection
+let clearedAt = 0;
+let selTrace = null, selModule = "intent", selSpan = null, tab = "calls";
+const expanded = new Set();
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pad = (n, w = 2) => String(n).padStart(w, "0");
+const clock = (ms) => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`; };
+const fmtMs = (ms) => ms == null ? "" : ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${Math.round(ms)}ms`;
+
+function trace(id) {
+  let t = traces.get(id);
+  if (!t) { t = { id, spans: new Map(), order: [], events: [], start: Infinity, end: 0, question: "" }; traces.set(id, t); }
+  return t;
+}
+
+function apply(ev) {
+  if (!ev.trace_id || (ev.timestamp || 0) < clearedAt) return;
+  const t = trace(ev.trace_id);
+  t.events.push(ev);
+  t.start = Math.min(t.start, ev.timestamp);
+  t.end = Math.max(t.end, ev.timestamp);
+  let s = t.spans.get(ev.span_id);
+  if (!s) {
+    s = { id: ev.span_id, parent: null, module: ev.module, fn: ev.function, source: ev.source, status: "running", start: ev.timestamp, end: null, data: [], children: [] };
+    t.spans.set(ev.span_id, s);
+    t.order.push(ev.span_id);
+  }
+  if (ev.event_type === "span_start") {
+    Object.assign(s, { parent: ev.parent_id || null, caller: ev.caller, module: ev.module, fn: ev.function, source: ev.source, start: ev.timestamp, input: ev.input, request_id: ev.request_id });
+    if (s.parent) { const p = t.spans.get(s.parent); if (p && !p.children.includes(s.id)) p.children.push(s.id); }
+    if (!s.parent && ev.input && ev.input.question) t.question = ev.input.question;
+  } else if (ev.event_type === "span_data") {
+    s.data.push({ label: ev.data && ev.data.label, value: ev.data && ev.data.value, ts: ev.timestamp });
+  } else if (ev.event_type === "span_end" || ev.event_type === "span_error") {
+    s.status = ev.status || (ev.event_type === "span_end" ? "completed" : "error");
+    s.end = ev.timestamp; s.duration = ev.duration_ms; s.output = ev.output; s.error = ev.error;
+  }
+  if (followLatest() && !s.parent && ev.event_type === "span_start") { selTrace = ev.trace_id; selSpan = null; selModule = "intent"; }
+  if (!selTrace) selTrace = ev.trace_id;
+}
+
+const followLatest = () => $("follow").checked;
+
+function rootOf(t) { return t.order.map((id) => t.spans.get(id)).find((s) => !s.parent); }
+function spansOf(t, module) { return t.order.map((id) => t.spans.get(id)).filter((s) => s.module === module); }
+function depth(t, s) { let d = 0, p = s.parent; while (p && t.spans.get(p)) { d++; p = t.spans.get(p).parent; } return d; }
+function moduleStatus(t, module) {
+  const list = spansOf(t, module);
+  if (!list.length) return "waiting";
+  if (list.some((s) => s.status === "error")) return "error";
+  if (list.some((s) => s.status === "running")) return "running";
+  return "completed";
+}
+function moduleDuration(t, module) {
+  const main = spansOf(t, module).filter((s) => module === "llm" ? s.fn === "aiService.generate" : s.fn === MAIN_FN[module]);
+  if (!main.length) return null;
+  return main.reduce((n, s) => n + (s.duration != null ? s.duration : (s.end || Date.now()) - s.start), 0);
+}
+
+// ------------------------------------------------------------ render
+
+function render() {
+  renderTraces();
+  const t = traces.get(selTrace);
+  renderGraph(t);
+  renderTimeline(t);
+  renderInspector(t);
+}
+
+function renderTraces() {
+  const list = [...traces.values()].sort((a, b) => b.start - a.start);
+  if (!list.length) { $("traceList").innerHTML = '<div class="empty">앱에서 질문하면 여기에 나타납니다.</div>'; return; }
+  $("traceList").innerHTML = list.map((t) => {
+    const root = rootOf(t);
+    const status = root ? root.status : "running";
+    const dur = root && root.duration != null ? fmtMs(root.duration) : status === "running" ? "…" : "";
+    return `<button type="button" class="trace ${t.id === selTrace ? "sel" : ""}" data-trace="${esc(t.id)}">
+      <span class="q">${esc(t.question || t.id)}</span>
+      <span class="m"><span>${clock(t.start)}</span><span class="badge ${status}">${status}</span><span>${dur}</span></span></button>`;
+  }).join("");
+}
+
+function nodeSvg(t, module, x, y, w, h) {
+  const status = t ? moduleStatus(t, module) : "waiting";
+  const dur = t ? moduleDuration(t, module) : null;
+  const fns = t ? spansOf(t, module) : [];
+  const lines = fns.slice(0, 4).map((s, i) =>
+    `<text class="fn ${s.status}" x="${x + 12}" y="${y + 52 + i * 14}">${esc((s.source === "rust" ? "rust  " : "") + s.fn)}${s.duration != null ? "  " + fmtMs(s.duration) : s.status === "running" ? "  …" : ""}</text>`).join("");
+  return `<g class="node ${status} ${module === "llm" ? "llm" : ""} ${selModule === module ? "sel" : ""}" data-module="${module}" tabindex="0" role="button" aria-label="${esc(MODULES[module].title)} ${status}">
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10"></rect>
+    <text class="title" x="${x + 12}" y="${y + 22}">${esc(MODULES[module].title)}</text>
+    <text class="meta" x="${x + w - 12}" y="${y + 22}" text-anchor="end">${status}${dur != null ? "  " + fmtMs(dur) : ""}</text>
+    <line x1="${x + 12}" y1="${y + 32}" x2="${x + w - 12}" y2="${y + 32}" stroke="var(--line)"></line>
+    ${lines || `<text class="fn" x="${x + 12}" y="${y + 52}">${status === "waiting" ? "아직 실행 안 됨" : ""}</text>`}
+  </g>`;
+}
+
+function edgeClass(t, from, to) {
+  if (!t) return "";
+  const a = moduleStatus(t, from), b = moduleStatus(t, to);
+  if (b === "running") return "active";
+  if (a === "completed" && b !== "waiting") return "done";
+  return "";
+}
+
+function renderGraph(t) {
+  // Main pipeline down the left column; the LLM is a shared node on the right.
+  const X = 30, W = 330, H = 96, LX = 500, LW = 205;
+  const Y = { user: 14, intent: 130, agent: 246, answer: 362 };
+  const edge = (from, to, label) => {
+    const c = edgeClass(t, from, to);
+    const y1 = Y[from] + H, y2 = Y[to];
+    return `<path class="edge ${c}" d="M${X + W / 2} ${y1} V${y2 - 6}"></path>
+      <path class="ah ${c}" d="M${X + W / 2 - 5} ${y2 - 8} L${X + W / 2} ${y2} L${X + W / 2 + 5} ${y2 - 8} z"></path>
+      <text class="elabel" x="${X + W / 2 + 10}" y="${(y1 + y2) / 2 + 4}">${label}</text>`;
+  };
+  const llmY = 188;
+  const callEdge = (module, label) => {
+    const llmCalls = t ? spansOf(t, "llm").filter((s) => { let p = s.parent; while (p) { const ps = t.spans.get(p); if (!ps) break; if (ps.module === module) return true; p = ps.parent; } return false; }) : [];
+    const active = llmCalls.some((s) => s.status === "running");
+    const done = llmCalls.length && llmCalls.every((s) => s.status !== "running");
+    const yFrom = Y[module] + H / 2, yTo = llmY + (module === "intent" ? 30 : 70);
+    return `<path class="edge call ${active ? "active" : done ? "done" : ""}" d="M${X + W} ${yFrom} C ${X + W + 60} ${yFrom}, ${LX - 60} ${yTo}, ${LX} ${yTo}"></path>
+      <text class="elabel" x="${X + W + 14}" y="${yFrom - 8}">${label}</text>`;
+  };
+  $("graph").innerHTML = [
+    edge("user", "intent", "question + editor location"),
+    edge("intent", "agent", "question + intent"),
+    edge("agent", "answer", "LLM response"),
+    callEdge("intent", "aiService.generate"),
+    callEdge("agent", "aiService.generate"),
+    nodeSvg(t, "user", X, Y.user, W, H),
+    nodeSvg(t, "intent", X, Y.intent, W, H),
+    nodeSvg(t, "agent", X, Y.agent, W, H),
+    nodeSvg(t, "answer", X, Y.answer, W, H),
+    nodeSvg(t, "llm", LX, llmY, LW, 100),
+  ].join("");
+}
+
+function renderTimeline(t) {
+  document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+  if (!t) { $("timeline").innerHTML = '<div class="empty">선택된 실행이 없습니다.</div>'; return; }
+  const now = Date.now();
+  const span0 = t.start, total = Math.max(1, Math.max(t.end, ...[...t.spans.values()].map((s) => s.end || (s.status === "running" ? now : s.start))) - span0);
+  if (tab === "calls") {
+    $("timeline").innerHTML = t.order.map((id) => {
+      const s = t.spans.get(id);
+      const d = depth(t, s);
+      const end = s.end || (s.status === "running" ? now : s.start);
+      const left = ((s.start - span0) / total) * 100, width = Math.max(0.4, ((end - s.start) / total) * 100);
+      return `<div class="row ${selSpan === id ? "sel" : ""}" data-span="${esc(id)}" data-module="${esc(s.module)}">
+        <span class="dim">${clock(s.start)}</span>
+        <span class="badge ${s.status}">${s.status}</span>
+        <span class="fnname" style="padding-left:${d * 14}px" title="${esc(s.caller ? s.caller + " → " + s.fn : s.fn)}">${d ? "↳ " : ""}${esc(s.fn)}${s.source === "rust" ? ' <span class="badge rust">rust</span>' : ""}</span>
+        <span class="bar-track"><span class="bar ${s.status} ${s.module === "llm" && s.status === "completed" ? "llm" : ""}" style="left:${left}%;width:${width}%"></span></span>
+      </div>`;
+    }).join("");
+  } else {
+    $("timeline").innerHTML = [...t.events].sort((a, b) => a.timestamp - b.timestamp || a.seq - b.seq).map((ev) => {
+      const cls = ev.event_type === "span_start" ? "ev-start" : ev.event_type === "span_end" ? "ev-end" : ev.event_type === "span_error" ? "ev-error" : "ev-data";
+      return `<div class="log" data-span="${esc(ev.span_id)}" data-module="${esc(ev.module)}">
+        <span>${clock(ev.timestamp)}</span><span class="dim">+${ev.timestamp - span0}ms</span><span class="dim">${esc(ev.source || "")}</span>
+        <span>${esc(ev.module || "")}</span><span class="fnname">${esc(ev.function || "")}</span><span class="${cls}">${esc(ev.event_type)}</span>
+        <span class="dim">${ev.duration_ms != null ? fmtMs(ev.duration_ms) : ev.data ? esc(ev.data.label) : ev.error ? esc(ev.error) : ""}</span></div>`;
+    }).join("");
+  }
+}
+
+function valueHtml(key, value) {
+  if (value === undefined) return '<pre class="val dim">(없음)</pre>';
+  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  const long = text.length > PREVIEW && !expanded.has(key);
+  return `<pre class="val">${esc(long ? text.slice(0, PREVIEW) + "…" : text)}</pre>` +
+    (long ? `<button class="more" type="button" data-expand="${esc(key)}">전체 ${text.length.toLocaleString()}자 보기</button>` : "");
+}
+
+function renderInspector(t) {
+  const box = $("inspector");
+  if (!t) { box.innerHTML = '<div class="section-title">Data Inspector</div><div class="empty">노드를 누르면 입력, 중간값, 출력을 봅니다.</div>'; return; }
+  const status = moduleStatus(t, selModule);
+  const list = spansOf(t, selModule);
+  const head = `<div class="section-title">Data Inspector</div><div class="insp-head"><h2>${esc(MODULES[selModule].title)}</h2><span class="badge ${status}">${status}</span>
+    <span class="dim">${list.length}개 함수 호출</span></div>`;
+  if (!list.length) { box.innerHTML = head + '<div class="empty">이 단계는 아직 실행되지 않았습니다.</div>'; return; }
+  box.innerHTML = head + list.map((s) => {
+    const callees = s.children.map((c) => t.spans.get(c)).filter(Boolean).map((c) => c.fn);
+    const main = s.fn === MAIN_FN[selModule];
+    const next = main && MODULES[selModule].next;
+    const data = s.data.map((d, i) => `<div class="blk"><div class="lbl">중간값: ${esc(d.label)} <span class="dim">${clock(d.ts)}</span></div>${valueHtml(s.id + ":d" + i, d.value)}</div>`).join("");
+    return `<div class="span ${selSpan === s.id ? "sel" : ""}" id="span-${esc(s.id)}">
+      <div class="span-h"><span class="fnname">${esc(s.fn)}</span><span class="badge ${s.status}">${s.status}</span>${s.source === "rust" ? '<span class="badge rust">rust</span>' : '<span class="badge">webview</span>'}</div>
+      <dl class="kv">
+        <dt>caller</dt><dd>${esc(s.caller || (s.parent && t.spans.get(s.parent) ? t.spans.get(s.parent).fn : "(없음)"))}</dd>
+        <dt>callee</dt><dd>${esc(callees.join(", ") || "(없음)")}</dd>
+        <dt>시작</dt><dd>${clock(s.start)}</dd>
+        <dt>종료</dt><dd>${s.end ? clock(s.end) : "실행 중"}</dd>
+        <dt>실행 시간</dt><dd>${s.duration != null ? fmtMs(s.duration) : "…"}</dd>
+        ${s.request_id ? `<dt>request</dt><dd>${esc(s.request_id)}</dd>` : ""}
+      </dl>
+      <div class="blk"><div class="lbl">Input</div>${valueHtml(s.id + ":in", s.input)}</div>
+      ${data}
+      ${s.error ? `<div class="blk"><div class="lbl" style="color:var(--err)">Error</div>${valueHtml(s.id + ":err", s.error)}</div>` : ""}
+      ${s.output !== undefined || s.status === "completed" ? `<div class="blk ${next ? "next" : ""}"><div class="lbl">${next ? `Output → ${esc(next)} 로 전달` : "Output"}</div>${valueHtml(s.id + ":out", s.output)}</div>` : ""}
+    </div>`;
+  }).join("");
+  if (selSpan) document.getElementById("span-" + selSpan)?.scrollIntoView({ block: "nearest" });
+}
+
+// ------------------------------------------------------------ events
+
+let pending = false;
+function schedule() { if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; render(); }); } }
+setInterval(() => { const t = traces.get(selTrace); if (t && [...t.spans.values()].some((s) => s.status === "running")) schedule(); }, 250);
+
+document.addEventListener("click", (e) => {
+  const tr = e.target.closest("[data-trace]");
+  if (tr) { selTrace = tr.dataset.trace; selSpan = null; $("follow").checked = false; schedule(); return; }
+  const ex = e.target.closest("[data-expand]");
+  if (ex) { expanded.add(ex.dataset.expand); schedule(); return; }
+  const tb = e.target.closest("[data-tab]");
+  if (tb) { tab = tb.dataset.tab; schedule(); return; }
+  const node = e.target.closest(".node");
+  if (node) { selModule = node.dataset.module; selSpan = null; schedule(); return; }
+  const row = e.target.closest("[data-span]");
+  if (row) { selModule = row.dataset.module; selSpan = row.dataset.span; schedule(); }
+});
+document.addEventListener("keydown", (e) => {
+  const node = e.target.closest && e.target.closest(".node");
+  if (node && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); selModule = node.dataset.module; selSpan = null; schedule(); }
+});
+$("clear").addEventListener("click", () => { clearedAt = Date.now(); traces = new Map(); selTrace = null; schedule(); });
+
+function connect() {
+  const es = new EventSource("/events");
+  es.onopen = () => {
+    // The server replays its whole history on every connection.
+    traces = new Map(); seen = new Set();
+    $("conn").textContent = "연결됨"; $("conn").className = "pill on";
+    schedule();
+  };
+  es.onmessage = (m) => {
+    let ev; try { ev = JSON.parse(m.data); } catch { return; }
+    if (seen.has(ev.seq)) return;
+    seen.add(ev.seq);
+    apply(ev);
+    schedule();
+  };
+  es.onerror = () => { $("conn").textContent = "앱 연결 끊김, 재연결 중"; $("conn").className = "pill off"; };
+}
+connect();
+render();
+</script>
+</body>
+</html>
