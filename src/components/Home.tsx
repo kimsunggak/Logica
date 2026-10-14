@@ -1,5 +1,6 @@
 import { Clock, FilePlus, FolderOpen, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import logo from "../assets/logo.png";
 import { t as translateNow, useT } from "../i18n";
 import { confirmDialog, isDemoMode } from "../lib/backend";
 import { timeAgo } from "../lib/time";
@@ -96,8 +97,9 @@ export function Home() {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50 dark:bg-[#0c1117]" data-testid="home">
       <div className="mx-auto max-w-5xl px-8 py-10">
-        <h1 className="text-[22px] font-bold tracking-[0.2em]">LOGICA</h1>
-        <p className="mt-1 text-[13px] text-slate-500">{t("welcome.tagline")}</p>
+        <h1>
+          <img src={logo} alt="LOGICA" className="h-20 w-20 select-none" draggable={false} data-testid="home-logo" />
+        </h1>
 
         <div className="mt-7 grid gap-3 sm:grid-cols-2">
           <button
