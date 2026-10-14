@@ -74,7 +74,7 @@ describe("context builder + prompts", () => {
     expect(ctx.currentSectionText).toContain("Prev para.");
     const prompt = buildPrompt({
       id: "r2",
-      task: "chat",
+      task: "answer",
       instruction: "shorten",
       context: ctx,
       history: [

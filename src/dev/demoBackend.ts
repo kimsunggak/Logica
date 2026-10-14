@@ -170,7 +170,7 @@ function editBlock(path: string, original: string, revised: string): string {
   return `\`\`\`edit ${path}\n<<<<<<< ORIGINAL\n${original}\n=======\n${revised}\n>>>>>>> REVISED\n\`\`\``;
 }
 
-/** Chat agent: edit blocks for the current paragraph, or for every file on a paper-wide request. */
+/** Edit request: edit blocks for the current paragraph, or for every file on a paper-wide request. */
 function simulateAgent(userMessage: string, instruction: string, target: string | undefined): string {
   const files = [...userMessage.matchAll(/<file path="([^"]+)">\n([\s\S]*?)\n<\/file>/g)].map((m) => ({ path: m[1], text: m[2] }));
   const blocks: string[] = [];
@@ -189,31 +189,39 @@ function simulateAgent(userMessage: string, instruction: string, target: string 
   return `I tightened the wording and kept citations, labels and LaTeX commands unchanged.\n\n${blocks.join("\n\n")}`;
 }
 
-const DEMO_EDIT_WORDS = /rewrite|shorten|tighten|fix|improve|unify|make|change|remove|add|translate|수정|고쳐|줄여|바꿔|다듬|통일|추가|삭제|번역/i;
+const DEMO_INTENTS: [RegExp, string][] = [
+  [/rewrite|shorten|tighten|fix|improve|unify|make|change|remove|add|translate|수정|고쳐|줄여|바꿔|다듬|통일|추가|삭제|번역/i, "edit"],
+  [/result|experiment|table|figure|결과|실험|표|그림|성능/i, "result"],
+  [/how|method|approach|algorithm|어떻게|방법|방식|구조|알고리즘/i, "method"],
+  [/claim|prove|support|true|주장|증명|맞아|사실|근거/i, "claim"],
+  [/what is|explain|mean|개념|뜻|의미|무엇|뭐야|설명/i, "concept"],
+];
 
-/** Section selector: edit wording routes to the edit agent; questions use the cursor section or the first ones. */
-function simulateSelect(userMessage: string): string {
-  const instruction = between(userMessage, "user_message") ?? "";
-  const keys = [...(between(userMessage, "paper_map") ?? "").matchAll(/\[(s\d+)\]/g)].map((m) => m[1]);
-  const cursor = /\[(s\d+)\]/.exec(between(userMessage, "editor_context") ?? "")?.[1];
-  const sections = cursor ? [cursor] : keys.slice(0, 2);
-  const intent = DEMO_EDIT_WORDS.test(instruction) ? "edit" : "ask";
-  return JSON.stringify({ intent, sections, focus: instruction.trim() });
+/** Intent Module: pick a type from keywords and restate the question. */
+function simulateIntent(userMessage: string): string {
+  const question = between(userMessage, "user_message") ?? "";
+  const type = DEMO_INTENTS.find(([pattern]) => pattern.test(question))?.[1] ?? "other";
+  const where = between(userMessage, "current_section");
+  return JSON.stringify({ type, intent: `${where ? `${where}: ` : ""}${question.trim()}` });
 }
 
-function simulateQuestion(userMessage: string): string {
-  const titles = [...userMessage.matchAll(/<section key="[^"]*" title="([^"]*)">/g)].map((m) => m[1]);
-  if (titles.length === 0) return "The selected sections do not cover this question. Point me to the part of the paper you mean.";
-  return `Based on ${titles.join(", ")}: this is a demo answer. In the desktop app, the connected model answers from the source of these sections only.`;
+/** Answer Agent: edit blocks for an edit request, otherwise a short demo answer. */
+function simulateAnswerAgent(userMessage: string): string {
+  const question = between(userMessage, "user_message") ?? "";
+  const intent = /<intent type="([^"]*)">\n([\s\S]*?)\n<\/intent>/.exec(userMessage);
+  if (intent?.[1] === "edit") {
+    return simulateAgent(userMessage, question, between(userMessage, "selected_text") ?? between(userMessage, "cursor_paragraph"));
+  }
+  const files = [...userMessage.matchAll(/<file path="([^"]+)">/g)].map((m) => m[1]);
+  return `Demo answer for the ${intent?.[1] ?? "other"} question "${intent?.[2] ?? question}". In the desktop app, the connected model answers from the whole paper (${files.join(", ") || "no files"}).`;
 }
 
 function simulateAnswer(userMessage: string): string {
-  if (userMessage.includes("<paper_map>")) return simulateSelect(userMessage);
-  if (userMessage.includes("<selected_sections>")) return simulateQuestion(userMessage);
-  const instruction = between(userMessage, "instruction") ?? between(userMessage, "user_message") ?? "";
+  if (userMessage.includes('<intent type="')) return simulateAnswerAgent(userMessage);
+  if (userMessage.includes("<user_message>")) return simulateIntent(userMessage);
+  const instruction = between(userMessage, "instruction") ?? "";
   const selected = between(userMessage, "selected_text");
   if (userMessage.includes("<instruction>") && selected !== undefined) return demoRewrite(selected, instruction);
-  if (userMessage.includes("<project_files>")) return simulateAgent(userMessage, instruction, selected ?? between(userMessage, "current_paragraph"));
   const target = selected ?? between(userMessage, "current_paragraph");
   if (!target) return "Place the cursor in a paragraph or select text, and I will suggest an edit for it.";
   return `Here is a tighter version that keeps the citations and LaTeX commands unchanged:\n\n\`\`\`latex\n${demoRewrite(target, instruction)}\n\`\`\`\n\nReview it as a diff before applying.`;

@@ -32,22 +32,22 @@ export interface AIMessage {
 }
 
 /**
- * `select` picks the paper sections a chat question needs; `answer` answers
- * a question from those sections (no edits).
+ * Chat runs as a pipeline: `intent` works out what the user wants to know,
+ * then `answer` (the Answer Agent) answers from the whole paper.
  */
-export type AITask = "inline-edit" | "chat" | "select" | "answer";
+export type AITask = "inline-edit" | "intent" | "answer";
 
 export interface ProjectFile {
   path: string;
   text: string;
 }
 
-/** A paper section chosen for a question, with its source. */
-export interface SourceSection {
-  /** Short key from the paper map, e.g. "s3". */
-  key: string;
-  /** "3.2 Uncertainty-guided Routing" */
-  label: string;
+export type IntentType = "concept" | "method" | "result" | "claim" | "edit" | "other";
+
+/** What the user wants, as worked out by the Intent Module. */
+export interface QuestionIntent {
+  type: IntentType;
+  /** One or two sentences in the user's language. */
   text: string;
 }
 
@@ -57,18 +57,14 @@ export interface AIRequest {
   instruction: string;
   selectedText?: string;
   context: AIContext;
-  /** Earlier chat turns (chat only). */
+  /** Earlier chat turns (intent and answer). */
   history?: AIMessage[];
-  /** Source files the chat agent may edit (chat only, size-limited). */
+  /** The paper's source files (answer only, size-limited). */
   projectFiles?: ProjectFile[];
   /** Paper files left out of `projectFiles` to stay within the budget. */
   omittedFiles?: string[];
-  /** Section list with short keys (select only). */
-  paperMap?: string;
-  /** Sections chosen for the question (answer only). */
-  sources?: SourceSection[];
-  /** The question restated by the section selector (answer only). */
-  focus?: string;
+  /** Output of the Intent Module (answer only). */
+  intent?: QuestionIntent;
   model: string;
   maxOutputTokens?: number;
 }

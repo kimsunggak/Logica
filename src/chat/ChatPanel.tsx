@@ -1,4 +1,4 @@
-import { BookOpen, Check, CheckCheck, FileText, GitCompare, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
+import { Bug, Check, CheckCheck, FileText, GitCompare, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
@@ -13,6 +13,7 @@ import { useProject } from "../project/projectStore";
 import { useT, type MessageKey } from "../i18n";
 import { useSettings } from "../settings/settingsStore";
 import { CollapseButton } from "../components/panes";
+import { PipelineDebug } from "./PipelineDebug";
 import {
   applyAllChatEdits,
   applyChatEdit,
@@ -23,6 +24,7 @@ import {
   rejectAllChatEdits,
   rejectChatEdit,
   sendChatMessage,
+  setChatDebug,
   setChatProvider,
   splitBlocks,
   stopChat,
@@ -103,32 +105,18 @@ function EditCard({ messageId, index, edit, state }: { messageId: string; index:
   );
 }
 
-/** The sections a question was answered from; each opens that place in the editor. */
-function Sources({ message }: { message: ChatMessage }) {
+/** What the Intent Module understood the question as. */
+function IntentLine({ message }: { message: ChatMessage }) {
   const t = useT();
-  if (!message.sources?.length && !message.focus) return null;
+  if (!message.intent) return null;
   return (
-    <div className="space-y-1 text-[11.5px] text-slate-500" data-testid="chat-sources">
-      {message.focus && (
-        <div className="truncate" title={message.focus}>
-          {t("chat.focus")}: {message.focus}
-        </div>
-      )}
-      {!!message.sources?.length && (
-        <div className="flex flex-wrap items-center gap-1">
-          <BookOpen size={12} className="shrink-0" />
-          {message.sources.map((source) => (
-            <button
-              key={`${source.path}:${source.line}`}
-              className="max-w-full truncate rounded border border-slate-200 px-1.5 py-0.5 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
-              title={`${source.path}:${source.line}`}
-              onClick={() => void navigateTo(source.path, source.line)}
-            >
-              {source.label}
-            </button>
-          ))}
-        </div>
-      )}
+    <div className="flex items-baseline gap-1.5 text-[11.5px] text-slate-500" data-testid="chat-intent">
+      <span className="shrink-0 rounded bg-slate-100 px-1.5 py-px text-[10.5px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+        {t(`intent.${message.intent.type}`)}
+      </span>
+      <span className="min-w-0" title={t("chat.intent")}>
+        {message.intent.text}
+      </span>
     </div>
   );
 }
@@ -151,8 +139,9 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   const pending = [...edits.values()].filter(({ index }) => !message.editStates?.[index]);
   return (
     <div className="space-y-2 text-[13px] leading-relaxed">
-      {message.stage === "selecting" && <div className="text-[11.5px] text-slate-500">{t("chat.selecting")}</div>}
-      <Sources message={message} />
+      {message.stage === "intent" && <div className="text-[11.5px] text-slate-500">{t("chat.stageIntent")}</div>}
+      <IntentLine message={message} />
+      {message.stage === "agent" && !message.content && <div className="text-[11.5px] text-slate-500">{t("chat.stageAgent")}</div>}
       {edits.size > 1 && (
         <div className="flex items-center gap-1.5 text-[11.5px] text-slate-500" data-testid="agent-edits-bar">
           <span>{t("agent.edits", { count: edits.size })}</span>
@@ -298,6 +287,7 @@ export function ChatPanel() {
   const messages = useChat((s) => s.messages);
   const running = useChat((s) => s.runningId !== null);
   const providerOverride = useChat((s) => s.provider);
+  const debug = useChat((s) => s.debug);
   const defaultProvider = useSettings((s) => s.ai.defaultProvider);
   const models = useSettings((s) => s.ai.models);
   const provider = providerOverride ?? defaultProvider;
@@ -328,6 +318,15 @@ export function ChatPanel() {
           {models[provider]}
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-0.5">
+          <button
+            className={`icon-btn ${debug ? "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100" : ""}`}
+            title={t("chat.debug")}
+            aria-pressed={debug}
+            onClick={() => setChatDebug(!debug)}
+            data-testid="chat-debug"
+          >
+            <Bug size={13} />
+          </button>
           <SessionHistory />
           <button className="icon-btn" title={t("chat.new")} onClick={newChatSession} data-testid="chat-new">
             <MessageSquarePlus size={13} />
@@ -335,6 +334,7 @@ export function ChatPanel() {
           <CollapseButton pane="chat" />
         </div>
       </div>
+      {debug && <PipelineDebug />}
       <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
         {messages.length === 0 && (
           <div className="space-y-2 text-[12.5px] text-slate-500">
@@ -356,8 +356,13 @@ export function ChatPanel() {
           message.role === "user" ? (
             <div key={message.id} className="ml-6">
               {message.contextLabel && <div className="mb-0.5 truncate text-right text-[10.5px] text-slate-400">{message.contextLabel}</div>}
-              <div className="rounded-lg bg-sky-50 px-2.5 py-1.5 text-[13px] whitespace-pre-wrap text-slate-800 dark:bg-sky-950/50 dark:text-slate-100">
-                {message.content}
+              <div className="flex items-start justify-end gap-1.5">
+                <div className="min-w-0 rounded-lg bg-sky-50 px-2.5 py-1.5 text-[13px] whitespace-pre-wrap text-slate-800 dark:bg-sky-950/50 dark:text-slate-100">
+                  {message.content}
+                </div>
+                <span className="shrink-0 pt-1 text-[14px] leading-none" aria-hidden>
+                  👤
+                </span>
               </div>
             </div>
           ) : (

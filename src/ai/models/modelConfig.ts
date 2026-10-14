@@ -29,12 +29,10 @@ export const DEFAULT_MODEL_ID: Record<ProviderId, string> = {
 /** Output token budget per task. */
 export const MAX_OUTPUT_TOKENS = {
   "inline-edit": 8192,
-  // Agent answers may carry edits for several places and files.
-  chat: 16384,
-  // The reply is a short JSON object, but reasoning models spend part of this
-  // budget thinking first; a tight cap ends the stream before any answer.
-  select: 8192,
-  answer: 8192,
+  // A short JSON reply, but reasoning models spend part of the budget thinking first.
+  intent: 8192,
+  // Answers may carry edits for several places and files.
+  answer: 16384,
 } as const;
 
 /**
