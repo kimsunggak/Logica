@@ -31,7 +31,6 @@ const en = {
   "top.language": "Language",
 
   // welcome
-  "welcome.tagline": "Researcher writes. AI edits on demand.",
   "home.new": "New paper",
   "home.newHint": "Start from a one-page template",
   "home.open": "Open folder",
@@ -387,7 +386,6 @@ const ko: Record<MessageKey, string> = {
   "top.settingsTitle": "설정 ({mod},)",
   "top.language": "언어",
 
-  "welcome.tagline": "글은 연구자가 쓰고, AI는 요청할 때만 고칩니다.",
   "home.new": "새 논문",
   "home.newHint": "한 페이지짜리 기본 구조로 시작",
   "home.open": "폴더 열기",

@@ -7,6 +7,7 @@ import { isConnected, isKnown, useConnections } from "../settings/connectionStor
 import { useSettings } from "../settings/settingsStore";
 import { useWorkspace } from "../storage/workspaceStore";
 import { LANGUAGES, useT } from "../i18n";
+import type { ReactNode } from "react";
 import { ProviderSelect } from "./ProviderSelect";
 import { openSettings } from "./uiStore";
 
@@ -16,6 +17,39 @@ const MOD = isMac ? "⌘" : "Ctrl+";
 export async function chooseAndOpenProject() {
   const folder = await pickProjectFolder();
   if (folder) await openProject(folder);
+}
+
+/**
+ * A top bar button whose label gives way to the icon alone when the bar gets
+ * narrow ("early" labels go first, then "late" ones; see the topbar container
+ * rules in index.css). The label stays available as tooltip and aria-label.
+ */
+function BarButton({
+  icon,
+  label,
+  collapse,
+  title,
+  active,
+  testId,
+  ...rest
+}: {
+  icon: ReactNode;
+  label: string;
+  collapse: "early" | "late";
+  title: string;
+  active?: boolean;
+  testId?: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button className={`btn-ghost ${active ? "bg-slate-100 dark:bg-slate-800" : ""}`} title={title} aria-label={label} data-testid={testId} {...rest}>
+      {icon}
+      <span className="btn-label" data-collapse={collapse}>
+        {label}
+      </span>
+    </button>
+  );
 }
 
 /** Segmented 한국어 | English switch; the choice is saved with the settings. */
@@ -35,15 +69,17 @@ function LanguageToggle() {
           key={lang.id}
           role="radio"
           aria-checked={language === lang.id}
-          className={`h-full rounded px-2 text-[11.5px] font-medium ${
+          className={`h-full rounded px-[0.65em] text-[length:var(--ui-font)] font-medium whitespace-nowrap ${
             language === lang.id
               ? "bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900"
               : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
           }`}
           onClick={() => useSettings.getState().updateUI({ language: lang.id })}
           data-testid={`language-${lang.id}`}
+          aria-label={lang.label}
         >
-          {lang.label}
+          <span className="lang-full">{lang.label}</span>
+          <span className="lang-short">{lang.short}</span>
         </button>
       ))}
     </div>
@@ -66,9 +102,9 @@ export function TopBar() {
   const toggle = (key: "showPdf" | "showChat") => useWorkspace.getState().updateLayout({ [key]: !useWorkspace.getState().layout[key] });
 
   return (
-    <header className="flex h-10 shrink-0 items-center gap-1.5 border-b border-slate-200 bg-white px-2 dark:border-slate-800 dark:bg-[#0f141b]">
+    <header className="topbar flex h-10 shrink-0 items-center gap-1 border-b border-slate-200 bg-white px-2 dark:border-slate-800 dark:bg-[#0f141b]">
       <button
-        className="mr-2 pl-1 text-[13px] font-bold tracking-[0.18em] text-slate-800 disabled:cursor-default dark:text-slate-100"
+        className="mr-1.5 shrink-0 pl-1 text-[13px] font-bold tracking-[0.18em] text-slate-800 disabled:cursor-default dark:text-slate-100"
         onClick={() => void closeProject()}
         disabled={!root}
         title={root ? t("top.home") : undefined}
@@ -77,43 +113,62 @@ export function TopBar() {
       </button>
       {root && (
         <>
-          <button className="btn-ghost" onClick={() => void closeProject()} title={t("top.home")} data-testid="go-home">
-            <House size={14} /> {t("top.home")}
-          </button>
-          <button
-            className="btn-ghost"
-            onClick={() => void chooseAndOpenProject()}
+          <BarButton
+            icon={<House />}
+            label={t("top.home")}
+            collapse="early"
+            title={t("top.home")}
+            testId="go-home"
+            onClick={() => void closeProject()}
+          />
+          <BarButton
+            icon={<FolderOpen />}
+            label={t("top.openProject")}
+            collapse="early"
             title={t("top.openProjectTitle", { mod: MOD })}
-            data-testid="open-project"
-          >
-            <FolderOpen size={14} /> {t("top.openProject")}
-          </button>
-          <button className="btn-ghost" onClick={() => void newPaper()} title={t("top.newPaperTitle")} data-testid="new-paper">
-            <FilePlus size={14} /> {t("top.newPaper")}
-          </button>
-          <span className="max-w-[220px] truncate px-1 text-[12.5px] text-slate-500" title={root}>
+            testId="open-project"
+            onClick={() => void chooseAndOpenProject()}
+          />
+          <BarButton
+            icon={<FilePlus />}
+            label={t("top.newPaper")}
+            collapse="early"
+            title={t("top.newPaperTitle")}
+            testId="new-paper"
+            onClick={() => void newPaper()}
+          />
+          <span className="min-w-0 max-w-[220px] truncate px-1 text-[length:var(--ui-font)] text-slate-500" title={root}>
             {name}
           </span>
-          <div className="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700" />
-          <button className="btn-ghost" onClick={() => void saveAll()} disabled={!anyDirty} title={t("top.saveTitle", { mod: MOD })}>
-            <Save size={14} /> {t("top.save")}
-          </button>
-          <button
-            className="btn-ghost"
-            onClick={() => void compileProject()}
-            disabled={compileStatus === "running"}
+          <div className="mx-0.5 h-5 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
+          <BarButton
+            icon={<Save />}
+            label={t("top.save")}
+            collapse="late"
+            title={t("top.saveTitle", { mod: MOD })}
+            disabled={!anyDirty}
+            onClick={() => void saveAll()}
+          />
+          <BarButton
+            icon={compileStatus === "running" ? <Loader2 className="animate-spin" /> : <Play />}
+            label={t("top.compile")}
+            collapse="late"
             title={t("top.compileTitle", { mod: MOD })}
-            data-testid="compile"
-          >
-            {compileStatus === "running" ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-            {t("top.compile")}
-          </button>
-          <button className="btn-ghost" onClick={() => void exportPdf()} title={t("top.exportTitle")} data-testid="export-pdf">
-            <Download size={14} /> {t("top.export")}
-          </button>
+            disabled={compileStatus === "running"}
+            testId="compile"
+            onClick={() => void compileProject()}
+          />
+          <BarButton
+            icon={<Download />}
+            label={t("top.export")}
+            collapse="late"
+            title={t("top.exportTitle")}
+            testId="export-pdf"
+            onClick={() => void exportPdf()}
+          />
         </>
       )}
-      <div className="ml-auto flex items-center gap-1.5">
+      <div className="ml-auto flex min-w-0 items-center gap-1">
         <span
           className={`h-2 w-2 rounded-full ${isKnown(connection) && connected ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600"}`}
           title={t(connected ? "top.connected" : "top.notConnected", { provider: PROVIDER_LABELS[provider] })}
@@ -122,29 +177,31 @@ export function TopBar() {
           value={provider}
           onChange={(p) => useSettings.getState().updateAI({ defaultProvider: p })}
           title={t("top.defaultProvider")}
-          className="h-7"
+          className="topbar-provider h-7"
         />
         <span className="hidden max-w-[150px] truncate text-[11.5px] text-slate-400 xl:inline" title={model}>
           {model}
         </span>
         {root && (
           <>
-            <div className="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700" />
-            <button
-              className={`btn-ghost ${showPdf ? "bg-slate-100 dark:bg-slate-800" : ""}`}
-              onClick={() => toggle("showPdf")}
+            <div className="mx-0.5 h-5 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
+            <BarButton
+              icon={<FileText />}
+              label={t("top.pdf")}
+              collapse="early"
               title={t("top.pdfTitle")}
-            >
-              <FileText size={14} /> {t("top.pdf")}
-            </button>
-            <button
-              className={`btn-ghost ${showChat ? "bg-slate-100 dark:bg-slate-800" : ""}`}
-              onClick={() => toggle("showChat")}
+              active={showPdf}
+              onClick={() => toggle("showPdf")}
+            />
+            <BarButton
+              icon={<Bot />}
+              label={t("top.ai")}
+              collapse="early"
               title={t("top.aiTitle", { mod: MOD })}
-              data-testid="toggle-chat"
-            >
-              <Bot size={14} /> {t("top.ai")}
-            </button>
+              active={showChat}
+              testId="toggle-chat"
+              onClick={() => toggle("showChat")}
+            />
           </>
         )}
         <button className="btn-ghost" onClick={() => openSettings()} title={t("top.settingsTitle", { mod: MOD })} data-testid="open-settings">
