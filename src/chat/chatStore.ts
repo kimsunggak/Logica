@@ -162,7 +162,7 @@ async function selectSections(turn: Turn, doc: PaperDocument): Promise<Selection
   const cursorKey = cursor ? map.entries.find((e) => e.section.id === cursor.id)?.key : undefined;
   const cursorEntry = map.entries.find((e) => e.key === cursorKey);
   const selected = turn.selectedText && turn.selectedText.length > SELECT_TEXT_LIMIT ? `${turn.selectedText.slice(0, SELECT_TEXT_LIMIT)}…` : turn.selectedText;
-  const response = await run(turn, {
+  const request = {
     id: `${turn.id}-select`,
     task: "select",
     selectedText: selected,
@@ -173,8 +173,17 @@ async function selectSections(turn: Turn, doc: PaperDocument): Promise<Selection
     history: turn.history.slice(-SELECT_HISTORY_MESSAGES),
     paperMap: map.text,
     maxOutputTokens: MAX_OUTPUT_TOKENS.select,
-  });
-  return parseSelection(response.text, map.entries, cursorKey);
+  } satisfies Omit<AIRequest, "model" | "instruction">;
+  try {
+    const response = await run(turn, request);
+    return parseSelection(response.text, map.entries, cursorKey);
+  } catch (err) {
+    // A broken selection reply should not cost the answer: use the cursor section instead.
+    if (err instanceof AIError && (err.kind === "stream_interrupted" || err.kind === "malformed_response")) {
+      return parseSelection("", map.entries, cursorKey);
+    }
+    throw err;
+  }
 }
 
 /** Step 2 (question): answer from the selected sections only. */

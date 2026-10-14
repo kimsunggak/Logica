@@ -68,8 +68,11 @@ export class OpenAIProvider implements AIProvider {
     return error;
   }
 
-  /** Convert the shared prompt payload into a Responses API request body. */
-  buildBody(request: AIRequest): Record<string, unknown> {
+  /**
+   * Convert the shared prompt payload into a Responses API request body.
+   * ChatGPT plan usage rejects `max_output_tokens`, so it is sent only with an API key.
+   */
+  buildBody(request: AIRequest, auth: AuthMethodKind = this.authMethod()): Record<string, unknown> {
     const prompt = buildPrompt(request);
     return {
       model: request.model,
@@ -77,7 +80,7 @@ export class OpenAIProvider implements AIProvider {
       input: prompt.messages.map((m) => ({ role: m.role, content: m.content })),
       stream: true,
       store: false,
-      ...(request.maxOutputTokens ? { max_output_tokens: request.maxOutputTokens } : {}),
+      ...(request.maxOutputTokens && auth === "api_key" ? { max_output_tokens: request.maxOutputTokens } : {}),
     };
   }
 
@@ -139,7 +142,7 @@ export class OpenAIProvider implements AIProvider {
       requestId: request.id,
       provider: this.id,
       path: "/v1/responses",
-      body: this.buildBody(request),
+      body: this.buildBody(request, auth),
       auth,
       onChunk: (chunk) => parser.push(chunk).forEach(handle),
     });

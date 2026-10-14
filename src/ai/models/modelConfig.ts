@@ -31,8 +31,9 @@ export const MAX_OUTPUT_TOKENS = {
   "inline-edit": 8192,
   // Agent answers may carry edits for several places and files.
   chat: 16384,
-  // A short JSON reply naming sections.
-  select: 1024,
+  // The reply is a short JSON object, but reasoning models spend part of this
+  // budget thinking first; a tight cap ends the stream before any answer.
+  select: 8192,
   answer: 8192,
 } as const;
 

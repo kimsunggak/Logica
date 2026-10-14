@@ -21,6 +21,11 @@ describe("provider adapters", () => {
     expect(typeof body.instructions).toBe("string");
     expect((body.input as { role: string }[])[0].role).toBe("user");
   });
+  it("OpenAI leaves out the output limit with Sign in with ChatGPT", () => {
+    const body = new OpenAIProvider(() => "chatgpt").buildBody(request);
+    expect(body).toMatchObject({ stream: true, store: false });
+    expect(body).not.toHaveProperty("max_output_tokens");
+  });
   it("Claude uses the Messages API format", () => {
     const body = new AnthropicProvider().buildBody(request);
     expect(body).toMatchObject({ model: "model-x", stream: true, max_tokens: 1000 });
