@@ -7,8 +7,6 @@
  * the localhost runtime debugger in development.
  */
 import { create } from "zustand";
-import { buildChatContext } from "../ai/context/contextBuilder";
-import { paragraphContext } from "../ai/context/paragraphs";
 import { AIError } from "../ai/errors";
 import type { RunControl } from "../ai/gateway";
 import { CHAT_MODELS } from "../ai/models/modelConfig";
@@ -17,19 +15,12 @@ import { lineOf, locateEdit, type ProposedEdit } from "../ai/agent/edits";
 import { deleteSession, listSessions, loadSession, newSessionId, saveSession, SESSION_VERSION, type SessionSummary } from "./chatHistory";
 import { editorLocation, runChatTurn, turnCount, type Outcome, type Paper, type Stage, type Turn } from "./orchestrator";
 import { endSpan, failSpan, startSpan, step } from "../debug/trace";
-import type { AIContext, AIMessage, ProjectFile, ProviderId } from "../ai/types";
+import type { AIMessage, ProjectFile, ProviderId } from "../ai/types";
 import { editorSession } from "../editor/editorSession";
-import { outlineText, sectionAt, sectionTrail } from "../latex/parser/documentModel";
+import { sectionAt, sectionTrail } from "../latex/parser/documentModel";
 import { currentTexts, navigateTo, openFile } from "../project/projectActions";
 import { notify, useProject } from "../project/projectStore";
 import { t } from "../i18n";
-
-export interface ChatAnchor {
-  path: string;
-  from: number;
-  to: number;
-  text: string;
-}
 
 export interface ChatMessage {
   id: string;
@@ -39,8 +30,6 @@ export interface ChatMessage {
   /** The model that wrote the answer (the one running while it streams). */
   provider?: ProviderId;
   model?: string;
-  /** Text the conversation turn was about (selection or paragraph). */
-  anchor?: ChatAnchor;
   /** Short description of the editor context sent with the message. */
   contextLabel?: string;
   /** The user instruction an assistant message answers. */
@@ -109,8 +98,12 @@ function paperFiles(activePath: string | undefined): Paper {
   return { files, omitted, budget: PAPER_BUDGET };
 }
 
-/** Finished question and answer pairs; a question whose answer failed is left out. */
-function conversation(): AIMessage[] {
+/**
+ * The conversation sent with a new question: earlier questions with their
+ * finished answers. A question whose answer failed or was stopped is left out,
+ * and so is the question being sent.
+ */
+export function conversation(): AIMessage[] {
   const { messages } = useChat.getState();
   const out: AIMessage[] = [];
   messages.forEach((m, i) => {
@@ -131,37 +124,23 @@ let running: RunControl | null = null;
 export async function sendChatMessage(text: string): Promise<void> {
   const instruction = text.trim();
   if (!instruction || useChat.getState().runningId) return;
-  const { doc, name } = useProject.getState();
+  const { doc } = useProject.getState();
+  // Only the open file goes with the question; the selection and the cursor
+  // position often have nothing to do with what is asked.
   const snapshot = editorSession.selection();
 
-  let anchor: ChatAnchor | undefined;
   let contextLabel = t("chat.noFile");
-  let context: AIContext = {};
   if (snapshot) {
-    context = buildChatContext(
-      doc,
-      { projectName: name, filePath: snapshot.path, text: snapshot.docText, selectionFrom: snapshot.from, selectionTo: snapshot.to },
-      currentTexts(),
-    );
-    const range =
-      snapshot.from !== snapshot.to
-        ? { from: snapshot.from, to: snapshot.to }
-        : paragraphContext(snapshot.docText, snapshot.from, snapshot.to).currentRange;
-    if (range) anchor = { path: snapshot.path, ...range, text: snapshot.docText.slice(range.from, range.to) };
     const line = snapshot.docText.slice(0, snapshot.from).split("\n").length;
     const section = doc ? sectionAt(doc, snapshot.path, line) : null;
-    const where = section ? (section.order >= 0 && doc ? sectionTrail(doc, section) : section.title) : snapshot.path;
-    contextLabel = `${snapshot.path} › ${where}${snapshot.from !== snapshot.to ? ` ${t("chat.charsSelected", { count: snapshot.to - snapshot.from })}` : ""}`;
-  } else if (doc) {
-    context = { paperTitle: doc.title, outline: doc.flatSections.length ? outlineText(doc) : undefined };
+    contextLabel = section ? `${snapshot.path} › ${section.order >= 0 && doc ? sectionTrail(doc, section) : section.title}` : snapshot.path;
   }
 
   const requestId = newRequestId();
   const turn: Turn = {
     id: requestId,
     instruction,
-    selectedText: snapshot && snapshot.from !== snapshot.to ? snapshot.text : undefined,
-    context,
+    context: snapshot ? { currentFile: snapshot.path } : {},
     history: conversation(),
     activePath: snapshot?.path,
   };
@@ -175,7 +154,6 @@ export async function sendChatMessage(text: string): Promise<void> {
     status: "streaming",
     provider: first.provider,
     model: first.model,
-    anchor,
     instruction,
     stage: "judge",
   };

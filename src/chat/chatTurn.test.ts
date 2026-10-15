@@ -1,7 +1,8 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { call } from "../lib/backend";
 import { useSettings } from "../settings/settingsStore";
-import { sendChatMessage, stopChat, useChat } from "./chatStore";
+import { conversation, sendChatMessage, stopChat, useChat } from "./chatStore";
+import { turnCount } from "./orchestrator";
 
 const demo = globalThis as { __LOGICA_DEMO_FAIL_OPENAI?: boolean };
 const answer = () => useChat.getState().messages.at(-1)!;
@@ -42,7 +43,7 @@ describe("chat turn through the demo backend", () => {
 
   it("C: a question that cannot be settled is asked back", async () => {
     await sendChatMessage("이거?");
-    expect(answer()).toMatchObject({ status: "done", route: "clarify", content: "어느 부분을 말씀하시는 건가요? 문장을 선택하거나 섹션을 알려 주세요." });
+    expect(answer()).toMatchObject({ status: "done", route: "clarify", content: "어느 부분을 말씀하시는 건가요? 섹션이나 문장을 알려 주세요." });
   });
 
   it("sends earlier exchanges as conversation history", async () => {
@@ -54,6 +55,23 @@ describe("chat turn through the demo backend", () => {
       ["user", "done"],
       ["assistant", "done"],
     ]);
+  });
+
+  it("counts a turn only once its answer is finished", async () => {
+    // The first question has no earlier turns.
+    expect(turnCount(conversation())).toBe(0);
+    await sendChatMessage("고마워");
+    expect(turnCount(conversation())).toBe(1);
+    // A question whose answer failed is not a turn.
+    demo.__LOGICA_DEMO_FAIL_OPENAI = true;
+    await call("credential_delete", { provider: "anthropic" });
+    try {
+      await sendChatMessage("What does Table 2 report?");
+    } finally {
+      await call("credential_set", { provider: "anthropic", secret: "sk-ant-demo-0000" });
+    }
+    expect(answer().status).toBe("error");
+    expect(turnCount(conversation())).toBe(1);
   });
 
   it("falls back to Claude when OpenAI fails, and says so", async () => {

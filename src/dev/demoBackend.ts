@@ -170,10 +170,11 @@ function editBlock(path: string, original: string, revised: string): string {
   return `\`\`\`edit ${path}\n<<<<<<< ORIGINAL\n${original}\n=======\n${revised}\n>>>>>>> REVISED\n\`\`\``;
 }
 
-/** Edit request: edit blocks for the current paragraph, or for every file on a paper-wide request. */
-function simulateAgent(userMessage: string, instruction: string, target: string | undefined): string {
+/** Edit request: edit blocks for a sentence quoted in the request, or for every file on a paper-wide request. */
+function simulateAgent(userMessage: string, instruction: string): string {
   const files = [...userMessage.matchAll(/<file path="([^"]+)">\n([\s\S]*?)\n<\/file>/g)].map((m) => ({ path: m[1], text: m[2] }));
   const blocks: string[] = [];
+  const quoted = /["“]([^"”]{10,})["”]/.exec(instruction)?.[1];
   if (/whole|entire|across|all|전체|모든|통일/i.test(instruction)) {
     for (const file of files) {
       const line = file.text
@@ -181,11 +182,11 @@ function simulateAgent(userMessage: string, instruction: string, target: string 
         .find((l) => l.length > 40 && !/^\s*[\\%]/.test(l) && demoRewrite(l, instruction) !== l.trim());
       if (line && blocks.length < 4) blocks.push(editBlock(file.path, line.trim(), demoRewrite(line, instruction)));
     }
-  } else if (target) {
-    const path = between(userMessage, "current_file") ?? files[0]?.path ?? "main.tex";
-    blocks.push(editBlock(path, target, demoRewrite(target, instruction)));
+  } else if (quoted) {
+    const file = files.find((f) => f.text.includes(quoted));
+    if (file) blocks.push(editBlock(file.path, quoted, demoRewrite(quoted, instruction)));
   }
-  if (blocks.length === 0) return "Place the cursor in a paragraph or select text, and I will suggest an edit for it.";
+  if (blocks.length === 0) return "Say which part to change (quote the sentence or name the section), and I will suggest an edit for it.";
   return `I tightened the wording and kept citations, labels and LaTeX commands unchanged.\n\n${blocks.join("\n\n")}`;
 }
 
@@ -212,8 +213,8 @@ function simulateJudge(last: string): DemoReply {
 /** Refine Module: restate the question with the paper's title and the editor location, or ask back. */
 function simulateRefine(all: string, last: string): string {
   const question = (between(last, "user_message") ?? "").trim();
-  if (/^(이거|그거|this|that)\s*\??$/i.test(question) && !between(last, "selected_text")) {
-    return JSON.stringify({ clarify: hangul(question) ? "어느 부분을 말씀하시는 건가요? 문장을 선택하거나 섹션을 알려 주세요." : "Which part do you mean? Select the text or name the section." });
+  if (/^(이거|그거|this|that)\s*\??$/i.test(question)) {
+    return JSON.stringify({ clarify: hangul(question) ? "어느 부분을 말씀하시는 건가요? 섹션이나 문장을 알려 주세요." : "Which part do you mean? Name the section or quote the sentence." });
   }
   const title = /\\title\{([^}]*)\}/.exec(all)?.[1]?.trim() ?? "this paper";
   const section = between(last, "current_section");
@@ -227,7 +228,7 @@ function simulateRefine(all: string, last: string): string {
 function simulateAnswerModule(all: string, last: string): string {
   const question = between(last, "user_message") ?? "";
   if (EDIT_REQUEST.test(question)) {
-    return simulateAgent(all, question, between(last, "selected_text") ?? between(last, "cursor_paragraph"));
+    return simulateAgent(all, question);
   }
   const refined = between(last, "refined_question");
   const files = [...all.matchAll(/<file path="([^"]+)">/g)].map((m) => m[1]);

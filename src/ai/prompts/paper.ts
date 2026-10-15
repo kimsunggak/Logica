@@ -24,13 +24,13 @@ function formatPaper(request: AIRequest): string {
 }
 
 /**
- * What the user points at: the open file and the selected text. The cursor's
- * paragraph and section are left out, since the cursor often stays where the
- * user last typed, unrelated to the question.
+ * Where the user is: the open file. The selection and the cursor's paragraph
+ * and section are left out, since they often stay where the user last
+ * worked, unrelated to the question.
  */
 export function editorBlocks(request: AIRequest): string[] {
   const location = formatContext(request.context, ["currentFile"]);
-  return [location ? tag("editor_location", location) : "", request.selectedText ? tag("selected_text", request.selectedText) : ""];
+  return [location ? tag("editor_location", location) : ""];
 }
 
 /** System prompt, paper, conversation, then the module's last message. */

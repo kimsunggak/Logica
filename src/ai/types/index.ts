@@ -18,8 +18,6 @@ export interface AIContext {
   outline?: string;
   /** e.g. "3 Method › 3.2 Uncertainty-guided Routing" */
   currentSection?: string;
-  /** Source of the current section (chat only, size-limited). */
-  currentSectionText?: string;
   previousParagraph?: string;
   /** Paragraph around the cursor when nothing is selected. */
   currentParagraph?: string;

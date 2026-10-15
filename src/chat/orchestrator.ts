@@ -29,7 +29,7 @@ export type Stage = "judge" | "refine" | "answer";
 export interface Turn {
   id: string;
   instruction: string;
-  selectedText?: string;
+  /** The open file (`currentFile`) only. */
   context: AIContext;
   /** Earlier question and answer pairs. */
   history: AIMessage[];
@@ -88,12 +88,16 @@ export function chooseRoute(response: AIResponse): { route: Route; reason?: stri
   return { route: "reply" };
 }
 
-/** What the user points at, as handed to the orchestrator. */
+/** Where the user is, as handed to the orchestrator: the open file. */
 export function editorLocation(turn: Turn) {
-  return { file: turn.context.currentFile ?? null, selected_text: turn.selectedText ?? null };
+  return { file: turn.context.currentFile ?? null };
 }
 
-/** Earlier exchanges (one question and its answer each) in a history. */
+/**
+ * Completed exchanges in a history: one turn is a question together with its
+ * finished answer. The question being asked is not history yet, so the first
+ * message of a conversation reports 0 and the second reports 1.
+ */
 export function turnCount(history: AIMessage[]): number {
   return Math.floor(history.length / 2);
 }
@@ -125,7 +129,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
     onAttempt: hooks.onModel,
     onText,
   });
-  const ask = { instruction: turn.instruction, selectedText: turn.selectedText, context: turn.context, history: turn.history };
+  const ask = { instruction: turn.instruction, context: turn.context, history: turn.history };
   let paper: Paper | null = null;
   const readPaper = (span: Span, module: "refine" | "answer"): Paper => {
     paper ??= deps.paper();

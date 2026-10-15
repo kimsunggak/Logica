@@ -6,7 +6,6 @@
 import {
   outlineText,
   sectionAt,
-  sectionSource,
   sectionTrail,
   type PaperDocument,
 } from "../../latex/parser/documentModel";
@@ -26,7 +25,6 @@ const LIMITS = {
   abstract: 2500,
   outline: 3000,
   paragraph: 1800,
-  sectionText: 12000,
 };
 
 function clip(text: string | undefined, max: number): string | undefined {
@@ -65,30 +63,4 @@ export function buildEditContext(doc: PaperDocument | null, snap: EditorSnapshot
     previousParagraph: paragraphs.previous,
     nextParagraph: paragraphs.next,
   };
-}
-
-/** Context for a chat message: adds the project, file and section source. */
-export function buildChatContext(
-  doc: PaperDocument | null,
-  snap: EditorSnapshot,
-  files: Map<string, string>,
-): AIContext {
-  const paragraphs = paragraphContext(snap.text, snap.selectionFrom, snap.selectionTo, LIMITS.paragraph);
-  const context: AIContext = {
-    projectName: snap.projectName,
-    currentFile: snap.filePath,
-    ...paperContext(doc, snap),
-    previousParagraph: paragraphs.previous,
-    currentParagraph: snap.selectionFrom === snap.selectionTo ? paragraphs.current : undefined,
-    nextParagraph: paragraphs.next,
-  };
-  if (doc) {
-    const section = sectionAt(doc, snap.filePath, lineAt(snap.text, snap.selectionFrom));
-    if (section && section.order >= 0) {
-      const merged = new Map(files);
-      merged.set(snap.filePath, snap.text);
-      context.currentSectionText = sectionSource(doc, section, merged, LIMITS.sectionText);
-    }
-  }
-  return context;
 }

@@ -4,7 +4,7 @@ import type { ChatRequest, GatewayOptions, GatewayResult } from "../ai/gateway";
 import { CHAT_MODELS } from "../ai/models/modelConfig";
 import type { AIResponse, ChatTask, ToolCall } from "../ai/types";
 import { startSpan } from "../debug/trace";
-import { chooseRoute, runChatTurn, type Stage, type Turn } from "./orchestrator";
+import { chooseRoute, runChatTurn, turnCount, type Stage, type Turn } from "./orchestrator";
 
 const response = (text: string, toolCalls?: ToolCall[]): AIResponse => ({
   id: "r",
@@ -62,6 +62,13 @@ function run(replies: Partial<Record<ChatTask, Reply>>) {
   });
   return { result, log, stages, refined, text, reads: () => paperReads };
 }
+
+describe("turnCount", () => {
+  it("counts finished question and answer exchanges", () => {
+    expect(turnCount([])).toBe(0);
+    expect(turnCount(turn.history)).toBe(1);
+  });
+});
 
 describe("chooseRoute", () => {
   it("follows the tool the judge called", () => {

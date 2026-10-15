@@ -139,13 +139,15 @@ LOGICA는 특정 provider에 묶이지 않도록 공통 `AIProvider` 인터페�
 
 ## AI context 구성
 
-AI 호출 때 선택 텍스트만 보내지 않고, 같은 문서 모델(`PaperDocument`)에서 필요한 부분만 골라 공통 semantic context를 만듭니다. 논문 전체를 매번 보내지 않습니다.
+인라인 편집은 선택 텍스트만 보내지 않고, 같은 문서 모델(`PaperDocument`)에서 필요한 부분만 골라 공통 semantic context를 만듭니다. 채팅은 아래처럼 원고 전체를 보냅니다.
 
 - 인라인 편집: 논문 제목, abstract, outline, 현재 section 경로(예: `3 Method › 3.2 Uncertainty Estimation`), 앞 문단, 선택 텍스트, 다음 문단
 - 채팅: 한 질문에 모델을 최대 3번 부릅니다(모두 `gpt-6.1-sol`, 실패하면 `claude-sonnet-5-5`, `src/ai/models/modelConfig.ts`의 `CHAT_MODELS`).
-  1. 판단(Chat Orchestrator, reasoning low): 질문, 편집기 위치(파일, section, 선택 텍스트나 커서 문단), 최근 대화. 원고는 보내지 않습니다. 모델이 `refine_question` 또는 `answer_question` 툴을 부르거나, 잡담이면 툴 없이 바로 답합니다.
-  2. 정제(Refine Module, reasoning medium, 판단이 `refine_question`일 때만): 원고 전체(최대 150,000자), 대화, 편집기 위치, 질문. 명확한 질문 하나로 다시 쓰거나 되물을 질문을 JSON으로 돌려줍니다.
-  3. 답변(Answer Module, reasoning medium): 원고 전체, 대화, 편집기 위치, 원래 질문, 정제된 질문(있을 때).
+  1. 판단(Chat Orchestrator, reasoning low): 질문, 열린 파일 이름, 최근 대화(최대 2턴). 원고는 보내지 않습니다. 모델이 `refine_question` 또는 `answer_question` 툴을 부르거나, 잡담이면 툴 없이 바로 답합니다.
+  2. 정제(Refine Module, reasoning medium, 판단이 `refine_question`일 때만): 원고 전체(최대 150,000자), 대화(최대 6턴), 열린 파일 이름, 질문. 명확한 질문 하나로 다시 쓰거나 되물을 질문을 JSON으로 돌려줍니다.
+  3. 답변(Answer Module, reasoning medium): 원고 전체, 대화(최대 6턴), 열린 파일 이름, 원래 질문, 정제된 질문(있을 때).
+  - 편집기의 선택 텍스트, 커서 문단, 커서 section은 보내지 않습니다. 커서와 선택은 마지막으로 작업한 자리에 남아 있어 질문과 관계없는 경우가 많기 때문입니다. 특정 부분을 물으려면 질문에 section 이름이나 문장을 적습니다.
+  - 1턴은 질문 하나와 그 답이 끝난 것을 뜻합니다. 지금 보내는 질문은 아직 턴이 아니므로, 대화의 첫 질문에서 디버거의 `chat_history_turns`는 0이고 두 번째 질문에서 1입니다. 답이 실패하거나 중지된 질문은 세지 않습니다.
   - 정제와 답변 요청은 같은 system prompt, 원고, 대화로 시작하고 각자의 지시와 질문을 마지막 메시지에 둡니다. 앞부분이 같아야 provider의 prompt cache가 두 번째 호출에서 원고를 다시 계산하지 않기 때문입니다. 캐시된 토큰 수는 런타임 디버거에서 확인합니다.
 
 문단은 빈 줄로 나누며, `\section`, `\begin`/`\end`, `\label`, 주석 줄 같은 구조 줄과 `\title`, `\author`, `\date` 같은 앞부분 명령(여러 줄에 걸치면 닫는 중괄호까지), 그리고 `\begin{document}` 앞의 preamble 전체는 문단에 넣지 않습니다. 그래서 "이 문단 고쳐줘"가 section 제목이나 논문 제목을 바꾸지 않습니다.

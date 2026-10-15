@@ -1,17 +1,15 @@
-import { Check, CheckCheck, FileText, GitCompare, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
+import { Check, CheckCheck, FileText, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
 import { CHAT_MODELS } from "../ai/models/modelConfig";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
 import { DiffView } from "../editor/inlineEdit/DiffView";
-import { reviewProposal } from "../editor/inlineEdit/inlineEditStore";
 import { validateRewrite } from "../latex/validation";
 import { confirmDialog } from "../lib/backend";
 import { timeAgo } from "../lib/time";
 import { currentTexts, navigateTo } from "../project/projectActions";
 import { useProject } from "../project/projectStore";
 import { useT, type MessageKey } from "../i18n";
-import { useSettings } from "../settings/settingsStore";
 import { CollapseButton } from "../components/panes";
 import {
   applyAllChatEdits,
@@ -117,7 +115,6 @@ function RefinedLine({ message }: { message: ChatMessage }) {
 
 function AssistantMessage({ message }: { message: ChatMessage }) {
   const t = useT();
-  const defaultProvider = useSettings((s) => s.ai.defaultProvider);
   if (message.status === "error") {
     return <div className="rounded-md bg-red-50 px-2.5 py-2 text-[12.5px] text-red-800 dark:bg-red-950/50 dark:text-red-200">{message.content}</div>;
   }
@@ -183,18 +180,6 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
         ) : (
           <div key={i} className="overflow-hidden rounded-md border border-slate-200 dark:border-slate-700">
             <pre className="max-h-72 overflow-auto bg-slate-50 p-2 font-mono text-[12px] whitespace-pre-wrap dark:bg-slate-900">{block.text}</pre>
-            {message.status === "done" && message.anchor && (block.lang === "latex" || block.lang === "tex" || !block.lang) && (
-              <div className="flex items-center gap-2 border-t border-slate-200 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-800">
-                <button
-                  className="btn h-6 shrink-0 text-[11.5px] whitespace-nowrap"
-                  data-testid="chat-review"
-                  onClick={() => void reviewProposal(message.anchor!, block.text, message.instruction ?? "", message.provider ?? defaultProvider)}
-                >
-                  <GitCompare size={12} /> {t("chat.reviewDiff")}
-                </button>
-                <span className="truncate text-[11px] text-slate-400">{t("chat.replaces", { count: message.anchor.text.length })}</span>
-              </div>
-            )}
           </div>
         ),
       )}

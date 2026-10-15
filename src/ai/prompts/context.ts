@@ -13,7 +13,6 @@ const LABELS: Record<ContextKey, string> = {
   abstract: "abstract",
   outline: "paper_outline",
   currentSection: "current_section",
-  currentSectionText: "current_section_source",
   previousParagraph: "previous_paragraph",
   currentParagraph: "current_paragraph",
   nextParagraph: "next_paragraph",

@@ -201,7 +201,7 @@ export function InlineEditPanel({ container }: { container: RefObject<HTMLDivEle
       {state.phase === "review" && (
         <div className="flex min-h-0 flex-col">
           <div className="flex items-center gap-2 px-3 pt-2 text-[11.5px] text-slate-500">
-            <span>{t(state.origin === "chat" ? "inline.fromChat" : "inline.review")}</span>
+            <span>{t("inline.review")}</span>
             <div className="ml-auto flex overflow-hidden rounded border border-slate-200 dark:border-slate-700">
               {(["words", "lines"] as const).map((mode) => (
                 <button

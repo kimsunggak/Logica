@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildPaperDocument } from "../../latex/parser/documentModel";
 import { buildPrompt } from "../prompts";
-import { buildChatContext, buildEditContext } from "./contextBuilder";
+import { buildEditContext } from "./contextBuilder";
 import { paragraphContext } from "./paragraphs";
 
 const text = "First paragraph.\n\nSecond paragraph line one.\nline two.\n\n\nThird paragraph.";
@@ -115,26 +115,5 @@ describe("context builder + prompts", () => {
     expect(user.indexOf("<previous_paragraph>")).toBeLessThan(user.indexOf("<selected_text>"));
     expect(user.indexOf("<selected_text>")).toBeLessThan(user.indexOf("<next_paragraph>"));
     expect(prompt.system).toContain("\\label");
-  });
-
-  it("chat context includes file and section source", () => {
-    const ctx = buildChatContext(doc, { ...snap, selectionTo: snap.selectionFrom }, files);
-    expect(ctx.currentFile).toBe("main.tex");
-    expect(ctx.currentParagraph).toBe("Selected sentence here.");
-    expect(ctx.currentSectionText).toContain("Prev para.");
-    const prompt = buildPrompt({
-      id: "r2",
-      task: "answer",
-      instruction: "shorten",
-      context: ctx,
-      history: [
-        { role: "assistant", content: "orphan assistant turn" },
-        { role: "user", content: "hi" },
-        { role: "assistant", content: "hello" },
-      ],
-      model: "m",
-    });
-    expect(prompt.messages[0].role).toBe("user");
-    expect(prompt.messages.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
   });
 });
