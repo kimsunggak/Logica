@@ -163,9 +163,10 @@ export class MathFieldRenderer {
     software: boolean,
   ) {
     this.governor.still = software;
-    if (software) this.frozenTime = STILL_TIME;
     this.theme = options.dark ? DARK_THEME : LIGHT_THEME;
     this.reducedMotion = options.reducedMotion;
+    // Not animating from the start: every redraw (resize, theme) must show the same moment.
+    if (software || options.reducedMotion) this.frozenTime = STILL_TIME;
     this.formulas = new FormulaField(atlas, seededRandom((Math.random() * 2 ** 32) >>> 0));
     this.initGL();
     canvas.addEventListener("webglcontextlost", this.onContextLost);
