@@ -66,6 +66,24 @@ export const DIGIT_LAYERS = [
 ] as const;
 export const MAX_DIGITS = 9000;
 
+/** Direction everything drifts in (unit vector): mostly right, a little down. */
+export const FLOW_DIR = [0.94, 0.341] as const;
+/** Drift speed of digits per layer in px/s: nearer layers pass faster, which reads as depth. */
+export const DIGIT_FLOW_SPEED = [9, 15, 24] as const;
+/** Drift speed of formulas; one speed for all so they never run into each other. */
+export const FORMULA_FLOW_SPEED = 12;
+
+/**
+ * Size of each digit layer's grid. Drifting digits wrap around within it, and since the
+ * grid tiles seamlessly a digit leaving one edge comes back unseen at the other.
+ */
+export function digitFlowDomain(width: number, height: number): { x: number[]; y: number[] } {
+  return {
+    x: DIGIT_LAYERS.map((l) => (Math.ceil(width / l.cell) + 1) * l.cell),
+    y: DIGIT_LAYERS.map((l) => (Math.ceil(height / l.cell) + 1) * l.cell),
+  };
+}
+
 /**
  * Digits on a jittered grid per layer, ordered by a stable priority so that a
  * lower quality level can simply draw the first N.
@@ -83,7 +101,6 @@ export function buildDigitField(width: number, height: number, cell: { qw: numbe
         if (hash3(l, c, r) >= layer.density) continue;
         const cx = (c + 0.15 + 0.7 * hash3(l + 11, c, r)) * layer.cell;
         const cy = (r + 0.15 + 0.7 * hash3(l + 23, c, r)) * layer.cell;
-        if (cx > width + w || cy > height + h) continue;
         const seed = hash3(l + 37, c, r);
         const rate = 1 / (10 + 14 * hash3(l + 51, c, r));
         priority.push(hash3(l + 71, c, r));
@@ -198,6 +215,12 @@ interface Group {
   cycle: number;
   /** No free spot was found this cycle: stay dark until the next one. */
   hidden: boolean;
+  /** Where and when it was placed; it drifts from there. */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  born: number;
 }
 
 /**
@@ -209,7 +232,10 @@ export class FormulaField {
   readonly instances = new Float32Array(FORMULA_INSTANCES * STRIDE);
   /** Current brightness of each group, 0..1. */
   readonly life = new Float32Array(MAX_GROUPS);
-  /** Bounding box of each group: x0, y0, x1, y1 (zero when unused). */
+  /**
+   * Bounding box of each group where it has drifted to: x0, y0, x1, y1 (zero when unused).
+   * The shader places formula glyphs relative to x0, y0.
+   */
   readonly rects = new Float32Array(MAX_GROUPS * 4);
   /** Range of groups whose instance slots changed since the last `takeDirty`. */
   private dirtyFrom = Infinity;
@@ -251,10 +277,11 @@ export class FormulaField {
       const period = 14 + this.random() * 12;
       // The first screenful starts mid-cycle; groups added later start dark.
       const phase = this.started && !frozen ? startPhase(time, period) : this.random() * period;
-      this.groups[g] = { formula: -1, period, phase, cycle: Math.floor((time + phase) / period), hidden: false };
+      const cycle = Math.floor((time + phase) / period);
+      this.groups[g] = { formula: -1, period, phase, cycle, hidden: false, x: 0, y: 0, w: 0, h: 0, born: time };
       // Count it before placing so the groups added in this batch avoid each other.
       this.count = g + 1;
-      this.spawn(g);
+      this.spawn(g, time);
     }
     for (let g = target; g < this.count; g++) this.clear(g);
     this.count = target;
@@ -277,9 +304,16 @@ export class FormulaField {
           cycle = Math.floor(pos);
         }
         group.cycle = cycle;
-        this.spawn(g);
+        this.spawn(g, time);
       }
       this.life[g] = group.hidden ? 0 : lifeEnvelope(pos - cycle);
+      if (!group.hidden) {
+        const travel = FORMULA_FLOW_SPEED * (time - group.born);
+        const x = group.x + FLOW_DIR[0] * travel;
+        const y = group.y + FLOW_DIR[1] * travel;
+        this.rects.set([x, y, x + group.w, y + group.h], g * 4);
+        this.rectsChanged = true;
+      }
     }
   }
 
@@ -299,7 +333,7 @@ export class FormulaField {
     this.rectsChanged = true;
   }
 
-  private spawn(g: number): void {
+  private spawn(g: number, time: number): void {
     const group = this.groups[g];
     const formula = this.pickFormula(g);
     const layout = this.layouts[formula];
@@ -308,7 +342,9 @@ export class FormulaField {
     const size = LAYER_SIZE[layer] + this.random() * 2;
     const w = layout.width * size;
     const h = layout.height * size;
-    const spot = layout.chars.length > 0 ? this.findSpot(g, w, h) : null;
+    // Leave room for the drift over a whole cycle so it never leaves the screen while lit.
+    const travel = FORMULA_FLOW_SPEED * group.period;
+    const spot = layout.chars.length > 0 ? this.findSpot(g, w, h, FLOW_DIR[0] * travel, FLOW_DIR[1] * travel) : null;
     group.formula = formula;
     if (!spot) {
       group.hidden = true;
@@ -317,6 +353,7 @@ export class FormulaField {
     }
     group.hidden = false;
     const [x, y] = spot;
+    Object.assign(group, { x, y, w, h, born: time });
     const base = g * SLOTS_PER_GROUP;
     for (let i = 0; i < SLOTS_PER_GROUP; i++) {
       const o = (base + i) * STRIDE;
@@ -326,7 +363,7 @@ export class FormulaField {
         continue;
       }
       const { u0, v0, u1, v1 } = c.info;
-      this.instances.set([x + c.x * size, y + c.y * size, c.w * size, c.h * size, u0, v0, u1, v1, this.random(), layer, g, c.order], o);
+      this.instances.set([c.x * size, c.y * size, c.w * size, c.h * size, u0, v0, u1, v1, this.random(), layer, g, c.order], o);
     }
     this.rects.set([x, y, x + w, y + h], g * 4);
     this.markDirty(g);
@@ -355,9 +392,13 @@ export class FormulaField {
     return pick;
   }
 
-  private findSpot(g: number, w: number, h: number): [number, number] | null {
-    const freeW = this.width - w - 2 * EDGE_MARGIN;
-    const freeH = this.height - h - 2 * EDGE_MARGIN;
+  /**
+   * A free spot for a w by h formula that will drift (dx, dy) before it goes dark. The others
+   * drift at the same speed, so only where they are now matters for overlaps.
+   */
+  private findSpot(g: number, w: number, h: number, dx: number, dy: number): [number, number] | null {
+    const freeW = this.width - w - dx - 2 * EDGE_MARGIN;
+    const freeH = this.height - h - dy - 2 * EDGE_MARGIN;
     if (freeW < 0 || freeH < 0) return null;
     for (let tries = 0; tries < PLACEMENT_TRIES; tries++) {
       const x = EDGE_MARGIN + this.random() * freeW;

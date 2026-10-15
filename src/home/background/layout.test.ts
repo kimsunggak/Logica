@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { FORMULAS, formulaCharset, parseFormula } from "./formulas";
 import {
+  FLOW_DIR,
+  FORMULA_FLOW_SPEED,
   FormulaField,
   MAX_GROUPS,
   SLOTS_PER_GROUP,
@@ -148,6 +150,24 @@ describe("FormulaField", () => {
     expect(range).not.toBeNull();
     expect(range!.start).toBe(0);
     expect(field.takeDirty()).toBeNull();
+  });
+
+  it("drifts formulas along the flow and keeps them on screen while lit", () => {
+    const field = new FormulaField(glyphs, seededRandom(17));
+    field.resize(1400, 800, 0);
+    const g = Array.from({ length: field.groupCount }, (_, i) => i).find((i) => field.rects[i * 4 + 2] > 0)!;
+    const [x0, y0] = field.rects.subarray(g * 4, g * 4 + 2);
+    field.update(1);
+    expect(field.rects[g * 4] - x0).toBeCloseTo(FORMULA_FLOW_SPEED * FLOW_DIR[0], 3);
+    expect(field.rects[g * 4 + 1] - y0).toBeCloseTo(FORMULA_FLOW_SPEED * FLOW_DIR[1], 3);
+    for (let t = 1; t < 120; t += 0.25) {
+      field.update(t);
+      for (let i = 0; i < field.groupCount; i++) {
+        if (field.life[i] === 0) continue;
+        const [a, b, c, d] = field.rects.subarray(i * 4, i * 4 + 4);
+        expect(a >= 0 && b >= 0 && c <= 1400 && d <= 800, `group ${i} at t=${t}`).toBe(true);
+      }
+    }
   });
 
   it("fades formulas in after a jump in time instead of popping in", () => {

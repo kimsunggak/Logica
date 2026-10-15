@@ -1,5 +1,5 @@
 import { DIGIT_COUNT } from "./formulas";
-import { MAX_GROUPS } from "./layout";
+import { DIGIT_FLOW_SPEED, DIGIT_LAYERS, FLOW_DIR, MAX_GROUPS } from "./layout";
 import { MAX_RIPPLES, RIPPLE_LIFETIME } from "./ripples";
 
 /**
@@ -9,7 +9,8 @@ import { MAX_RIPPLES, RIPPLE_LIFETIME } from "./ripples";
  * The CPU only sends the time, the ripples and each formula's brightness.
  */
 
-const f = (n: number) => n.toFixed(1);
+const f = (n: number) => n.toFixed(3);
+const vec3 = (v: readonly number[]) => `vec3(${v.map(f).join(", ")})`;
 
 export const VERTEX_SHADER = /* glsl */ `#version 300 es
 precision highp float;
@@ -23,6 +24,9 @@ const float RIPPLE_TRAIL = 120.0;    // px, afterglow behind the front
 const float RIPPLE_DECAY = 1.4;      // s
 const float RIPPLE_LIFETIME = ${f(RIPPLE_LIFETIME)};
 const float HOVER_RADIUS = 170.0;    // px
+const vec2 FLOW_DIR = vec2(${f(FLOW_DIR[0])}, ${f(FLOW_DIR[1])});
+const vec3 FLOW_SPEED = ${vec3(DIGIT_FLOW_SPEED)};  // px per second, far to near
+const vec3 FLOW_CELL = ${vec3(DIGIT_LAYERS.map((l) => l.cell))};
 
 layout(location = 0) in vec2 a_corner;
 layout(location = 1) in vec4 a_rect;    // x, y, w, h in CSS px
@@ -31,10 +35,12 @@ layout(location = 3) in vec4 a_params;  // seed, layer, group (-1 = digit), rate
 
 uniform vec2 u_resolution;
 uniform float u_time;
-uniform float u_motion;                 // 0 = reduced motion: no scramble, no bob
+uniform float u_motion;                 // 0 = reduced motion: no scramble, no sway
 uniform vec4 u_ripples[MAX_RIPPLES];    // x, y, start time, strength
 uniform float u_groupLife[MAX_GROUPS];
-uniform vec4 u_groupRects[MAX_GROUPS];  // x0, y0, x1, y1
+uniform vec4 u_groupRects[MAX_GROUPS];  // x0, y0, x1, y1 where each formula has drifted to
+uniform vec3 u_flowX;                   // wrap-around size of each digit layer
+uniform vec3 u_flowY;
 uniform vec3 u_pointer;                 // x, y, strength
 uniform vec4 u_column;                  // x0, x1, dim, feather
 uniform vec4 u_digits;                  // u0, v0, cell du, cell dv
@@ -90,6 +96,10 @@ float swell(vec2 p, float t) {
   return smoothstep(0.1, 1.45, w);
 }
 
+float perLayer(vec3 v, float layer) {
+  return mix(mix(v.x, v.y, step(0.5, layer)), v.z, step(1.5, layer));
+}
+
 void hide() {
   gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   v_uv = vec2(0.0);
@@ -105,7 +115,17 @@ void main() {
   float seed = a_params.x;
   float layer = a_params.y;
   bool isDigit = a_params.z < -0.5;
-  vec2 center = a_rect.xy + 0.5 * size;
+  // Drift: digits flow on and wrap around their layer's grid (it tiles, so the jump at
+  // the edge is never seen); formula glyphs ride on their formula's drifting origin.
+  vec2 center;
+  if (isDigit) {
+    float cell = perLayer(FLOW_CELL, layer);
+    vec2 domain = vec2(perLayer(u_flowX, layer), perLayer(u_flowY, layer));
+    vec2 home = a_rect.xy + 0.5 * size + FLOW_DIR * perLayer(FLOW_SPEED, layer) * t;
+    center = mod(home + cell, domain) - cell;
+  } else {
+    center = u_groupRects[int(a_params.z + 0.5)].xy + a_rect.xy + 0.5 * size;
+  }
 
   // Own life: digits fade in and out on their own cycle, formulas follow the CPU's cycle
   // and reveal left to right.
@@ -120,7 +140,7 @@ void main() {
     float groupLife = u_groupLife[int(a_params.z + 0.5)];
     life = clamp(groupLife * 1.6 - a_params.w * 0.6, 0.0, 1.0);
   }
-  float layerAlpha = mix(mix(u_layerAlpha.x, u_layerAlpha.y, step(0.5, layer)), u_layerAlpha.z, step(1.5, layer));
+  float layerAlpha = perLayer(u_layerAlpha, layer);
 
   // Ripples: a bright front with an afterglow behind it, fading with age.
   float act = 0.0;
@@ -168,8 +188,12 @@ void main() {
   }
 
   float scale = 1.0 + 0.16 * min(act, 1.0);
-  vec2 bob = u_motion * vec2(sin(t * 0.7 + seed * 6.283), cos(t * 0.53 + seed * 4.1)) * (0.6 + 0.4 * layer);
-  vec2 pos = center + bob + push * 7.0 + (a_corner - 0.5) * size * scale;
+  // Sway across the flow, as if riding small waves. A formula's glyphs share one phase
+  // along the flow so the formula bends gently instead of falling apart.
+  float swayPhase = dot(center, FLOW_DIR) * 0.012 - t * 1.1 + (isDigit ? seed * 6.283 : 0.0);
+  float swayAmp = isDigit ? 2.0 + 2.0 * layer : 2.5;
+  vec2 sway = u_motion * vec2(-FLOW_DIR.y, FLOW_DIR.x) * sin(swayPhase) * swayAmp;
+  vec2 pos = center + sway + push * 7.0 + (a_corner - 0.5) * size * scale;
   vec2 clip = pos / u_resolution * 2.0 - 1.0;
   gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
 

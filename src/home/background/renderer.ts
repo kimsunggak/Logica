@@ -1,5 +1,5 @@
 import type { Atlas } from "./atlas";
-import { FORMULA_INSTANCES, FormulaField, STRIDE, buildDigitField, seededRandom } from "./layout";
+import { FORMULA_INSTANCES, FormulaField, STRIDE, buildDigitField, digitFlowDomain, seededRandom } from "./layout";
 import { FrameGovernor } from "./quality";
 import { RippleBuffer } from "./ripples";
 import { FRAGMENT_SHADER, VERTEX_SHADER } from "./shaders";
@@ -72,6 +72,8 @@ const UNIFORMS = [
   "u_ink",
   "u_accent",
   "u_additive",
+  "u_flowX",
+  "u_flowY",
 ] as const;
 type UniformName = (typeof UNIFORMS)[number];
 
@@ -342,6 +344,9 @@ export class MathFieldRenderer {
       gl.uniform3fv(u.u_ink, theme.ink);
       gl.uniform3fv(u.u_accent, theme.accent);
       gl.uniform1f(u.u_additive, theme.additive);
+      const domain = digitFlowDomain(this.width, this.height);
+      gl.uniform3fv(u.u_flowX, domain.x);
+      gl.uniform3fv(u.u_flowY, domain.y);
       this.settingsDirty = false;
     }
 
@@ -364,6 +369,7 @@ export class MathFieldRenderer {
         this.height = h;
         this.digits = buildDigitField(w, h, this.atlas.digits);
         this.digitsDirty = true;
+        this.settingsDirty = true;
         this.formulas.resize(w, h, time, this.frozenTime !== null);
       }
     }
