@@ -45,6 +45,14 @@ const FRAME_MS = 1000 / 60;
 /** Half rate while the window is unfocused or nobody has touched the screen for a while. */
 const CALM_FRAME_MS = 1000 / 30;
 const IDLE_AFTER_MS = 15000;
+/**
+ * A frame is skipped only when it comes sooner than this share of the target interval, so
+ * displays up to 100 Hz draw every refresh. (With 0.75, an 85 to 90 Hz display drew every
+ * other refresh, about 45 fps, and the governor took that for a slow machine.)
+ */
+const FRAME_SKIP = 0.6;
+/** Frame times are not judged this soon after start: thumbnails and the atlas are still loading. */
+const STARTUP_MS = 3000;
 const POINTER_EASE = 5;
 
 const QUAD = new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]);
@@ -70,8 +78,10 @@ type UniformName = (typeof UNIFORMS)[number];
 export interface RendererOptions {
   dark: boolean;
   reducedMotion: boolean;
-  /** Called after the first frame is on screen, so the canvas can fade in. */
+  /** Called after the first frame is on screen (again after a restored context), so the canvas can fade in. */
   onFirstFrame?: () => void;
+  /** The WebGL context is gone; the canvas should step aside for the CSS background. */
+  onContextLost?: () => void;
 }
 
 /**
@@ -140,6 +150,8 @@ export class MathFieldRenderer {
   private lost = false;
   private disposed = false;
   private drewFirst = false;
+  /** The moment shown while not animating (reduced motion or a still frame). */
+  private frozenTime: number | null = null;
 
   private constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -149,6 +161,7 @@ export class MathFieldRenderer {
     software: boolean,
   ) {
     this.governor.still = software;
+    if (software) this.frozenTime = STILL_TIME;
     this.theme = options.dark ? DARK_THEME : LIGHT_THEME;
     this.reducedMotion = options.reducedMotion;
     this.formulas = new FormulaField(atlas, seededRandom((Math.random() * 2 ** 32) >>> 0));
@@ -183,6 +196,7 @@ export class MathFieldRenderer {
 
   setReducedMotion(reduced: boolean): void {
     this.reducedMotion = reduced;
+    this.frozenTime = reduced ? STILL_TIME : this.governor.still ? (this.frozenTime ?? STILL_TIME) : null;
     this.ripples.clear();
     this.pointer.strength = this.pointer.target = 0;
     this.lastDraw = 0;
@@ -199,6 +213,11 @@ export class MathFieldRenderer {
     // The pause is not a slow frame.
     this.lastDraw = 0;
     this.governor.resetWindow();
+    this.requestRender();
+  }
+
+  /** Draw again when nothing else would, e.g. after the display scale changed. */
+  refresh(): void {
     this.requestRender();
   }
 
@@ -236,8 +255,9 @@ export class MathFieldRenderer {
       gl.deleteVertexArray(this.vao);
       gl.deleteProgram(this.program);
     }
-    // Free the context now instead of waiting for GC; browsers cap live contexts.
-    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    // Free the context now instead of waiting for GC; browsers cap live contexts. Not in
+    // development: Fast Refresh reuses the canvas, and a lost context cannot be taken back.
+    if (!import.meta.env.DEV) gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 
   // -------------------------------------------------------------------------
@@ -248,7 +268,7 @@ export class MathFieldRenderer {
   }
 
   private time(now: number): number {
-    return this.reducedMotion ? STILL_TIME : (now - this.startTime) / 1000;
+    return this.frozenTime ?? (now - this.startTime) / 1000;
   }
 
   private requestRender(): void {
@@ -268,15 +288,16 @@ export class MathFieldRenderer {
         document.hasFocus() && (now - this.lastActivity < IDLE_AFTER_MS || this.ripples.activeAt(this.time(now)));
       const interval = now - this.lastDraw;
       // Draw at about 60 or 30 fps whatever the display rate.
-      if (interval < (fullRate ? FRAME_MS : CALM_FRAME_MS) * 0.75) {
+      if (interval < (fullRate ? FRAME_MS : CALM_FRAME_MS) * FRAME_SKIP) {
         this.requestRender();
         return;
       }
       // Half-rate frames are slow on purpose, so only full-rate intervals say anything.
-      const measurable = fullRate && this.lastFullRate;
+      const measurable = fullRate && this.lastFullRate && now - this.startTime > STARTUP_MS;
       this.lastFullRate = fullRate;
       if (measurable && this.governor.sample(interval) && this.governor.still) {
-        // The still frame should not freeze a ripple or the hover light half way.
+        // Keep showing this moment, without a ripple or the hover light frozen half way.
+        this.frozenTime = this.time(now);
         this.ripples.clear();
         this.pointer.strength = this.pointer.target = 0;
       }
@@ -343,7 +364,7 @@ export class MathFieldRenderer {
         this.height = h;
         this.digits = buildDigitField(w, h, this.atlas.digits);
         this.digitsDirty = true;
-        this.formulas.resize(w, h, time);
+        this.formulas.resize(w, h, time, this.frozenTime !== null);
       }
     }
     const dpr = Math.min(window.devicePixelRatio || 1, this.governor.level.maxDpr);
@@ -433,6 +454,7 @@ export class MathFieldRenderer {
     e.preventDefault();
     this.lost = true;
     this.cancelFrame();
+    this.options.onContextLost?.();
   };
 
   private readonly onContextRestored = (): void => {
@@ -444,6 +466,7 @@ export class MathFieldRenderer {
     }
     this.lost = false;
     this.lastDraw = 0;
+    this.drewFirst = false;
     this.requestRender();
   };
 }

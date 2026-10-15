@@ -150,6 +150,35 @@ describe("FormulaField", () => {
     expect(field.takeDirty()).toBeNull();
   });
 
+  it("fades formulas in after a jump in time instead of popping in", () => {
+    const field = new FormulaField(glyphs, seededRandom(9));
+    field.resize(1400, 800, 37);
+    field.update(500); // e.g. reduced motion turned off, or the window was hidden for minutes
+    for (let g = 0; g < field.groupCount; g++) expect(field.life[g]).toBeLessThan(0.001);
+    field.update(504);
+    expect(Math.max(...field.life)).toBeGreaterThan(0.3);
+  });
+
+  it("darkens formulas that no longer fit after the window shrinks", () => {
+    const field = new FormulaField(glyphs, seededRandom(11));
+    field.resize(1600, 1000, 5);
+    field.resize(1600, 500, 5.1);
+    for (let g = 0; g < field.groupCount; g++) {
+      if (field.rects[g * 4 + 3] > 500) throw new Error(`group ${g} still extends past the bottom`);
+      if (field.rects[g * 4 + 2] === 0) expect(field.life[g]).toBe(0);
+    }
+  });
+
+  it("shows new formulas at once while time stands still", () => {
+    const field = new FormulaField(glyphs, seededRandom(13));
+    field.resize(600, 500, 37, true);
+    const before = field.groupCount;
+    field.resize(1800, 1000, 37, true);
+    let lit = 0;
+    for (let g = before; g < field.groupCount; g++) if (field.life[g] > 0.5) lit++;
+    expect(lit).toBeGreaterThan(0);
+  });
+
   it("clears dropped groups and starts added ones dark", () => {
     const field = new FormulaField(glyphs, seededRandom(5));
     field.resize(1800, 1000, 0);

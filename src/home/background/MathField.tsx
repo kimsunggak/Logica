@@ -33,6 +33,7 @@ export default function MathField({ interactionRef, columnRef }: MathFieldProps)
           dark: document.documentElement.classList.contains("dark"),
           reducedMotion: motion.matches,
           onFirstFrame: () => setShown(true),
+          onContextLost: () => setShown(false),
         });
         if (renderer) disconnect = connect(renderer, canvas, interactionRef.current, columnRef.current, motion);
       })
@@ -87,6 +88,16 @@ function connect(
   const onVisibility = () => renderer.setVisible(!document.hidden);
   document.addEventListener("visibilitychange", onVisibility);
 
+  // Moving to a monitor with another scale keeps the CSS size, so no resize is reported.
+  let scale: MediaQueryList | null = null;
+  const onScale = () => {
+    scale?.removeEventListener("change", onScale);
+    scale = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    scale.addEventListener("change", onScale);
+    renderer.refresh();
+  };
+  onScale();
+
   const onDown = (e: PointerEvent) => {
     if (e.button === 0) renderer.ripple(e.clientX - box.left, e.clientY - box.top);
   };
@@ -103,6 +114,7 @@ function connect(
     interaction?.removeEventListener("pointermove", onMove);
     interaction?.removeEventListener("pointerleave", onLeave);
     document.removeEventListener("visibilitychange", onVisibility);
+    scale?.removeEventListener("change", onScale);
     motion.removeEventListener("change", onMotion);
     theme.disconnect();
     resize.disconnect();

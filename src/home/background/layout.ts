@@ -175,6 +175,11 @@ export function lifeEnvelope(f: number): number {
   return smoothstep(0, 0.2, f) * (1 - smoothstep(0.6, 0.86, f));
 }
 
+/** The phase that puts the start of a cycle at `time`. */
+function startPhase(time: number, period: number): number {
+  return (period - (time % period)) % period;
+}
+
 function smoothstep(e0: number, e1: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
@@ -229,14 +234,23 @@ export class FormulaField {
     return this.count;
   }
 
-  resize(width: number, height: number, time: number): void {
+  /** `frozen`: time stands still (reduced motion), so new groups must not wait for a cycle to start. */
+  resize(width: number, height: number, time: number, frozen = false): void {
     this.width = width;
     this.height = height;
     const target = targetGroupCount(width, height);
+    // Formulas that no longer fit go dark until their next cycle places them again.
+    for (let g = 0; g < Math.min(this.count, target); g++) {
+      const o = g * 4;
+      if (!this.groups[g].hidden && (this.rects[o + 2] > width || this.rects[o + 3] > height)) {
+        this.groups[g].hidden = true;
+        this.clear(g);
+      }
+    }
     for (let g = this.count; g < target; g++) {
       const period = 14 + this.random() * 12;
       // The first screenful starts mid-cycle; groups added later start dark.
-      const phase = this.started ? (period - (time % period)) % period : this.random() * period;
+      const phase = this.started && !frozen ? startPhase(time, period) : this.random() * period;
       this.groups[g] = { formula: -1, period, phase, cycle: Math.floor((time + phase) / period), hidden: false };
       // Count it before placing so the groups added in this batch avoid each other.
       this.count = g + 1;
@@ -252,9 +266,16 @@ export class FormulaField {
   update(time: number): void {
     for (let g = 0; g < this.count; g++) {
       const group = this.groups[g];
-      const pos = (time + group.phase) / group.period;
-      const cycle = Math.floor(pos);
+      let pos = (time + group.phase) / group.period;
+      let cycle = Math.floor(pos);
       if (cycle !== group.cycle) {
+        // Time jumped (the window was hidden, or reduced motion was turned off): start the
+        // new cycle dark here instead of popping in at full brightness.
+        if (cycle !== group.cycle + 1 || pos - cycle > 0.05) {
+          group.phase = startPhase(time, group.period);
+          pos = (time + group.phase) / group.period;
+          cycle = Math.floor(pos);
+        }
         group.cycle = cycle;
         this.spawn(g);
       }
