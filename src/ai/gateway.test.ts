@@ -1,0 +1,149 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AIError } from "./errors";
+import type { AIRequest, AIResponse, ProviderId, StreamHandlers } from "./types";
+
+type Script = (request: AIRequest, handlers?: StreamHandlers) => Promise<AIResponse>;
+const calls: { provider: ProviderId; request: AIRequest }[] = [];
+let scripts: Partial<Record<ProviderId, Script>> = {};
+let connected: Record<ProviderId, boolean> = { openai: true, anthropic: true };
+
+vi.mock("./service", () => ({
+  aiService: {
+    generate: (provider: ProviderId, request: AIRequest, handlers?: StreamHandlers) => {
+      calls.push({ provider, request });
+      return scripts[provider]!(request, handlers);
+    },
+    isAuthenticated: async (provider: ProviderId) => connected[provider],
+  },
+}));
+
+const { callModel } = await import("./gateway");
+
+const reply = (provider: ProviderId, text: string): Script => async (request) => ({
+  id: request.id,
+  provider,
+  model: request.model,
+  text,
+  finishReason: "stop",
+});
+const failing = (error: AIError): Script => async () => {
+  throw error;
+};
+const control = () => ({ stopped: false, activeRequest: null as string | null });
+const request = { id: "t1-refine", instruction: "q", context: {} };
+
+beforeEach(() => {
+  calls.length = 0;
+  scripts = {};
+  connected = { openai: true, anthropic: true };
+});
+
+describe("LLM Gateway", () => {
+  it("uses gpt-6.1-sol with the task's reasoning effort", async () => {
+    scripts.openai = reply("openai", "ok");
+    const judge = await callModel("judge", request, { control: control() });
+    const refine = await callModel("refine", request, { control: control() });
+    expect(judge.choice).toEqual({ provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" });
+    expect(refine.choice).toEqual({ provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" });
+    expect(calls.map((c) => [c.request.task, c.request.model, c.request.reasoningEffort])).toEqual([
+      ["judge", "gpt-6.1-sol", "low"],
+      ["refine", "gpt-6.1-sol", "medium"],
+    ]);
+    expect(judge.fallbackFrom).toBeUndefined();
+  });
+
+  it("sends the same request to claude-sonnet-5-5 when OpenAI fails", async () => {
+    scripts.openai = failing(new AIError("unavailable", "OpenAI is down", { provider: "openai", status: 503 }));
+    scripts.anthropic = reply("anthropic", "from Claude");
+    const attempts: string[] = [];
+    const result = await callModel("refine", { ...request, history: [{ role: "user", content: "h" }] }, {
+      control: control(),
+      onAttempt: (choice, fallback) => attempts.push(`${choice.model}${fallback ? " (fallback)" : ""}`),
+    });
+    expect(result.response.text).toBe("from Claude");
+    expect(result.choice).toEqual({ provider: "anthropic", model: "claude-sonnet-5-5" });
+    expect(result.fallbackFrom?.error.message).toBe("OpenAI is down");
+    expect(attempts).toEqual(["gpt-6.1-sol", "claude-sonnet-5-5 (fallback)"]);
+    const [first, second] = calls;
+    expect(second.provider).toBe("anthropic");
+    expect(second.request.id).toBe("t1-refine-fallback");
+    expect(second.request.reasoningEffort).toBeUndefined();
+    expect(second.request.history).toEqual(first.request.history);
+    expect(second.request.maxOutputTokens).toBe(first.request.maxOutputTokens);
+  });
+
+  it("falls back on any OpenAI failure, including a missing sign-in", async () => {
+    scripts.openai = failing(new AIError("no_credential", "Sign in with ChatGPT", { provider: "openai" }));
+    scripts.anthropic = reply("anthropic", "ok");
+    expect((await callModel("judge", request, { control: control() })).choice.provider).toBe("anthropic");
+  });
+
+  it("does not fall back when the user stopped the turn", async () => {
+    scripts.openai = failing(new AIError("cancelled", "Stopped", { provider: "openai" }));
+    scripts.anthropic = reply("anthropic", "ok");
+    await expect(callModel("answer", request, { control: control() })).rejects.toMatchObject({ kind: "cancelled" });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("reports a stop requested during the call as cancelled", async () => {
+    const run = control();
+    scripts.openai = async (req) => {
+      run.stopped = true;
+      return reply("openai", "late")(req);
+    };
+    await expect(callModel("answer", request, { control: run })).rejects.toMatchObject({ kind: "cancelled" });
+    expect(run.activeRequest).toBeNull();
+  });
+
+  it("does not start a call after the turn was stopped", async () => {
+    scripts.openai = reply("openai", "ok");
+    await expect(callModel("refine", request, { control: { stopped: true, activeRequest: null } })).rejects.toMatchObject({ kind: "cancelled" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("does not fall back once part of the answer is on screen", async () => {
+    scripts.openai = async (_req, handlers) => {
+      handlers?.onDelta?.("Part", "Part");
+      throw new AIError("stream_interrupted", "cut off", { provider: "openai" });
+    };
+    scripts.anthropic = reply("anthropic", "ok");
+    const shown: string[] = [];
+    await expect(callModel("answer", request, { control: control(), onText: (t) => shown.push(t) })).rejects.toMatchObject({
+      kind: "stream_interrupted",
+    });
+    expect(shown).toEqual(["Part"]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("explains the error when Claude is not connected", async () => {
+    connected.anthropic = false;
+    scripts.openai = failing(new AIError("rate_limit", "Limit reached", { provider: "openai", status: 429 }));
+    const error = await callModel("judge", request, { control: control() }).catch((e) => e);
+    expect(error).toBeInstanceOf(AIError);
+    expect(error.kind).toBe("rate_limit");
+    expect(error.message).toContain("Limit reached");
+    expect(error.message).toContain("Anthropic API key");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("reports both errors when Claude fails too", async () => {
+    scripts.openai = failing(new AIError("unavailable", "OpenAI is down", { provider: "openai" }));
+    scripts.anthropic = failing(new AIError("auth", "Claude key rejected", { provider: "anthropic", status: 401 }));
+    const error = await callModel("answer", request, { control: control() }).catch((e) => e);
+    expect(error.kind).toBe("auth");
+    expect(error.message).toContain("OpenAI is down");
+    expect(error.message).toContain("Claude also failed: Claude key rejected");
+  });
+
+  it("tracks the running request for cancellation", async () => {
+    const run = control();
+    let seen: string | null = null;
+    scripts.openai = async (req) => {
+      seen = run.activeRequest;
+      return reply("openai", "ok")(req);
+    };
+    await callModel("answer", request, { control: run });
+    expect(seen).toBe("t1-refine");
+    expect(run.activeRequest).toBeNull();
+  });
+});

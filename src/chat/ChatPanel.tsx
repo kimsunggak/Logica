@@ -1,8 +1,8 @@
 import { Check, CheckCheck, FileText, GitCompare, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
+import { CHAT_MODELS } from "../ai/models/modelConfig";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
-import { ProviderSelect } from "../components/ProviderSelect";
 import { DiffView } from "../editor/inlineEdit/DiffView";
 import { reviewProposal } from "../editor/inlineEdit/inlineEditStore";
 import { validateRewrite } from "../latex/validation";
@@ -16,14 +16,12 @@ import { CollapseButton } from "../components/panes";
 import {
   applyAllChatEdits,
   applyChatEdit,
-  chatProvider,
   deleteChatSession,
   newChatSession,
   switchChatSession,
   rejectAllChatEdits,
   rejectChatEdit,
   sendChatMessage,
-  setChatProvider,
   splitBlocks,
   stopChat,
   useChat,
@@ -103,24 +101,23 @@ function EditCard({ messageId, index, edit, state }: { messageId: string; index:
   );
 }
 
-/** What the Intent Module understood the question as. */
-function IntentLine({ message }: { message: ChatMessage }) {
+/** The question as rewritten by the Refine Module before answering. */
+function RefinedLine({ message }: { message: ChatMessage }) {
   const t = useT();
-  if (!message.intent) return null;
+  if (!message.refined) return null;
   return (
-    <div className="flex items-baseline gap-1.5 text-[11.5px] text-slate-500" data-testid="chat-intent">
+    <div className="flex items-baseline gap-1.5 text-[11.5px] text-slate-500" data-testid="chat-refined">
       <span className="shrink-0 rounded bg-slate-100 px-1.5 py-px text-[10.5px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-        {t(`intent.${message.intent.type}`)}
+        {t("chat.refined")}
       </span>
-      <span className="min-w-0" title={t("chat.intent")}>
-        {message.intent.text}
-      </span>
+      <span className="min-w-0">{message.refined}</span>
     </div>
   );
 }
 
 function AssistantMessage({ message }: { message: ChatMessage }) {
   const t = useT();
+  const defaultProvider = useSettings((s) => s.ai.defaultProvider);
   if (message.status === "error") {
     return <div className="rounded-md bg-red-50 px-2.5 py-2 text-[12.5px] text-red-800 dark:bg-red-950/50 dark:text-red-200">{message.content}</div>;
   }
@@ -137,9 +134,17 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   const pending = [...edits.values()].filter(({ index }) => !message.editStates?.[index]);
   return (
     <div className="space-y-2 text-[13px] leading-relaxed">
-      {message.stage === "intent" && <div className="text-[11.5px] text-slate-500">{t("chat.stageIntent")}</div>}
-      <IntentLine message={message} />
-      {message.stage === "agent" && !message.content && <div className="text-[11.5px] text-slate-500">{t("chat.stageAgent")}</div>}
+      {(message.stage === "judge" || message.stage === "refine") && (
+        <div className="text-[11.5px] text-slate-500" data-testid="chat-stage">
+          {t(message.stage === "judge" ? "chat.stageJudge" : "chat.stageRefine")}
+        </div>
+      )}
+      <RefinedLine message={message} />
+      {message.stage === "answer" && !message.content && (
+        <div className="text-[11.5px] text-slate-500" data-testid="chat-stage">
+          {t("chat.stageAnswer")}
+        </div>
+      )}
       {edits.size > 1 && (
         <div className="flex items-center gap-1.5 text-[11.5px] text-slate-500" data-testid="agent-edits-bar">
           <span>{t("agent.edits", { count: edits.size })}</span>
@@ -183,7 +188,7 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
                 <button
                   className="btn h-6 shrink-0 text-[11.5px] whitespace-nowrap"
                   data-testid="chat-review"
-                  onClick={() => void reviewProposal(message.anchor!, block.text, message.instruction ?? "", message.provider ?? chatProvider())}
+                  onClick={() => void reviewProposal(message.anchor!, block.text, message.instruction ?? "", message.provider ?? defaultProvider)}
                 >
                   <GitCompare size={12} /> {t("chat.reviewDiff")}
                 </button>
@@ -195,6 +200,11 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
       )}
       {message.status === "streaming" && <span className="inline-block h-3 w-1.5 animate-pulse bg-slate-400" />}
       {message.status === "cancelled" && <div className="text-[11.5px] text-slate-400">{t("chat.stopped")}</div>}
+      {message.fallbackFrom && message.status === "done" && (
+        <div className="text-[11px] text-amber-700 dark:text-amber-400" data-testid="chat-fallback">
+          {t("chat.fallbackUsed", { primary: message.fallbackFrom, fallback: message.model ?? "Claude" })}
+        </div>
+      )}
     </div>
   );
 }
@@ -284,10 +294,7 @@ export function ChatPanel() {
   const t = useT();
   const messages = useChat((s) => s.messages);
   const running = useChat((s) => s.runningId !== null);
-  const providerOverride = useChat((s) => s.provider);
-  const defaultProvider = useSettings((s) => s.ai.defaultProvider);
-  const models = useSettings((s) => s.ai.models);
-  const provider = providerOverride ?? defaultProvider;
+  const models = t("chat.modelLabel", { primary: CHAT_MODELS.answer.primary.model, fallback: CHAT_MODELS.answer.fallback.model });
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -310,9 +317,8 @@ export function ChatPanel() {
     <div className="flex h-full flex-col bg-white dark:bg-[#0f141b]" data-testid="chat-panel">
       <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-slate-200 bg-slate-50 px-2 dark:border-slate-800 dark:bg-[#121820]">
         <span className="panel-title whitespace-nowrap">{t("chat.title")}</span>
-        <ProviderSelect value={provider} onChange={setChatProvider} className="ml-1 h-6 text-[12px]" />
-        <span className="truncate text-[11px] text-slate-400" title={models[provider]}>
-          {models[provider]}
+        <span className="ml-1 truncate text-[11px] text-slate-400" title={models} data-testid="chat-models">
+          {models}
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-0.5">
           <SessionHistory />
@@ -353,7 +359,7 @@ export function ChatPanel() {
               </div>
             </div>
           ) : (
-            <div key={message.id} data-testid="chat-assistant">
+            <div key={message.id} data-testid="chat-assistant" data-route={message.route}>
               <div className="mb-0.5 text-[10.5px] text-slate-400">
                 {message.provider ? PROVIDER_LABELS[message.provider] : ""} {message.model ? `(${message.model})` : ""}
               </div>

@@ -5,10 +5,11 @@
  * a starting point; once a provider is connected, Settings refreshes the list
  * from the provider's models API, and users can add any model id by hand.
  */
-import type { ModelConfig, ProviderId } from "../types";
+import type { ChatTask, ModelConfig, ProviderId, ReasoningEffort } from "../types";
 
 export const DEFAULT_MODELS: Record<ProviderId, ModelConfig[]> = {
   openai: [
+    { id: "gpt-6.1-sol", provider: "openai", displayName: "GPT-6.1 Sol", supportsStreaming: true, source: "default" },
     { id: "gpt-6-sol", provider: "openai", displayName: "GPT-6 Sol", supportsStreaming: true, source: "default" },
     { id: "gpt-6-luna", provider: "openai", displayName: "GPT-6 Luna", supportsStreaming: true, source: "default" },
     { id: "gpt-6-astra", provider: "openai", displayName: "GPT-6 Astra", supportsStreaming: true, source: "default" },
@@ -26,14 +27,34 @@ export const DEFAULT_MODEL_ID: Record<ProviderId, string> = {
   anthropic: DEFAULT_MODELS.anthropic[0].id,
 };
 
-/** Output token budget per task. */
+/** Output token budget per task (reasoning models spend part of it thinking first). */
 export const MAX_OUTPUT_TOKENS = {
   "inline-edit": 8192,
-  // A short JSON reply, but reasoning models spend part of the budget thinking first.
-  intent: 8192,
+  // A tool call or a one-sentence reply.
+  judge: 4096,
+  // One rewritten question as JSON.
+  refine: 8192,
   // Answers may carry edits for several places and files.
   answer: 16384,
 } as const;
+
+export interface ModelChoice {
+  provider: ProviderId;
+  model: string;
+  reasoningEffort?: ReasoningEffort;
+}
+
+const CLAUDE_FALLBACK: ModelChoice = { provider: "anthropic", model: "claude-sonnet-5-5" };
+
+/**
+ * Model for each chat call. The OpenAI model runs first; when it fails, the
+ * LLM Gateway sends the same request to Claude.
+ */
+export const CHAT_MODELS: Record<ChatTask, { primary: ModelChoice; fallback: ModelChoice }> = {
+  judge: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
+  refine: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
+  answer: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
+};
 
 /**
  * OpenAI's models endpoint also lists embedding, audio, image and moderation

@@ -65,6 +65,9 @@ svg text { font-family: var(--sans); fill: var(--ink); }
 .node.llm rect { stroke: var(--llm); }
 .node.llm.running rect { fill: var(--llm-soft); stroke: var(--llm); }
 .node.sel rect { stroke-width: 3.5; }
+.node.skipped { opacity: .45; }
+.node.skipped rect { stroke-dasharray: 2 4; }
+.node .route { font: 600 11px var(--mono); fill: var(--llm); }
 .node { cursor: pointer; }
 .node .title { font-size: 14px; font-weight: 600; }
 .node .meta { font: 11px var(--mono); fill: var(--ink-2); }
@@ -76,6 +79,7 @@ svg text { font-family: var(--sans); fill: var(--ink); }
 .edge.done { stroke: var(--ok); }
 .edge.active { stroke: var(--run); stroke-width: 2.2; stroke-dasharray: 6 5; animation: flow .7s linear infinite; }
 .edge.call { stroke-dasharray: 3 4; }
+.edge.skip { stroke-dasharray: 2 5; opacity: .35; }
 .edge.call.active { stroke: var(--llm); stroke-dasharray: 6 5; }
 @keyframes flow { to { stroke-dashoffset: -11; } }
 @media (prefers-reduced-motion: reduce) { .node.running rect, .edge.active { animation: none; } }
@@ -123,7 +127,7 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
 <body>
 <header>
   <h1>LOGICA Runtime Debugger</h1>
-  <span class="sub">npm run tauri dev 로 실행 중인 앱의 채팅 파이프라인을 실시간으로 봅니다</span>
+  <span class="sub">npm run tauri dev 로 실행 중인 앱의 채팅 한 턴이 어떤 갈래로 처리되는지 실시간으로 봅니다</span>
   <span class="spacer"></span>
   <span id="conn" class="pill off">연결 대기</span>
   <div class="ctl">
@@ -138,13 +142,14 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
   </aside>
   <main class="center">
     <div class="section-title">Execution Graph</div>
-    <div class="graph-wrap"><svg id="graph" viewBox="0 0 720 470" role="img" aria-label="User Input, Intent Module, Answer Agent, Final Answer 순서의 실행 그래프와 LLM 호출"></svg></div>
+    <div class="graph-wrap"><svg id="graph" viewBox="0 0 720 580" role="img" aria-label="User Input, Chat Orchestrator, Refine Module, Answer Module, Final Answer 실행 그래프와 LLM 호출"></svg></div>
     <div class="legend">
       <span><i style="border-color:var(--wait);border-style:dashed"></i>waiting</span>
       <span><i style="border-color:var(--run);background:var(--run-soft)"></i>running</span>
       <span><i style="border-color:var(--ok)"></i>completed</span>
       <span><i style="border-color:var(--err);background:var(--err-soft)"></i>error</span>
-      <span><i style="border-color:var(--llm)"></i>LLM 호출 (webview + Rust)</span>
+      <span><i style="border-color:var(--wait);border-style:dotted;opacity:.5"></i>skipped (이 갈래에서 건너뜀)</span>
+      <span><i style="border-color:var(--llm)"></i>LLM 호출 (Gateway + Rust)</span>
     </div>
     <section class="timeline">
       <div class="tabs">
@@ -159,20 +164,24 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
 <script>
 "use strict";
 const MODULES = {
-  user:   { title: "👤 User Input",  next: "Intent Module" },
-  intent: { title: "Intent Module",  next: "Answer Agent" },
-  agent:  { title: "Answer Agent",   next: "Final Answer" },
-  answer: { title: "💬 Final Answer", next: null },
-  llm:    { title: "LLM",            next: null },
+  user:         { title: "👤 User Input" },
+  orchestrator: { title: "Chat Orchestrator" },
+  refine:       { title: "Refine Module" },
+  answer:       { title: "Answer Module" },
+  final:        { title: "💬 Final Answer" },
+  llm:          { title: "LLM Gateway" },
 };
+// The column, top to bottom; a turn runs along part of it (its route).
+const CHAIN = ["user", "orchestrator", "refine", "answer", "final"];
 // Top-level span of each module: its output is what the module hands on.
-const MAIN_FN = { user: "receiveUserInput", intent: "runIntentModule", agent: "runAnswerAgent", answer: "showFinalAnswer" };
+const MAIN_FN = { user: "receiveUserInput", orchestrator: "runOrchestrator", refine: "runRefineModule", answer: "runAnswerModule", final: "showFinalAnswer" };
+const ROUTE_LABEL = { reply: "A 바로 답 (툴 없음)", answer: "B answer_question", refine: "C refine_question", clarify: "C refine_question → 되묻기" };
 const PREVIEW = 1500;
 
 let traces = new Map();   // trace_id -> trace
 let seen = new Set();     // seq numbers of this connection
 let clearedAt = 0;
-let selTrace = null, selModule = "intent", selSpan = null, tab = "calls";
+let selTrace = null, selModule = "orchestrator", selSpan = null, tab = "calls";
 const expanded = new Set();
 
 const $ = (id) => document.getElementById(id);
@@ -209,7 +218,7 @@ function apply(ev) {
     s.status = ev.status || (ev.event_type === "span_end" ? "completed" : "error");
     s.end = ev.timestamp; s.duration = ev.duration_ms; s.output = ev.output; s.error = ev.error;
   }
-  if (followLatest() && !s.parent && ev.event_type === "span_start") { selTrace = ev.trace_id; selSpan = null; selModule = "intent"; }
+  if (followLatest() && !s.parent && ev.event_type === "span_start") { selTrace = ev.trace_id; selSpan = null; selModule = "orchestrator"; }
   if (!selTrace) selTrace = ev.trace_id;
 }
 
@@ -218,8 +227,35 @@ const followLatest = () => $("follow").checked;
 function rootOf(t) { return t.order.map((id) => t.spans.get(id)).find((s) => !s.parent); }
 function spansOf(t, module) { return t.order.map((id) => t.spans.get(id)).filter((s) => s.module === module); }
 function depth(t, s) { let d = 0, p = s.parent; while (p && t.spans.get(p)) { d++; p = t.spans.get(p).parent; } return d; }
+function mainSpan(t, module) { return spansOf(t, module).find((s) => s.fn === MAIN_FN[module]); }
+/** The route the judge chose, and the modules the turn runs through. */
+function routeOf(t) {
+  const orch = t && mainSpan(t, "orchestrator");
+  const route = orch && orch.output && orch.output.route;
+  if (!route) return null;
+  const refine = mainSpan(t, "refine");
+  const clarify = Boolean(refine && refine.output && refine.output.kind === "clarify");
+  const path = route === "reply" ? ["user", "orchestrator", "final"]
+    : route === "answer" ? ["user", "orchestrator", "answer", "final"]
+    : clarify ? ["user", "orchestrator", "refine", "final"] : CHAIN;
+  return { route, clarify, path, reason: orch.output.reason };
+}
+/** Model calls: a failed attempt that Claude took over does not make the call fail. */
+function llmStatus(t) {
+  const attempts = spansOf(t, "llm").filter((s) => s.fn === "aiService.generate");
+  if (!attempts.length) return "waiting";
+  const last = new Map();
+  for (const s of attempts) last.set(s.parent, s);
+  const ends = [...last.values()];
+  if (ends.some((s) => s.status === "running")) return "running";
+  if (ends.some((s) => s.status === "error")) return "error";
+  return "completed";
+}
 function moduleStatus(t, module) {
+  if (module === "llm") return llmStatus(t);
   const list = spansOf(t, module);
+  const r = routeOf(t);
+  if (!list.length && r && !r.path.includes(module)) return "skipped";
   if (!list.length) return "waiting";
   if (list.some((s) => s.status === "error")) return "error";
   if (list.some((s) => s.status === "running")) return "running";
@@ -254,18 +290,37 @@ function renderTraces() {
   }).join("");
 }
 
+/** What a node lists: function calls, or for the LLM node one line per model call. */
+function nodeLines(t, module) {
+  const fns = t ? spansOf(t, module) : [];
+  const time = (s) => s.duration != null ? "  " + fmtMs(s.duration) : s.status === "running" ? "  …" : "";
+  if (module === "llm") {
+    return fns.filter((s) => s.source !== "rust" && (s.fn === "aiService.generate" || s.fn === "fallback")).map((s) => ({
+      status: s.status,
+      text: s.fn === "fallback"
+        ? `↪ fallback → ${s.output && s.output.model ? s.output.model : "skipped"}`
+        : `${(s.input && s.input.task) || ""}  ${(s.input && s.input.model) || ""}${time(s)}`,
+    }));
+  }
+  const lines = fns.map((s) => ({ status: s.status, text: (s.source === "rust" ? "rust  " : "") + s.fn + time(s) }));
+  const r = module === "orchestrator" && routeOf(t);
+  if (r) lines.unshift({ status: "route", text: "갈래 " + ROUTE_LABEL[r.clarify ? "clarify" : r.route] });
+  return lines;
+}
+
 function nodeSvg(t, module, x, y, w, h) {
   const status = t ? moduleStatus(t, module) : "waiting";
   const dur = t ? moduleDuration(t, module) : null;
-  const fns = t ? spansOf(t, module) : [];
-  const lines = fns.slice(0, 4).map((s, i) =>
-    `<text class="fn ${s.status}" x="${x + 12}" y="${y + 52 + i * 14}">${esc((s.source === "rust" ? "rust  " : "") + s.fn)}${s.duration != null ? "  " + fmtMs(s.duration) : s.status === "running" ? "  …" : ""}</text>`).join("");
+  const max = Math.floor((h - 40) / 14);
+  const lines = nodeLines(t, module).slice(0, max).map((l, i) =>
+    `<text class="${l.status === "route" ? "route" : "fn " + l.status}" x="${x + 12}" y="${y + 50 + i * 14}">${esc(l.text)}</text>`).join("");
+  const empty = status === "waiting" ? "아직 실행 안 됨" : status === "skipped" ? "이 갈래에서는 건너뜀" : "";
   return `<g class="node ${status} ${module === "llm" ? "llm" : ""} ${selModule === module ? "sel" : ""}" data-module="${module}" tabindex="0" role="button" aria-label="${esc(MODULES[module].title)} ${status}">
     <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10"></rect>
     <text class="title" x="${x + 12}" y="${y + 22}">${esc(MODULES[module].title)}</text>
     <text class="meta" x="${x + w - 12}" y="${y + 22}" text-anchor="end">${status}${dur != null ? "  " + fmtMs(dur) : ""}</text>
     <line x1="${x + 12}" y1="${y + 32}" x2="${x + w - 12}" y2="${y + 32}" stroke="var(--line)"></line>
-    ${lines || `<text class="fn" x="${x + 12}" y="${y + 52}">${status === "waiting" ? "아직 실행 안 됨" : ""}</text>`}
+    ${lines || `<text class="fn" x="${x + 12}" y="${y + 50}">${empty}</text>`}
   </g>`;
 }
 
@@ -278,36 +333,47 @@ function edgeClass(t, from, to) {
 }
 
 function renderGraph(t) {
-  // Main pipeline down the left column; the LLM is a shared node on the right.
-  const X = 30, W = 330, H = 96, LX = 500, LW = 205;
-  const Y = { user: 14, intent: 130, agent: 246, answer: 362 };
-  const edge = (from, to, label) => {
-    const c = edgeClass(t, from, to);
-    const y1 = Y[from] + H, y2 = Y[to];
-    return `<path class="edge ${c}" d="M${X + W / 2} ${y1} V${y2 - 6}"></path>
-      <path class="ah ${c}" d="M${X + W / 2 - 5} ${y2 - 8} L${X + W / 2} ${y2} L${X + W / 2 + 5} ${y2 - 8} z"></path>
-      <text class="elabel" x="${X + W / 2 + 10}" y="${(y1 + y2) / 2 + 4}">${label}</text>`;
-  };
-  const llmY = 188;
-  const callEdge = (module, label) => {
-    const llmCalls = t ? spansOf(t, "llm").filter((s) => { let p = s.parent; while (p) { const ps = t.spans.get(p); if (!ps) break; if (ps.module === module) return true; p = ps.parent; } return false; }) : [];
-    const active = llmCalls.some((s) => s.status === "running");
-    const done = llmCalls.length && llmCalls.every((s) => s.status !== "running");
-    const yFrom = Y[module] + H / 2, yTo = llmY + (module === "intent" ? 30 : 70);
-    return `<path class="edge call ${active ? "active" : done ? "done" : ""}" d="M${X + W} ${yFrom} C ${X + W + 60} ${yFrom}, ${LX - 60} ${yTo}, ${LX} ${yTo}"></path>
-      <text class="elabel" x="${X + W + 14}" y="${yFrom - 8}">${label}</text>`;
+  // The column of modules on the left; the LLM Gateway is a shared node on the right.
+  const X = 50, W = 320, H = 88, LX = 436, LW = 276, LY = 170, LH = 190;
+  const Y = { user: 12, orchestrator: 124, refine: 236, answer: 348, final: 460 };
+  const r = routeOf(t);
+  const LABEL = { "user>orchestrator": "question + editor location", "orchestrator>refine": "refine_question", "refine>answer": "refined question", "answer>final": "answer (streamed)" };
+  const arrow = (c, x, y, dir) => dir === "down"
+    ? `<path class="ah ${c}" d="M${x - 5} ${y - 8} L${x} ${y} L${x + 5} ${y - 8} z"></path>`
+    : `<path class="ah ${c}" d="M${x - 8} ${y - 5} L${x} ${y} L${x - 8} ${y + 5} z"></path>`;
+  const edges = [];
+  for (let i = 0; i + 1 < CHAIN.length; i++) {
+    const from = CHAIN[i], to = CHAIN[i + 1];
+    const onPath = !r || (r.path.includes(from) && r.path.includes(to) && r.path.indexOf(to) === r.path.indexOf(from) + 1);
+    const c = onPath ? edgeClass(t, from, to) : "skip";
+    const y1 = Y[from] + H, y2 = Y[to], cx = X + W / 2;
+    edges.push(`<path class="edge ${c}" d="M${cx} ${y1} V${y2 - 6}"></path>${arrow(c, cx, y2, "down")}
+      <text class="elabel" x="${cx + 10}" y="${(y1 + y2) / 2 + 4}">${onPath ? LABEL[from + ">" + to] : ""}</text>`);
+  }
+  // Steps the route jumps over are drawn as a bypass on the left.
+  if (r) {
+    for (let i = 0; i + 1 < r.path.length; i++) {
+      const from = r.path[i], to = r.path[i + 1];
+      if (CHAIN.indexOf(to) === CHAIN.indexOf(from) + 1) continue;
+      const c = edgeClass(t, from, to);
+      const y1 = Y[from] + H / 2 + 14, y2 = Y[to] + H / 2 - 14;
+      edges.push(`<path class="edge ${c}" d="M${X} ${y1} C ${X - 44} ${y1}, ${X - 44} ${y2}, ${X - 6} ${y2}"></path>${arrow(c, X, y2, "right")}`);
+    }
+  }
+  const callEdge = (module, yTo) => {
+    const calls = t ? spansOf(t, "llm").filter((s) => { let p = s.parent; while (p) { const ps = t.spans.get(p); if (!ps) break; if (ps.module === module) return true; p = ps.parent; } return false; }) : [];
+    if (!calls.length) return "";
+    const active = calls.some((s) => s.status === "running");
+    const yFrom = Y[module] + H / 2;
+    return `<path class="edge call ${active ? "active" : "done"}" d="M${X + W} ${yFrom} C ${X + W + 50} ${yFrom}, ${LX - 50} ${yTo}, ${LX} ${yTo}"></path>`;
   };
   $("graph").innerHTML = [
-    edge("user", "intent", "question + editor location"),
-    edge("intent", "agent", "question + intent"),
-    edge("agent", "answer", "LLM response"),
-    callEdge("intent", "aiService.generate"),
-    callEdge("agent", "aiService.generate"),
-    nodeSvg(t, "user", X, Y.user, W, H),
-    nodeSvg(t, "intent", X, Y.intent, W, H),
-    nodeSvg(t, "agent", X, Y.agent, W, H),
-    nodeSvg(t, "answer", X, Y.answer, W, H),
-    nodeSvg(t, "llm", LX, llmY, LW, 100),
+    ...edges,
+    callEdge("orchestrator", LY + 36),
+    callEdge("refine", LY + 76),
+    callEdge("answer", LY + 116),
+    ...CHAIN.map((m) => nodeSvg(t, m, X, Y[m], W, H)),
+    nodeSvg(t, "llm", LX, LY, LW, LH),
   ].join("");
 }
 
@@ -359,7 +425,10 @@ function renderInspector(t) {
   box.innerHTML = head + list.map((s) => {
     const callees = s.children.map((c) => t.spans.get(c)).filter(Boolean).map((c) => c.fn);
     const main = s.fn === MAIN_FN[selModule];
-    const next = main && MODULES[selModule].next;
+    const r = routeOf(t);
+    const path = r ? r.path : CHAIN;
+    const after = path[path.indexOf(selModule) + 1];
+    const next = main && after && MODULES[after].title;
     const data = s.data.map((d, i) => `<div class="blk"><div class="lbl">중간값: ${esc(d.label)} <span class="dim">${clock(d.ts)}</span></div>${valueHtml(s.id + ":d" + i, d.value)}</div>`).join("");
     return `<div class="span ${selSpan === s.id ? "sel" : ""}" id="span-${esc(s.id)}">
       <div class="span-h"><span class="fnname">${esc(s.fn)}</span><span class="badge ${s.status}">${s.status}</span>${s.source === "rust" ? '<span class="badge rust">rust</span>' : '<span class="badge">webview</span>'}</div>

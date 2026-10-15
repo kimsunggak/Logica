@@ -189,36 +189,63 @@ function simulateAgent(userMessage: string, instruction: string, target: string 
   return `I tightened the wording and kept citations, labels and LaTeX commands unchanged.\n\n${blocks.join("\n\n")}`;
 }
 
-const DEMO_INTENTS: [RegExp, string][] = [
-  [/rewrite|shorten|tighten|fix|improve|unify|make|change|remove|add|translate|수정|고쳐|줄여|바꿔|다듬|통일|추가|삭제|번역/i, "edit"],
-  [/result|experiment|table|figure|결과|실험|표|그림|성능/i, "result"],
-  [/how|method|approach|algorithm|어떻게|방법|방식|구조|알고리즘/i, "method"],
-  [/claim|prove|support|true|주장|증명|맞아|사실|근거/i, "claim"],
-  [/what is|explain|mean|개념|뜻|의미|무엇|뭐야|설명/i, "concept"],
-];
+/** A demo model reply: text, or a function call. */
+type DemoReply = { text: string } | { tool: { name: string; args: Record<string, unknown> } };
 
-/** Intent Module: pick a type from keywords and restate the question. */
-function simulateIntent(userMessage: string): string {
-  const question = between(userMessage, "user_message") ?? "";
-  const type = DEMO_INTENTS.find(([pattern]) => pattern.test(question))?.[1] ?? "other";
-  const where = between(userMessage, "current_section");
-  return JSON.stringify({ type, intent: `${where ? `${where}: ` : ""}${question.trim()}` });
-}
+const EDIT_REQUEST = /rewrite|shorten|tighten|fix|improve|unify|make|change|remove|add|translate|수정|고쳐|줄여|바꿔|다듬|통일|추가|삭제|번역/i;
+const SMALL_TALK = /^\s*(hi|hello|hey|thanks|thank you|ok|okay|안녕|고마워|고맙|감사|좋아|알겠어)/i;
+const VAGUE = /핵심|요약|전체|전반|무슨 내용|어때|왜|이거|그거|summar|overall|main idea|key point|gist|why/i;
+const hangul = (text: string) => /[가-힣]/.test(text);
 
-/** Answer Agent: edit blocks for an edit request, otherwise a short demo answer. */
-function simulateAnswerAgent(userMessage: string): string {
-  const question = between(userMessage, "user_message") ?? "";
-  const intent = /<intent type="([^"]*)">\n([\s\S]*?)\n<\/intent>/.exec(userMessage);
-  if (intent?.[1] === "edit") {
-    return simulateAgent(userMessage, question, between(userMessage, "selected_text") ?? between(userMessage, "cursor_paragraph"));
+/** Chat Orchestrator's judge: reply to small talk, refine vague questions, answer clear ones. */
+function simulateJudge(last: string): DemoReply {
+  const question = between(last, "user_message") ?? "";
+  if (SMALL_TALK.test(question) && question.length < 40) {
+    return { text: hangul(question) ? "천만에요! 논문에 대해 궁금한 점을 물어보세요." : "You're welcome! Ask me anything about the paper." };
   }
-  const files = [...userMessage.matchAll(/<file path="([^"]+)">/g)].map((m) => m[1]);
-  return `Demo answer for the ${intent?.[1] ?? "other"} question "${intent?.[2] ?? question}". In the desktop app, the connected model answers from the whole paper (${files.join(", ") || "no files"}).`;
+  if (VAGUE.test(question) && !EDIT_REQUEST.test(question)) {
+    return { tool: { name: "refine_question", args: { reason: "The message is broad; refine it with the paper first." } } };
+  }
+  return { tool: { name: "answer_question", args: { reason: "The message says what it is about." } } };
 }
 
+/** Refine Module: restate the question with the paper's title and the editor location, or ask back. */
+function simulateRefine(all: string, last: string): string {
+  const question = (between(last, "user_message") ?? "").trim();
+  if (/^(이거|그거|this|that)\s*\??$/i.test(question) && !between(last, "selected_text")) {
+    return JSON.stringify({ clarify: hangul(question) ? "어느 부분을 말씀하시는 건가요? 문장을 선택하거나 섹션을 알려 주세요." : "Which part do you mean? Select the text or name the section." });
+  }
+  const title = /\\title\{([^}]*)\}/.exec(all)?.[1]?.trim() ?? "this paper";
+  const section = between(last, "current_section");
+  const refined = hangul(question)
+    ? `논문 "${title}"${section ? `의 ${section}` : ""} 기준: ${question} (제안한 방법의 핵심 아이디어, 푸는 문제, 기존 방법과의 차이를 중심으로)`
+    : `In the paper "${title}"${section ? `, ${section}` : ""}: ${question} (focus on the proposed method's key idea, the problem it solves, and how it differs from prior work)`;
+  return JSON.stringify({ refined_question: refined });
+}
+
+/** Answer Module: edit blocks for an edit request, otherwise a short demo answer. */
+function simulateAnswerModule(all: string, last: string): string {
+  const question = between(last, "user_message") ?? "";
+  if (EDIT_REQUEST.test(question)) {
+    return simulateAgent(all, question, between(last, "selected_text") ?? between(last, "cursor_paragraph"));
+  }
+  const refined = between(last, "refined_question");
+  const files = [...all.matchAll(/<file path="([^"]+)">/g)].map((m) => m[1]);
+  return `Demo answer to "${refined ?? question}". In the desktop app, the connected model answers from the whole paper (${files.join(", ") || "no files"}).`;
+}
+
+/** Which call a request body is, from the request itself. */
+function simulateReply(body: Record<string, any>, messages: { content: string }[]): DemoReply {
+  const last = messages[messages.length - 1]?.content ?? "";
+  const all = messages.map((m) => m.content).join("\n\n");
+  if (Array.isArray(body.tools) && body.tools.length) return simulateJudge(last);
+  if (last.includes('{"refined_question":"..."}')) return { text: simulateRefine(all, last) };
+  if (last.includes("You are the Answer Module")) return { text: simulateAnswerModule(all, last) };
+  return { text: simulateAnswer(last) };
+}
+
+/** Inline edit: the rewritten selection, or a reviewable suggestion for the paragraph. */
 function simulateAnswer(userMessage: string): string {
-  if (userMessage.includes('<intent type="')) return simulateAnswerAgent(userMessage);
-  if (userMessage.includes("<user_message>")) return simulateIntent(userMessage);
   const instruction = between(userMessage, "instruction") ?? "";
   const selected = between(userMessage, "selected_text");
   if (userMessage.includes("<instruction>") && selected !== undefined) return demoRewrite(selected, instruction);
@@ -227,30 +254,47 @@ function simulateAnswer(userMessage: string): string {
   return `Here is a tighter version that keeps the citations and LaTeX commands unchanged:\n\n\`\`\`latex\n${demoRewrite(target, instruction)}\n\`\`\`\n\nReview it as a diff before applying.`;
 }
 
-function openAIStream(text: string): string[] {
-  const events = [`event: response.created\ndata: ${JSON.stringify({ type: "response.created" })}\n\n`];
-  for (let i = 0; i < text.length; i += 14) {
-    events.push(`event: response.output_text.delta\ndata: ${JSON.stringify({ type: "response.output_text.delta", delta: text.slice(i, i + 14) })}\n\n`);
+const chunks = (text: string, size = 14) => Array.from({ length: Math.ceil(text.length / size) }, (_, i) => text.slice(i * size, (i + 1) * size));
+const sseEvent = (data: Record<string, unknown>) => `event: ${data.type}\ndata: ${JSON.stringify(data)}\n\n`;
+
+function openAIStream(reply: DemoReply): string[] {
+  const events = [sseEvent({ type: "response.created" })];
+  let output = 0;
+  if ("text" in reply) {
+    for (const delta of chunks(reply.text)) events.push(sseEvent({ type: "response.output_text.delta", delta }));
+    output = Math.ceil(reply.text.length / 4);
+  } else {
+    const args = JSON.stringify(reply.tool.args);
+    const item = { id: "fc_demo", type: "function_call", call_id: "call_demo", name: reply.tool.name };
+    events.push(sseEvent({ type: "response.output_item.added", output_index: 0, item: { ...item, arguments: "" } }));
+    for (const delta of chunks(args)) events.push(sseEvent({ type: "response.function_call_arguments.delta", item_id: "fc_demo", output_index: 0, delta }));
+    events.push(
+      sseEvent({ type: "response.function_call_arguments.done", item_id: "fc_demo", output_index: 0, arguments: args }),
+      sseEvent({ type: "response.output_item.done", output_index: 0, item: { ...item, arguments: args } }),
+    );
+    output = Math.ceil(args.length / 4);
   }
-  events.push(
-    `event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: { usage: { input_tokens: 900, output_tokens: Math.ceil(text.length / 4) } } })}\n\n`,
-  );
+  events.push(sseEvent({ type: "response.completed", response: { usage: { input_tokens: 900, input_tokens_details: { cached_tokens: 0 }, output_tokens: output } } }));
   return events;
 }
 
-function anthropicStream(text: string): string[] {
-  const events = [
-    `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 900 } } })}\n\n`,
-    `event: content_block_start\ndata: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })}\n\n`,
-    `event: ping\ndata: {"type": "ping"}\n\n`,
-  ];
-  for (let i = 0; i < text.length; i += 14) {
-    events.push(`event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: text.slice(i, i + 14) } })}\n\n`);
+function anthropicStream(reply: DemoReply): string[] {
+  const events = [sseEvent({ type: "message_start", message: { usage: { input_tokens: 900 } } })];
+  let output = 0;
+  if ("text" in reply) {
+    events.push(sseEvent({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }), `event: ping\ndata: {"type": "ping"}\n\n`);
+    for (const text of chunks(reply.text)) events.push(sseEvent({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text } }));
+    output = Math.ceil(reply.text.length / 4);
+  } else {
+    const args = JSON.stringify(reply.tool.args);
+    events.push(sseEvent({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_demo", name: reply.tool.name, input: {} } }));
+    for (const partial_json of chunks(args)) events.push(sseEvent({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json } }));
+    output = Math.ceil(args.length / 4);
   }
   events.push(
-    `event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n`,
-    `event: message_delta\ndata: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: Math.ceil(text.length / 4) } })}\n\n`,
-    `event: message_stop\ndata: {"type":"message_stop"}\n\n`,
+    sseEvent({ type: "content_block_stop", index: 0 }),
+    sseEvent({ type: "message_delta", delta: { stop_reason: "text" in reply ? "end_turn" : "tool_use" }, usage: { output_tokens: output } }),
+    sseEvent({ type: "message_stop" }),
   );
   return events;
 }
@@ -437,6 +481,7 @@ export function createDemoBackend(): DemoBackend {
       if (provider === "openai" && auth === "chatgpt") {
         return {
           models: [
+            { slug: "gpt-6.1-sol", display_name: "GPT-6.1 Sol", visibility: "list" },
             { slug: "gpt-6-sol", display_name: "GPT-6 Sol", visibility: "list" },
             { slug: "gpt-6-luna", display_name: "GPT-6 Luna", visibility: "list" },
             { slug: "internal-preview", display_name: "Hidden", visibility: "hide" },
@@ -444,16 +489,20 @@ export function createDemoBackend(): DemoBackend {
         };
       }
       return provider === "openai"
-        ? { data: [{ id: "gpt-6-sol", created: 3 }, { id: "gpt-6-luna", created: 2 }, { id: "text-embedding-3-large", created: 1 }] }
+        ? { data: [{ id: "gpt-6.1-sol", created: 4 }, { id: "gpt-6-sol", created: 3 }, { id: "gpt-6-luna", created: 2 }, { id: "text-embedding-3-large", created: 1 }] }
         : { data: [{ id: "claude-sonnet-5-5", display_name: "Claude Sonnet 5.5" }, { id: "claude-opus-5-5", display_name: "Claude Opus 5.5" }] };
     },
     ai_stream: async ({ request, onEvent }) => {
       const channel = onEvent as Channel;
       const { requestId, provider, body, auth } = request as { requestId: string; provider: string; body: Record<string, any>; auth?: string | null };
       credentialFor(provider, auth);
+      // Tests can make every OpenAI call fail to exercise the Claude fallback.
+      if (provider === "openai" && (globalThis as { __LOGICA_DEMO_FAIL_OPENAI?: boolean }).__LOGICA_DEMO_FAIL_OPENAI) {
+        fail("http_error", "Provider returned HTTP 503", { status: 503, body: '{"error":{"type":"server_error","message":"The demo OpenAI service is unavailable"}}' });
+      }
       const messages: { content: string }[] = provider === "openai" ? body.input : body.messages;
-      const answer = simulateAnswer(messages[messages.length - 1]?.content ?? "");
-      const stream = (provider === "openai" ? openAIStream(answer) : anthropicStream(answer)).join("");
+      const reply = simulateReply(body, messages);
+      const stream = (provider === "openai" ? openAIStream(reply) : anthropicStream(reply)).join("");
       channel.onmessage({ type: "open", status: 200 });
       // Deliver in uneven chunks to exercise the SSE parser.
       for (let i = 0; i < stream.length; ) {

@@ -1,16 +1,16 @@
 /**
- * Answer Agent prompt: the user's question, the intent worked out by the
- * Intent Module and the full source of the paper, in one request.
+ * Answer Module prompt: answer from the whole paper, with the question as
+ * rewritten by the Refine Module when the Chat Orchestrator refined it first.
  */
-import type { AIMessage, AIRequest } from "../types";
-import { formatContext, tag } from "./context";
+import type { AIRequest } from "../types";
+import { tag } from "./context";
 import type { PromptPayload } from "./index";
-import { systemPrompt } from "./system";
+import { editorBlocks, paperPrompt } from "./paper";
 
-const ANSWER_RULES = [
-  "You are the Answer Agent of LOGICA. <paper> holds the full source of the paper the user is writing.",
-  "<intent> is what the user wants, worked out before you by the Intent Module. Use it to understand the question, and the user's own message for its exact wording.",
-  "Answer from the paper. When you rely on a part of it, name the section by number and title so the author can find it.",
+const ANSWER_TASK = [
+  "You are the Answer Module. Answer the user's message from the paper.",
+  "<refined_question>, when present, is the user's message rewritten by an earlier step to be explicit. Use it to understand what to answer, and the user's own message for its exact wording.",
+  "When you rely on a part of the paper, name the section by number and title so the author can find it.",
   "If the paper does not contain what the question needs, say so instead of guessing.",
   "Only when the user asks for a change to the paper, propose every change as an edit block, one block per place:",
   "```edit <file path>",
@@ -25,32 +25,11 @@ const ANSWER_RULES = [
   "Keep answers short and concrete. Answer in the language the user writes in.",
 ].join("\n");
 
-function formatPaper(request: AIRequest): string {
-  const files = (request.projectFiles ?? []).map((f) => `<file path="${f.path}">\n${f.text}\n</file>`);
-  if (request.omittedFiles?.length) files.push(`<omitted_files>\n${request.omittedFiles.join("\n")}\n</omitted_files>`);
-  return files.length ? `<paper>\n${files.join("\n")}\n</paper>` : "";
-}
-
 export function buildAnswerPrompt(request: AIRequest): PromptPayload {
-  const location = formatContext(request.context, ["currentFile", "currentSection"]);
-  const intent = request.intent ? `<intent type="${request.intent.type}">\n${request.intent.text}\n</intent>` : "";
-  const latest = [
-    formatPaper(request),
-    location ? tag("editor_location", location) : "",
-    request.selectedText
-      ? tag("selected_text", request.selectedText)
-      : request.context.currentParagraph
-        ? tag("cursor_paragraph", request.context.currentParagraph)
-        : "",
-    intent,
+  return paperPrompt(request, [
+    ...editorBlocks(request),
     tag("user_message", request.instruction),
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-
-  const history: AIMessage[] = (request.history ?? []).filter((m) => m.content.trim());
-  return {
-    system: `${systemPrompt()}\n\n${ANSWER_RULES}`,
-    messages: [...history, { role: "user", content: latest }],
-  };
+    request.refinedQuestion ? tag("refined_question", request.refinedQuestion) : "",
+    tag("task", ANSWER_TASK),
+  ]);
 }

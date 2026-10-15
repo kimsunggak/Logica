@@ -1,29 +1,27 @@
 /**
- * Chat about the current paper, run as a three-step pipeline:
+ * Chat about the current paper.
  *
- *   👤 User → Intent Module → Answer Agent → 💬 Answer
- *
- * The Intent Module works out what the user wants to know; the Answer Agent
- * answers from the whole paper with that intent. In development every step
- * is reported to the localhost visual debugger (see `src/debug/trace.ts`).
+ * This store holds the conversation; each question is run by the Chat
+ * Orchestrator (`./orchestrator.ts`), which decides whether to reply
+ * directly, answer, or refine the question first, and reports every step to
+ * the localhost runtime debugger in development.
  */
 import { create } from "zustand";
 import { buildChatContext } from "../ai/context/contextBuilder";
 import { paragraphContext } from "../ai/context/paragraphs";
 import { AIError } from "../ai/errors";
-import { MAX_OUTPUT_TOKENS } from "../ai/models/modelConfig";
+import type { RunControl } from "../ai/gateway";
+import { CHAT_MODELS } from "../ai/models/modelConfig";
 import { aiService, newRequestId } from "../ai/service";
 import { lineOf, locateEdit, type ProposedEdit } from "../ai/agent/edits";
-import { parseIntent } from "../ai/agent/intent";
 import { deleteSession, listSessions, loadSession, newSessionId, saveSession, SESSION_VERSION, type SessionSummary } from "./chatHistory";
-import { buildPrompt } from "../ai/prompts";
-import { failSpan, spanData, startSpan, endSpan, step, traced, type Span } from "../debug/trace";
-import type { AIContext, AIMessage, AIRequest, AIResponse, ProjectFile, ProviderId, QuestionIntent } from "../ai/types";
+import { editorLocation, runChatTurn, type Outcome, type Paper, type Stage, type Turn } from "./orchestrator";
+import { endSpan, failSpan, startSpan, step } from "../debug/trace";
+import type { AIContext, AIMessage, ProjectFile, ProviderId } from "../ai/types";
 import { editorSession } from "../editor/editorSession";
 import { outlineText, sectionAt, sectionTrail } from "../latex/parser/documentModel";
 import { currentTexts, navigateTo, openFile } from "../project/projectActions";
 import { notify, useProject } from "../project/projectStore";
-import { useSettings } from "../settings/settingsStore";
 import { t } from "../i18n";
 
 export interface ChatAnchor {
@@ -38,6 +36,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   status: "done" | "streaming" | "error" | "cancelled";
+  /** The model that wrote the answer (the one running while it streams). */
   provider?: ProviderId;
   model?: string;
   /** Text the conversation turn was about (selection or paragraph). */
@@ -48,18 +47,20 @@ export interface ChatMessage {
   instruction?: string;
   /** Outcome of each proposed edit block, by its index in the answer. */
   editStates?: Record<number, EditState>;
-  /** Pipeline step running for this answer. */
-  stage?: "intent" | "agent";
-  /** What the Intent Module understood the question as. */
-  intent?: QuestionIntent;
+  /** Step of the turn running for this answer. */
+  stage?: Stage;
+  /** How the turn ended: direct reply, answer, or a question back. */
+  route?: Outcome;
+  /** The question as rewritten by the Refine Module. */
+  refined?: string;
+  /** The OpenAI model that failed when Claude wrote this answer. */
+  fallbackFrom?: string;
 }
 
 export type EditState = "applied" | "rejected" | "failed";
 
 interface ChatState {
   messages: ChatMessage[];
-  /** Provider override for the chat; null means the default provider. */
-  provider: ProviderId | null;
   runningId: string | null;
   /** Project the conversation belongs to, and the session being shown. */
   root: string | null;
@@ -71,7 +72,6 @@ interface ChatState {
 
 export const useChat = create<ChatState>()(() => ({
   messages: [],
-  provider: null,
   runningId: null,
   root: null,
   sessionId: newSessionId(),
@@ -80,17 +80,15 @@ export const useChat = create<ChatState>()(() => ({
 }));
 
 const MAX_HISTORY_MESSAGES = 12;
-/** Earlier messages the Intent Module sees (to resolve follow-up questions). */
-const INTENT_HISTORY_MESSAGES = 4;
-/** Characters of paper source sent to the Answer Agent (roughly 40k tokens). */
+/** Characters of paper source sent to the Refine and Answer modules (roughly 40k tokens). */
 const PAPER_BUDGET = 150_000;
 
 /**
- * The whole paper for the Answer Agent: the main file and the files it
- * includes, in reading order, as long as they fit the budget. A file open in
- * the editor that is not part of the paper goes first.
+ * The whole paper: the main file and the files it includes, in reading
+ * order, as long as they fit the budget. A file open in the editor that is
+ * not part of the paper goes first.
  */
-function paperFiles(activePath: string | undefined): { files: ProjectFile[]; omitted: string[] } {
+function paperFiles(activePath: string | undefined): Paper {
   const { doc } = useProject.getState();
   const texts = currentTexts();
   const paths = (doc?.files ?? []).filter((f) => f.included && !f.missing).map((f) => f.path);
@@ -108,7 +106,7 @@ function paperFiles(activePath: string | undefined): { files: ProjectFile[]; omi
     files.push({ path, text });
     used += text.length;
   }
-  return { files, omitted };
+  return { files, omitted, budget: PAPER_BUDGET };
 }
 
 /** Finished question and answer pairs; a question whose answer failed is left out. */
@@ -123,168 +121,16 @@ function conversation(): AIMessage[] {
   return out.slice(-MAX_HISTORY_MESSAGES);
 }
 
-export function chatProvider(): ProviderId {
-  return useChat.getState().provider ?? useSettings.getState().ai.defaultProvider;
-}
-
 function updateMessage(id: string, patch: Partial<ChatMessage>) {
   useChat.setState((s) => ({ messages: s.messages.map((m) => (m.id === id ? { ...m, ...patch } : m)) }));
 }
 
-/** Provider request currently running for the chat. */
-let activeRequest: string | null = null;
-/** Answers the author stopped, so the next step is not started. */
-const stopped = new Set<string>();
-
-interface Turn {
-  id: string;
-  provider: ProviderId;
-  model: string;
-  instruction: string;
-  selectedText?: string;
-  context: AIContext;
-  history: AIMessage[];
-  activePath?: string;
-}
-
-/** The exact system prompt and messages a provider receives, for the debugger. */
-function promptText(request: AIRequest): string {
-  const payload = buildPrompt(request);
-  return [`[system]\n${payload.system}`, ...payload.messages.map((m) => `[${m.role}]\n${m.content}`)].join("\n\n");
-}
-
-/** One model call through the AI service (the Rust transport reports its own span under it). */
-async function run(turn: Turn, parent: Span, request: AIRequest, onText?: (text: string) => void): Promise<AIResponse> {
-  activeRequest = request.id;
-  const span = startSpan(
-    turn.id,
-    parent,
-    "llm",
-    "aiService.generate",
-    () => ({ provider: turn.provider, model: turn.model, task: request.task, request_id: request.id, prompt_chars: promptText(request).length }),
-    request.id,
-  );
-  let first = true;
-  const started = performance.now();
-  try {
-    const response = await aiService.generate(turn.provider, request, {
-      onDelta: (_d, full) => {
-        if (first) {
-          first = false;
-          spanData(span, "llm", "first_text", () => ({ ms: Math.round(performance.now() - started) }));
-        }
-        onText?.(full);
-      },
-    });
-    endSpan(span, "llm", () => ({ text: response.text, finishReason: response.finishReason, usage: response.usage }));
-    return response;
-  } catch (err) {
-    failSpan(span, "llm", err);
-    throw err;
-  } finally {
-    activeRequest = null;
-    if (stopped.has(turn.id)) throw new AIError("cancelled", t("chat.stopped"), { provider: turn.provider });
-  }
-}
-
-function base(turn: Turn): Pick<AIRequest, "instruction" | "selectedText" | "model"> {
-  return { instruction: turn.instruction, selectedText: turn.selectedText, model: turn.model };
-}
-
-/** What the user is looking at, as handed from the user input to the Intent Module. */
-function editorLocation(turn: Turn) {
-  return {
-    file: turn.context.currentFile ?? null,
-    section: turn.context.currentSection ?? null,
-    selected_text: turn.selectedText ?? null,
-    cursor_paragraph: turn.selectedText ? null : (turn.context.currentParagraph ?? null),
-  };
-}
-
-/** Step 1: work out what the user wants to know. */
-function runIntentModule(turn: Turn, root: Span): Promise<QuestionIntent> {
-  const history = turn.history.slice(-INTENT_HISTORY_MESSAGES);
-  return traced(
-    turn.id,
-    root,
-    "intent",
-    "runIntentModule",
-    () => ({ question: turn.instruction, ...editorLocation(turn), history_pairs: history.length / 2 }),
-    async (span) => {
-      const request: AIRequest = {
-        ...base(turn),
-        id: `${turn.id}-intent`,
-        task: "intent",
-        context: {
-          paperTitle: turn.context.paperTitle,
-          outline: turn.context.outline,
-          currentFile: turn.context.currentFile,
-          currentSection: turn.context.currentSection,
-          currentParagraph: turn.context.currentParagraph,
-        },
-        history,
-        maxOutputTokens: MAX_OUTPUT_TOKENS.intent,
-      };
-      step(turn.id, span, "intent", "buildIntentPrompt", () => ({ task: "intent", history_pairs: history.length / 2 }), () => promptText(request));
-      const response = await run(turn, span, request);
-      const intent = parseIntent(response.text, turn.instruction);
-      step(turn.id, span, "intent", "parseIntent", response.text, intent);
-      return intent;
-    },
-  );
-}
-
-/** Step 2: answer from the whole paper with the intent. */
-function runAnswerAgent(turn: Turn, root: Span, intent: QuestionIntent): Promise<AIResponse> {
-  return traced(
-    turn.id,
-    root,
-    "agent",
-    "runAnswerAgent",
-    () => ({ question: turn.instruction, intent, history_pairs: turn.history.length / 2 }),
-    async (span) => {
-      const { files, omitted } = paperFiles(turn.activePath);
-      step(
-        turn.id,
-        span,
-        "agent",
-        "paperFiles",
-        { budget_chars: PAPER_BUDGET, active_file: turn.activePath ?? null },
-        () => ({
-          files: files.map((f) => ({ path: f.path, chars: f.text.length })),
-          omitted,
-          total_chars: files.reduce((n, f) => n + f.text.length, 0),
-          text: files.map((f) => `% ---- ${f.path}\n${f.text}`).join("\n"),
-        }),
-      );
-      const request: AIRequest = {
-        ...base(turn),
-        id: turn.id,
-        task: "answer",
-        context: {
-          currentFile: turn.context.currentFile,
-          currentSection: turn.context.currentSection,
-          currentParagraph: turn.context.currentParagraph,
-        },
-        history: turn.history,
-        projectFiles: files,
-        omittedFiles: omitted,
-        intent,
-        maxOutputTokens: MAX_OUTPUT_TOKENS.answer,
-      };
-      step(turn.id, span, "agent", "buildAnswerPrompt", () => ({ task: "answer", intent, files: files.length }), () => promptText(request));
-      updateMessage(turn.id, { stage: "agent", intent });
-      return run(turn, span, request, (full) => updateMessage(turn.id, { content: full }));
-    },
-    (response) => ({ text: response.text, finishReason: response.finishReason }),
-  );
-}
+/** The turn running now, so it can be stopped. */
+let running: RunControl | null = null;
 
 export async function sendChatMessage(text: string): Promise<void> {
   const instruction = text.trim();
   if (!instruction || useChat.getState().runningId) return;
-  const provider = chatProvider();
-  const model = useSettings.getState().ai.models[provider];
   const { doc, name } = useProject.getState();
   const snapshot = editorSession.selection();
 
@@ -313,8 +159,6 @@ export async function sendChatMessage(text: string): Promise<void> {
   const requestId = newRequestId();
   const turn: Turn = {
     id: requestId,
-    provider,
-    model,
     instruction,
     selectedText: snapshot && snapshot.from !== snapshot.to ? snapshot.text : undefined,
     context,
@@ -322,50 +166,74 @@ export async function sendChatMessage(text: string): Promise<void> {
     activePath: snapshot?.path,
   };
 
+  const first = CHAT_MODELS.judge.primary;
   const userMessage: ChatMessage = { id: `${requestId}-u`, role: "user", content: instruction, status: "done", contextLabel };
   const assistantMessage: ChatMessage = {
     id: requestId,
     role: "assistant",
     content: "",
     status: "streaming",
-    provider,
-    model,
+    provider: first.provider,
+    model: first.model,
     anchor,
     instruction,
-    stage: "intent",
+    stage: "judge",
   };
   useChat.setState((s) => ({ messages: [...s.messages, userMessage, assistantMessage], runningId: requestId }));
 
   // One trace per question; its id is the answer's message id.
-  const root = startSpan(requestId, null, "pipeline", "sendChatMessage", () => ({ question: instruction, provider, model }));
+  const root = startSpan(requestId, null, "pipeline", "sendChatMessage", () => ({ question: instruction, models: CHAT_MODELS }));
   step(requestId, root, "user", "receiveUserInput", instruction, () => ({ question: instruction, ...editorLocation(turn), history_pairs: turn.history.length / 2 }));
+  const control: RunControl = { stopped: false, activeRequest: null };
+  running = control;
   try {
-    const intent = await runIntentModule(turn, root);
-    const response = await runAnswerAgent(turn, root, intent);
-    const content = response.text + (response.finishReason === "length" ? `\n\n${t("chat.truncated")}` : "");
-    updateMessage(requestId, { content, status: "done", stage: undefined });
-    step(requestId, root, "answer", "showFinalAnswer", content, () => ({
-      finishReason: response.finishReason,
-      usage: response.usage,
+    const result = await runChatTurn(turn, {
+      root,
+      control,
+      paper: () => paperFiles(turn.activePath),
+      hooks: {
+        onStage: (stage) => updateMessage(requestId, { stage }),
+        onRefined: (refined) => updateMessage(requestId, { refined }),
+        onText: (full) => updateMessage(requestId, { content: full }),
+        onModel: (choice) => updateMessage(requestId, { provider: choice.provider, model: choice.model }),
+      },
+    });
+    const content = result.content + (result.finishReason === "length" ? `\n\n${t("chat.truncated")}` : "");
+    updateMessage(requestId, {
+      content,
+      status: "done",
+      stage: undefined,
+      route: result.outcome,
+      provider: result.choice.provider,
+      model: result.choice.model,
+      fallbackFrom: result.fallbackFrom?.model,
+    });
+    step(requestId, root, "final", "showFinalAnswer", content, () => ({
+      route: result.route,
+      outcome: result.outcome,
+      model: result.choice.model,
+      fallback_from: result.fallbackFrom?.model ?? null,
+      finishReason: result.finishReason,
+      usage: result.usage,
       edit_blocks: splitBlocks(content).filter((b) => b.kind === "code" && b.lang === "edit").length,
     }));
-    endSpan(root, "pipeline", { status: "done" });
+    endSpan(root, "pipeline", { status: "done", route: result.route, outcome: result.outcome });
   } catch (err) {
     const error = err instanceof AIError ? err : new AIError("unknown", String(err));
     if (error.kind === "cancelled") updateMessage(requestId, { status: "cancelled", stage: undefined });
     else updateMessage(requestId, { status: "error", stage: undefined, content: error.message });
     failSpan(root, "pipeline", error);
   } finally {
-    stopped.delete(requestId);
+    if (running === control) running = null;
     useChat.setState({ runningId: null });
   }
 }
 
 export function stopChat() {
-  const { runningId } = useChat.getState();
-  if (!runningId) return;
-  stopped.add(runningId);
-  if (activeRequest) void aiService.cancel(activeRequest);
+  const control = running;
+  if (!control) return;
+  control.stopped = true;
+  if (control.activeRequest) void aiService.cancel(control.activeRequest);
 }
 
 // ---------------------------------------------------------------- saved sessions
@@ -444,10 +312,6 @@ useChat.subscribe((state, prev) => {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flushSave, SAVE_DELAY_MS);
 });
-
-export function setChatProvider(provider: ProviderId) {
-  useChat.setState({ provider });
-}
 
 export interface Block {
   kind: "text" | "code";

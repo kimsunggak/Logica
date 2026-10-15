@@ -134,7 +134,7 @@ fn str_field<'a>(obj: &'a Map<String, Value>, key: &str) -> &'a str {
     obj.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
-/// `[trace 3f2a +0.183s] intent  runIntentModule  completed (177 ms)`
+/// `[trace 3f2a +0.183s] orchestrator  runOrchestrator  completed (177 ms)`
 fn cli_line(obj: &Map<String, Value>, relative_ms: u64) -> String {
     let trace = str_field(obj, "trace_id");
     let short = &trace[trace.len().saturating_sub(4)..];
@@ -464,7 +464,7 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(super::server::serve(listener, hub.clone(), port));
-        hub.emit(json!({ "trace_id": "t1", "span_id": "a", "event_type": "span_start", "module": "intent", "function": "runIntentModule", "input": "key sk-ant-api03-SECRETSECRET" }));
+        hub.emit(json!({ "trace_id": "t1", "span_id": "a", "event_type": "span_start", "module": "orchestrator", "function": "runOrchestrator", "input": "key sk-ant-api03-SECRETSECRET" }));
 
         let get = |path: &'static str, host: String| async move {
             let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
@@ -481,12 +481,12 @@ mod tests {
         let mut seen = String::new();
         let mut buf = [0u8; 4096];
         // History replay, then a live event.
-        while !seen.contains("runIntentModule") {
+        while !seen.contains("runOrchestrator") {
             let n = events.read(&mut buf).await.unwrap();
             seen.push_str(&String::from_utf8_lossy(&buf[..n]));
         }
-        hub.emit(json!({ "trace_id": "t1", "span_id": "a", "event_type": "span_end", "module": "intent", "function": "parseIntent" }));
-        while !seen.contains("parseIntent") {
+        hub.emit(json!({ "trace_id": "t1", "span_id": "a", "event_type": "span_end", "module": "orchestrator", "function": "chooseRoute" }));
+        while !seen.contains("chooseRoute") {
             let n = events.read(&mut buf).await.unwrap();
             seen.push_str(&String::from_utf8_lossy(&buf[..n]));
         }

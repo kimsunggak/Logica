@@ -1,7 +1,7 @@
 /**
  * Runtime trace events for the visual debugger.
  *
- * During `npm run tauri dev` the chat pipeline reports every step it runs
+ * During `npm run tauri dev` a chat turn reports every step it runs
  * (function, caller, input, output, timing). Events go to the Rust backend
  * (`debug_trace`), which prints them in the terminal and streams them to the
  * standalone page at http://127.0.0.1:1430. Production builds and the
@@ -12,7 +12,8 @@
  */
 import { call, isDesktop } from "../lib/backend";
 
-export type TraceModule = "pipeline" | "user" | "intent" | "agent" | "llm" | "answer";
+/** Where a span runs: the steps of a chat turn, and `llm` for model calls (LLM Gateway, Rust). */
+export type TraceModule = "pipeline" | "user" | "orchestrator" | "refine" | "answer" | "llm" | "final";
 export type TraceStatus = "running" | "completed" | "error";
 
 export interface Span {

@@ -24,6 +24,7 @@ import type {
   ModelConfig,
   StreamHandlers,
 } from "../../types";
+import { toToolCalls, type StreamedCall } from "../toolCalls";
 
 /** Platform API keys get `data[]`; ChatGPT sign-in gets the plan catalog `models[]`. */
 interface OpenAIModelList {
@@ -80,6 +81,20 @@ export class OpenAIProvider implements AIProvider {
       input: prompt.messages.map((m) => ({ role: m.role, content: m.content })),
       stream: true,
       store: false,
+      ...(request.tools?.length
+        ? {
+            tools: request.tools.map((tool) => ({
+              type: "function",
+              name: tool.name,
+              description: tool.description,
+              parameters: tool.parameters,
+              strict: true,
+            })),
+            tool_choice: "auto",
+            parallel_tool_calls: false,
+          }
+        : {}),
+      ...(request.reasoningEffort ? { reasoning: { effort: request.reasoningEffort } } : {}),
       ...(request.maxOutputTokens && auth === "api_key" ? { max_output_tokens: request.maxOutputTokens } : {}),
     };
   }
@@ -100,6 +115,21 @@ export class OpenAIProvider implements AIProvider {
     let usage: AIUsage | undefined;
     let completed = false;
     let streamError: AIError | null = null;
+    // Function calls by output item; arguments arrive as streamed JSON text.
+    const calls = new Map<string, StreamedCall>();
+    const callOf = (key: string) => {
+      let call = calls.get(key);
+      if (!call) calls.set(key, (call = { id: "", name: "", args: "" }));
+      return call;
+    };
+    const keyOf = (json: any): string => String(json.item_id ?? json.item?.id ?? `#${json.output_index}`);
+    const readItem = (json: any, item: any) => {
+      if (item?.type !== "function_call") return;
+      const call = callOf(keyOf(json));
+      if (typeof item.call_id === "string") call.id = item.call_id;
+      if (typeof item.name === "string") call.name = item.name;
+      if (typeof item.arguments === "string" && item.arguments) call.args = item.arguments;
+    };
 
     const handle = (event: SSEEvent) => {
       if (event.data === "[DONE]") return;
@@ -118,12 +148,27 @@ export class OpenAIProvider implements AIProvider {
             handlers?.onDelta?.(json.delta, text);
           }
           break;
+        case "response.output_item.added":
+        case "response.output_item.done":
+          readItem(json, json.item);
+          break;
+        case "response.function_call_arguments.delta":
+          if (typeof json.delta === "string") callOf(keyOf(json)).args += json.delta;
+          break;
+        case "response.function_call_arguments.done":
+          if (typeof json.arguments === "string") callOf(keyOf(json)).args = json.arguments;
+          break;
         case "response.completed":
           completed = true;
           usage = {
             inputTokens: json.response?.usage?.input_tokens,
+            cachedInputTokens: json.response?.usage?.input_tokens_details?.cached_tokens,
             outputTokens: json.response?.usage?.output_tokens,
           };
+          // Calls not streamed as items (some backends) are still in the final output.
+          if (calls.size === 0 && Array.isArray(json.response?.output)) {
+            json.response.output.forEach((item: any, i: number) => readItem({ item_id: item?.id ?? `out${i}` }, item));
+          }
           break;
         case "response.incomplete":
           completed = true;
@@ -154,7 +199,8 @@ export class OpenAIProvider implements AIProvider {
         provider: this.id,
       });
     }
-    return { id: request.id, provider: this.id, model: request.model, text, finishReason, usage };
+    const toolCalls = toToolCalls([...calls.values()]);
+    return { id: request.id, provider: this.id, model: request.model, text, ...(toolCalls.length ? { toolCalls } : {}), finishReason, usage };
   }
 
   async cancel(requestId: string): Promise<void> {

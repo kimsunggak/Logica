@@ -23,7 +23,7 @@ LOGICA는 개인 연구용 로컬 LaTeX 논문 작성 도구입니다. 논문 �
 | Editor | CodeMirror 6, LaTeX 문법 강조, 줄 번호, 괄호 매칭, undo/redo, 검색/바꾸기, 저장 상태 표시, `\section` `\cite` `\ref` `\eqref` `\label` 등 자동완성 |
 | 미리보기와 PDF | TeX 엔진 내장(설치된 TeX가 없으면 자동 사용), 입력을 멈추면 자동 저장 후 컴파일하는 실시간 미리보기(설정에서 끌 수 있음), 논문 페이지만 보이는 미리보기, **PDF 내보내기**로 원하는 위치에 저장, `latexmk` > `pdflatex` > `xelatex` 순 자동 선택(또는 직접 지정/사용자 명령), 타임아웃, 주요 오류만 추출(파일:줄 클릭 이동) |
 | AI 인라인 편집 | 텍스트 선택 후 `Cmd/Ctrl+K`, 기본 명령(Improve writing, Make concise, Make academic, Improve clarity, Fix grammar, Rewrite, 직접 입력), streaming 표시, Stop, diff 확인 후 Accept / Reject / Regenerate(다른 provider로 재생성 가능) |
-| AI 채팅 (에이전트) | 논문 전체 원고와 커서 위치를 보고 여러 곳, 여러 파일의 수정안을 한 번에 제안. 수정마다 diff와 LaTeX 검사 결과를 보여 주고 하나씩 또는 모두 적용/거절 |
+| AI 채팅 (에이전트) | Chat Orchestrator가 질문마다 처리 갈래를 고름: 잡담은 바로 답하고, 명확한 질문은 바로 답변하고, 모호한 질문은 논문 전체를 보고 명확한 질문으로 정제한 뒤 답변(정제해도 모호하면 되물음). 수정 요청에는 여러 곳, 여러 파일의 수정안을 제안하고 수정마다 diff와 LaTeX 검사 결과를 보여 주며 하나씩 또는 모두 적용/거절 |
 | Citation / Reference | `references.bib` 파싱, `\cite{` 입력 시 key/제목/저자/연도 자동완성, `\ref{` 라벨 자동완성, `\ref` `\eqref` `\cite` `\input` 위에서 `F12` 또는 `Cmd/Ctrl+클릭`으로 정의 위치 이동 |
 | 상태 복원 | 마지막 프로젝트, 열린 파일, 파일별 커서 위치, outline 접힘 상태, 패널 크기와 표시 여부, 테마, provider와 model 선택 |
 
@@ -124,7 +124,7 @@ LOGICA는 특정 provider에 묶이지 않도록 공통 `AIProvider` 인터페�
 | 설정, 최근 작업, 창 배치 | `%APPDATA%\app.logica.desktop\state.json` |
 | API key, ChatGPT 로그인 토큰 | Windows 자격 증명 관리자 (macOS 키체인, Linux Secret Service) |
 
-채팅 세션 파일 형식은 `{ version, createdAt, updatedAt, messages }`입니다. 채팅창의 기록 버튼에서 이전 대화를 불러오거나 삭제하고, 새 대화 버튼으로 새 세션을 시작합니다. 질문할 때 보내는 내용(원고, 질문)은 선택한 AI 제공자(OpenAI, Anthropic)로 전송됩니다.
+채팅 세션 파일 형식은 `{ version, createdAt, updatedAt, messages }`입니다. 채팅창의 기록 버튼에서 이전 대화를 불러오거나 삭제하고, 새 대화 버튼으로 새 세션을 시작합니다. 질문할 때 보내는 내용(원고, 질문)은 OpenAI로 전송되고, OpenAI 호출이 실패하면 Anthropic API key가 연결된 경우 같은 내용이 Anthropic으로 전송됩니다.
 
 ## 보안 설계
 
@@ -142,7 +142,11 @@ LOGICA는 특정 provider에 묶이지 않도록 공통 `AIProvider` 인터페�
 AI 호출 때 선택 텍스트만 보내지 않고, 같은 문서 모델(`PaperDocument`)에서 필요한 부분만 골라 공통 semantic context를 만듭니다. 논문 전체를 매번 보내지 않습니다.
 
 - 인라인 편집: 논문 제목, abstract, outline, 현재 section 경로(예: `3 Method › 3.2 Uncertainty Estimation`), 앞 문단, 선택 텍스트, 다음 문단
-- 채팅: 위 항목에 더해 프로젝트, 현재 파일, 커서 문단, 현재 section 원문(길이 제한)
+- 채팅: 한 질문에 모델을 최대 3번 부릅니다(모두 `gpt-6.1-sol`, 실패하면 `claude-sonnet-5-5`, `src/ai/models/modelConfig.ts`의 `CHAT_MODELS`).
+  1. 판단(Chat Orchestrator, reasoning low): 질문, 편집기 위치(파일, section, 선택 텍스트나 커서 문단), 최근 대화. 원고는 보내지 않습니다. 모델이 `refine_question` 또는 `answer_question` 툴을 부르거나, 잡담이면 툴 없이 바로 답합니다.
+  2. 정제(Refine Module, reasoning medium, 판단이 `refine_question`일 때만): 원고 전체(최대 150,000자), 대화, 편집기 위치, 질문. 명확한 질문 하나로 다시 쓰거나 되물을 질문을 JSON으로 돌려줍니다.
+  3. 답변(Answer Module, reasoning medium): 원고 전체, 대화, 편집기 위치, 원래 질문, 정제된 질문(있을 때).
+  - 정제와 답변 요청은 같은 system prompt, 원고, 대화로 시작하고 각자의 지시와 질문을 마지막 메시지에 둡니다. 앞부분이 같아야 provider의 prompt cache가 두 번째 호출에서 원고를 다시 계산하지 않기 때문입니다. 캐시된 토큰 수는 런타임 디버거에서 확인합니다.
 
 문단은 빈 줄로 나누며, `\section`, `\begin`/`\end`, `\label`, 주석 줄 같은 구조 줄은 문단에 넣지 않습니다. 그래서 "이 문단 고쳐줘"가 제목을 바꾸지 않습니다.
 
@@ -166,12 +170,14 @@ src/
 │   ├── types/         AIProvider, AIRequest, AIResponse, ModelConfig
 │   ├── providers/     openai/, anthropic/ adapter와 registry
 │   ├── context/       context builder, 문단 탐지
-│   ├── prompts/       system, rewrite, presets, chat
+│   ├── prompts/       system, rewrite, presets, 채팅의 judge, refine, answer (paper.ts가 공통 앞부분)
 │   ├── streaming/     SSE parser, backend transport
 │   ├── credentials/   credential 상태 조회/저장/삭제
-│   ├── models/        모델 설정
+│   ├── models/        모델 설정 (채팅 호출별 모델과 fallback: CHAT_MODELS)
+│   ├── tools/         Chat Orchestrator가 부르는 툴 정의 (refine_question, answer_question)
+│   ├── gateway.ts     LLM Gateway: 채팅 호출의 모델 선택, Claude fallback, 호출 추적
 │   └── service.ts     UI가 쓰는 유일한 AI 진입점
-├── chat/              AI 채팅 패널
+├── chat/              AI 채팅 패널, 대화 상태(chatStore), Chat Orchestrator(orchestrator.ts)
 ├── pdf/               pdf.js 미리보기
 ├── settings/          설정 저장소, 연결 상태, 설정 창
 ├── storage/           작업 상태 저장/복원
@@ -188,9 +194,9 @@ src-tauri/src/
 의존 방향:
 
 ```
-Editor / Chat UI
-   ↓
-AI Service (src/ai/service.ts)
+Chat UI → Chat Orchestrator → Refine / Answer Module → LLM Gateway (모델 선택, Claude fallback)
+                                                            ↓
+Editor (인라인 편집) ───────────────────────────→ AI Service (src/ai/service.ts)
    ↓
 AIProvider interface
    ↓
@@ -212,7 +218,7 @@ cd src-tauri && cargo test -- --ignored   # 실제 Anthropic API에 잘못된 ke
 
 ### 런타임 디버거 (개발용)
 
-`npm run tauri dev`로 앱을 띄우면 터미널에 `LOGICA debug visualizer: http://127.0.0.1:1430`이 함께 출력됩니다. 이 주소를 브라우저에서 열면 앱에서 보낸 채팅 질문이 User Input, Intent Module, Answer Agent, Final Answer를 거치는 과정을 실시간으로 볼 수 있습니다. 실행 중인 단계 강조, 함수 호출 순서(caller와 callee), 단계별 입력과 출력, 모델에 보낸 프롬프트와 응답, Rust의 AI 요청 처리까지 질문 하나를 trace 하나로 묶어 보여 주며, 같은 이벤트가 터미널에도 한 줄씩 찍힙니다.
+`npm run tauri dev`로 앱을 띄우면 터미널에 `LOGICA debug visualizer: http://127.0.0.1:1430`이 함께 출력됩니다. 이 주소를 브라우저에서 열면 앱에서 보낸 채팅 질문이 User Input, Chat Orchestrator, Refine Module, Answer Module, Final Answer 중 어느 갈래로 처리되는지(건너뛴 모듈은 흐리게) 실시간으로 볼 수 있습니다. LLM Gateway 노드에는 호출마다 모델, 실패와 Claude fallback이 표시됩니다. 실행 중인 단계 강조, 함수 호출 순서(caller와 callee), 단계별 입력과 출력, 모델에 보낸 프롬프트와 응답, Rust의 AI 요청 처리까지 질문 하나를 trace 하나로 묶어 보여 주며, 같은 이벤트가 터미널에도 한 줄씩 찍힙니다.
 
 - 이벤트는 웹뷰(`src/debug/trace.ts`)와 Rust(`src-tauri/src/ai.rs`)의 실제 실행에서 만들어지고, `src-tauri/src/debug_trace.rs`가 Server-Sent Events로 페이지에 보냅니다.
 - 키, 토큰, `Bearer` 값은 이벤트를 만드는 단계와 backend에서 두 번 가립니다. 서버는 `127.0.0.1`에만 열리고 다른 Host 이름의 요청은 거부합니다.

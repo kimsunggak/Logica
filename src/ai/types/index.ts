@@ -32,22 +32,34 @@ export interface AIMessage {
 }
 
 /**
- * Chat runs as a pipeline: `intent` works out what the user wants to know,
- * then `answer` (the Answer Agent) answers from the whole paper.
+ * Chat is run by the Chat Orchestrator: `judge` decides what to do with a
+ * message (reply, answer, or refine first), `refine` rewrites an abstract
+ * question into a clear one, and `answer` answers from the whole paper.
  */
-export type AITask = "inline-edit" | "intent" | "answer";
+export type AITask = "inline-edit" | "judge" | "refine" | "answer";
+
+/** The three model calls of a chat turn. */
+export type ChatTask = Exclude<AITask, "inline-edit">;
+
+export type ReasoningEffort = "low" | "medium" | "high";
+
+/** A function the model may call; `parameters` is a JSON Schema object. */
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+/** A function call made by the model. */
+export interface ToolCall {
+  id: string;
+  name: string;
+  /** Parsed arguments; empty when the model sent none or invalid JSON. */
+  arguments: Record<string, unknown>;
+}
 
 export interface ProjectFile {
   path: string;
-  text: string;
-}
-
-export type IntentType = "concept" | "method" | "result" | "claim" | "edit" | "other";
-
-/** What the user wants, as worked out by the Intent Module. */
-export interface QuestionIntent {
-  type: IntentType;
-  /** One or two sentences in the user's language. */
   text: string;
 }
 
@@ -57,15 +69,19 @@ export interface AIRequest {
   instruction: string;
   selectedText?: string;
   context: AIContext;
-  /** Earlier chat turns (intent and answer). */
+  /** Earlier chat turns. */
   history?: AIMessage[];
-  /** The paper's source files (answer only, size-limited). */
+  /** The paper's source files (refine and answer, size-limited). */
   projectFiles?: ProjectFile[];
   /** Paper files left out of `projectFiles` to stay within the budget. */
   omittedFiles?: string[];
-  /** Output of the Intent Module (answer only). */
-  intent?: QuestionIntent;
+  /** The question as rewritten by the Refine Module (answer only). */
+  refinedQuestion?: string;
+  /** Functions the model may call instead of replying (judge only). */
+  tools?: ToolDefinition[];
   model: string;
+  /** Reasoning effort for reasoning models (OpenAI only). */
+  reasoningEffort?: ReasoningEffort;
   maxOutputTokens?: number;
 }
 
@@ -73,6 +89,8 @@ export type FinishReason = "stop" | "length" | "cancelled" | "error";
 
 export interface AIUsage {
   inputTokens?: number;
+  /** Input tokens served from the provider's prompt cache. */
+  cachedInputTokens?: number;
   outputTokens?: number;
 }
 
@@ -81,6 +99,8 @@ export interface AIResponse {
   provider: ProviderId;
   model: string;
   text: string;
+  /** Function calls the model made (only when the request offered tools). */
+  toolCalls?: ToolCall[];
   finishReason: FinishReason;
   usage?: AIUsage;
 }
