@@ -1,9 +1,10 @@
 import { Clock, FilePlus, FolderOpen, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ComponentType } from "react";
 import logo from "../assets/logo.png";
 import { t as translateNow, useT } from "../i18n";
 import { confirmDialog, isDemoMode } from "../lib/backend";
 import { timeAgo } from "../lib/time";
+import type { MathFieldProps } from "../home/background/MathField";
 import { PdfThumbnail } from "../pdf/PdfThumbnail";
 import { newPaper, openProject } from "../project/projectActions";
 import { pathExists } from "../project/projectApi";
@@ -12,6 +13,12 @@ import { useWorkspace, type ProjectMemory } from "../storage/workspaceStore";
 import { chooseAndOpenProject } from "./TopBar";
 
 const THUMB_WIDTH = 220;
+
+// Loaded after the home screen is up so the WebGL code never delays it. A failed load
+// only costs the decoration, never the home screen.
+const MathField = lazy<ComponentType<MathFieldProps>>(() =>
+  import("../home/background/MathField").catch(() => ({ default: () => null })),
+);
 
 function folderName(root: string): string {
   return root.split(/[\\/]/).filter(Boolean).pop() ?? root;
@@ -93,59 +100,67 @@ export function Home() {
   const loading = useProject((s) => s.loading);
   const projects = useWorkspace((s) => s.projects);
   const recent = Object.entries(projects).sort(([, a], [, b]) => (b.lastOpened ?? 0) - (a.lastOpened ?? 0));
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const columnRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50 dark:bg-[#0c1117]" data-testid="home">
-      <div className="mx-auto max-w-5xl px-8 py-10">
-        <h1>
-          <img src={logo} alt="LOGICA" className="h-20 w-20 select-none" draggable={false} data-testid="home-logo" />
-        </h1>
+    // The background colors match LIGHT_THEME / DARK_THEME in home/background/renderer.ts.
+    <div className="relative min-h-0 flex-1 bg-[#f8fafc] dark:bg-[#0c1117]" data-testid="home">
+      <Suspense fallback={null}>
+        <MathField interactionRef={scrollRef} columnRef={columnRef} />
+      </Suspense>
+      <div ref={scrollRef} className="absolute inset-0 overflow-y-auto">
+        <div ref={columnRef} className="mx-auto max-w-5xl px-8 py-10">
+          <h1>
+            <img src={logo} alt="LOGICA" className="h-20 w-20 select-none" draggable={false} data-testid="home-logo" />
+          </h1>
 
-        <div className="mt-7 grid gap-3 sm:grid-cols-2">
-          <button
-            className="flex items-center gap-3 rounded-lg border border-sky-600 bg-sky-600 px-4 py-3.5 text-left text-white shadow-sm hover:bg-sky-700 disabled:opacity-60"
-            onClick={() => void newPaper()}
-            disabled={loading}
-            data-testid="home-new"
-          >
-            <FilePlus size={22} />
-            <span>
-              <span className="block text-[14px] font-semibold">{t("home.new")}</span>
-              <span className="block text-[12px] text-sky-100">{t("home.newHint")}</span>
-            </span>
-          </button>
-          <button
-            className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-[#151c26] dark:hover:bg-slate-800"
-            onClick={() => void chooseAndOpenProject()}
-            disabled={loading}
-            data-testid="home-open"
-          >
-            <FolderOpen size={22} className="text-slate-500" />
-            <span>
-              <span className="block text-[14px] font-semibold">{t("home.open")}</span>
-              <span className="block text-[12px] text-slate-500">{t("home.openHint")}</span>
-            </span>
-          </button>
+          <div className="mt-7 grid gap-3 sm:grid-cols-2">
+            <button
+              className="flex items-center gap-3 rounded-lg border border-sky-600 bg-sky-600 px-4 py-3.5 text-left text-white shadow-sm hover:bg-sky-700 disabled:opacity-60"
+              onClick={() => void newPaper()}
+              disabled={loading}
+              data-testid="home-new"
+            >
+              <FilePlus size={22} />
+              <span>
+                <span className="block text-[14px] font-semibold">{t("home.new")}</span>
+                <span className="block text-[12px] text-sky-100">{t("home.newHint")}</span>
+              </span>
+            </button>
+            <button
+              className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-[#151c26] dark:hover:bg-slate-800"
+              onClick={() => void chooseAndOpenProject()}
+              disabled={loading}
+              data-testid="home-open"
+            >
+              <FolderOpen size={22} className="text-slate-500" />
+              <span>
+                <span className="block text-[14px] font-semibold">{t("home.open")}</span>
+                <span className="block text-[12px] text-slate-500">{t("home.openHint")}</span>
+              </span>
+            </button>
+          </div>
+
+          <h2 className="mt-10 mb-3 text-[13px] font-semibold tracking-wide text-slate-600 dark:text-slate-300">{t("home.recent")}</h2>
+          {recent.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-[#f8fafc]/85 px-6 py-10 text-center text-[13px] text-slate-500 dark:border-slate-700 dark:bg-[#0c1117]/85">
+              {t("home.empty")}
+            </div>
+          ) : (
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4" data-testid="recent-projects">
+              {recent.map(([root, memory]) => (
+                <ProjectCard key={root} root={root} memory={memory} />
+              ))}
+            </div>
+          )}
+
+          {isDemoMode() && (
+            <p className="mt-8 rounded-md bg-amber-50 px-3 py-2 text-[12px] text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              {t("welcome.demo")}
+            </p>
+          )}
         </div>
-
-        <h2 className="mt-10 mb-3 text-[13px] font-semibold tracking-wide text-slate-600 dark:text-slate-300">{t("home.recent")}</h2>
-        {recent.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-slate-300 px-6 py-10 text-center text-[13px] text-slate-500 dark:border-slate-700">
-            {t("home.empty")}
-          </div>
-        ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4" data-testid="recent-projects">
-            {recent.map(([root, memory]) => (
-              <ProjectCard key={root} root={root} memory={memory} />
-            ))}
-          </div>
-        )}
-
-        {isDemoMode() && (
-          <p className="mt-8 rounded-md bg-amber-50 px-3 py-2 text-[12px] text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-            {t("welcome.demo")}
-          </p>
-        )}
       </div>
     </div>
   );
