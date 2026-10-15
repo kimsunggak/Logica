@@ -22,6 +22,56 @@ describe("paragraphContext", () => {
     expect(ctx.next).toBe("x = y");
     expect(ctx.previous).toBeUndefined();
   });
+  it("keeps the preamble and the title block out of paragraphs", () => {
+    const src = [
+      "\\documentclass{article}",
+      "\\usepackage{amsmath}",
+      "\\newcommand{\\method}{\\textsc{STRoute}}",
+      "\\title{Adaptive Routing for Occlusion-Robust Pose Estimation}",
+      "\\author{Anonymous Author}",
+      "\\date{}",
+      "\\begin{document}",
+      "\\maketitle",
+      "\\begin{abstract}",
+      "Pose estimation degrades under occlusion.",
+      "We present \\method{}.",
+      "\\end{abstract}",
+    ].join("\n");
+    for (const line of ["\\title{Adaptive", "\\author{", "\\usepackage", "\\newcommand"]) {
+      const at = src.indexOf(line) + 3;
+      expect(paragraphContext(src, at, at).current, line).toBeUndefined();
+    }
+    const at = src.indexOf("We present");
+    const ctx = paragraphContext(src, at, at);
+    expect(ctx.current).toBe("Pose estimation degrades under occlusion.\nWe present \\method{}.");
+    expect(ctx.previous).toBeUndefined();
+  });
+  it("keeps a title or author list spanning several lines out of paragraphs", () => {
+    const src = [
+      "\\begin{document}",
+      "\\title{A Long Title",
+      "  Continued Here}",
+      "\\author{First Author \\\\ Affiliation",
+      "  \\and Second Author \\{\\}}",
+      "Body text after the front matter.",
+    ].join("\n");
+    for (const line of ["Continued Here", "\\and Second"]) {
+      const at = src.indexOf(line);
+      expect(paragraphContext(src, at, at).current, line).toBeUndefined();
+    }
+    const at = src.indexOf("Body text");
+    expect(paragraphContext(src, at, at).current).toBe("Body text after the front matter.");
+  });
+  it("ends an unclosed title at the next blank line", () => {
+    const src = "\\title{Unclosed\n\nProse after a blank line.";
+    const at = src.indexOf("Prose");
+    expect(paragraphContext(src, at, at).current).toBe("Prose after a blank line.");
+  });
+  it("treats every line as body text in a file without a preamble", () => {
+    const src = "\\usepackageish is not a command here.\nIntro text.";
+    const at = src.indexOf("Intro");
+    expect(paragraphContext(src, at, at).current).toBe("\\usepackageish is not a command here.\nIntro text.");
+  });
   it("handles a cursor in a blank gap", () => {
     const pos = text.indexOf("\n\n\n") + 1;
     const ctx = paragraphContext(text, pos, pos);

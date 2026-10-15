@@ -18,21 +18,51 @@ export interface ParagraphContext {
 
 /**
  * Lines that are document structure rather than prose: headings, environment
- * boundaries, labels, includes and comment-only lines. They separate
- * paragraphs and never belong to one, so an AI edit of "the paragraph" cannot
- * rewrite a heading.
+ * boundaries, labels, includes, front matter (title, authors, date) and
+ * package or macro definitions, and comment-only lines. They separate
+ * paragraphs and never belong to one, so an AI edit of "the paragraph"
+ * cannot rewrite a heading or the title.
  */
 const STRUCTURAL_LINE =
-  /^\s*(?:%|\\(?:part|chapter|section|subsection|subsubsection|paragraph)\*?\s*[[{]|\\(?:begin|end)\s*\{|\\(?:label|input|include|maketitle|bibliography|bibliographystyle|appendix|item\s*$)\b)/;
+  /^\s*(?:%|\\(?:part|chapter|section|subsection|subsubsection|paragraph)\*?\s*[[{]|\\(?:begin|end)\s*\{|\\(?:label|input|include|maketitle|bibliography|bibliographystyle|appendix|item\s*$)\b|\\(?:title|titlerunning|author|authorrunning|date|thanks|keywords|affiliation|address|email|institute)\b|\\(?:documentclass|usepackage|RequirePackage|newcommand|renewcommand|providecommand|newenvironment|renewenvironment|DeclareMathOperator|newtheorem|def)\b)/;
 
-/** Paragraph blocks: runs of non-blank, non-structural lines. */
+/** Everything before this line of a main file is the preamble. */
+const DOCUMENT_BEGIN = /^\s*\\begin\s*\{document\}/;
+
+/** Braces a line leaves open, ignoring escaped braces and comments. */
+function openBraces(line: string): number {
+  let depth = 0;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === "\\") i++;
+    else if (c === "%") break;
+    else if (c === "{") depth++;
+    else if (c === "}") depth--;
+  }
+  return depth;
+}
+
+/**
+ * Paragraph blocks: runs of non-blank, non-structural lines. The preamble
+ * never holds prose, and the lines of a structural command whose argument
+ * continues over several lines (a long `\author{...}`) are structural too,
+ * up to the closing brace or a blank line.
+ */
 export function paragraphRanges(text: string): TextRange[] {
+  const lines = text.split("\n");
+  const bodyStart = lines.findIndex((line) => DOCUMENT_BEGIN.test(line));
   const ranges: TextRange[] = [];
   let start = -1;
   let end = 0;
   let offset = 0;
-  for (const line of text.split("\n")) {
-    const isProse = line.trim() !== "" && !STRUCTURAL_LINE.test(line);
+  let open = 0;
+  lines.forEach((line, i) => {
+    let structural = true;
+    if (line.trim() === "") open = 0;
+    else if (open > 0) open = Math.max(0, open + openBraces(line));
+    else if (STRUCTURAL_LINE.test(line)) open = Math.max(0, openBraces(line));
+    else structural = i < bodyStart;
+    const isProse = line.trim() !== "" && !structural;
     if (isProse) {
       if (start < 0) start = offset;
       end = offset + line.length;
@@ -41,7 +71,7 @@ export function paragraphRanges(text: string): TextRange[] {
       start = -1;
     }
     offset += line.length + 1;
-  }
+  });
   if (start >= 0) ranges.push({ from: start, to: end });
   return ranges;
 }

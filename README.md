@@ -148,7 +148,7 @@ AI 호출 때 선택 텍스트만 보내지 않고, 같은 문서 모델(`PaperD
   3. 답변(Answer Module, reasoning medium): 원고 전체, 대화, 편집기 위치, 원래 질문, 정제된 질문(있을 때).
   - 정제와 답변 요청은 같은 system prompt, 원고, 대화로 시작하고 각자의 지시와 질문을 마지막 메시지에 둡니다. 앞부분이 같아야 provider의 prompt cache가 두 번째 호출에서 원고를 다시 계산하지 않기 때문입니다. 캐시된 토큰 수는 런타임 디버거에서 확인합니다.
 
-문단은 빈 줄로 나누며, `\section`, `\begin`/`\end`, `\label`, 주석 줄 같은 구조 줄은 문단에 넣지 않습니다. 그래서 "이 문단 고쳐줘"가 제목을 바꾸지 않습니다.
+문단은 빈 줄로 나누며, `\section`, `\begin`/`\end`, `\label`, 주석 줄 같은 구조 줄과 `\title`, `\author`, `\date` 같은 앞부분 명령(여러 줄에 걸치면 닫는 중괄호까지), 그리고 `\begin{document}` 앞의 preamble 전체는 문단에 넣지 않습니다. 그래서 "이 문단 고쳐줘"가 section 제목이나 논문 제목을 바꾸지 않습니다.
 
 prompt는 provider와 무관하게 `src/ai/prompts/`에서 만들고(LaTeX 규칙: 명령어, citation key, `\label`, 수식, 기호, custom macro, `%` 주석 보존, 선택 영역 밖 반환 금지), 각 adapter는 이를 자기 메시지 형식으로만 바꿉니다.
 
