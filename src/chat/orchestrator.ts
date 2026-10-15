@@ -88,14 +88,14 @@ export function chooseRoute(response: AIResponse): { route: Route; reason?: stri
   return { route: "reply" };
 }
 
-/** What the user is looking at, as handed to the orchestrator. */
+/** What the user points at, as handed to the orchestrator. */
 export function editorLocation(turn: Turn) {
-  return {
-    file: turn.context.currentFile ?? null,
-    section: turn.context.currentSection ?? null,
-    selected_text: turn.selectedText ?? null,
-    cursor_paragraph: turn.selectedText ? null : (turn.context.currentParagraph ?? null),
-  };
+  return { file: turn.context.currentFile ?? null, selected_text: turn.selectedText ?? null };
+}
+
+/** Earlier exchanges (one question and its answer each) in a history. */
+export function turnCount(history: AIMessage[]): number {
+  return Math.floor(history.length / 2);
 }
 
 function paperSummary(paper: Paper) {
@@ -144,7 +144,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
     () => ({
       question: turn.instruction,
       ...editorLocation(turn),
-      history_pairs: Math.min(turn.history.length, JUDGE_HISTORY_MESSAGES) / 2,
+      chat_history_turns: turnCount(turn.history.slice(-JUDGE_HISTORY_MESSAGES)),
       tools: CHAT_TOOLS.map((tool) => tool.name),
     }),
     async (span) => {
@@ -169,7 +169,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
       deps.root,
       "refine",
       "runRefineModule",
-      () => ({ question: turn.instruction, ...editorLocation(turn), history_pairs: turn.history.length / 2 }),
+      () => ({ question: turn.instruction, ...editorLocation(turn), chat_history_turns: turnCount(turn.history) }),
       async (span): Promise<{ parsed: RefineResult; result: GatewayResult }> => {
         const read = readPaper(span, "refine");
         const result = await call(
@@ -197,7 +197,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
     deps.root,
     "answer",
     "runAnswerModule",
-    () => ({ question: turn.instruction, refined_question: refined ?? null, history_pairs: turn.history.length / 2 }),
+    () => ({ question: turn.instruction, refined_question: refined ?? null, chat_history_turns: turnCount(turn.history) }),
     async (span) => {
       const read = readPaper(span, "answer");
       return call(

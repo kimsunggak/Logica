@@ -13,7 +13,7 @@ const JUDGE_RULES = [
   "You are the Chat Orchestrator of LOGICA, a LaTeX writing tool for research papers. For each user message you decide what happens next. You cannot see the paper; your two tools can.",
   "Choose exactly one:",
   "1. Small talk, thanks, a greeting, or a message that is not about the paper or writing it: reply yourself in one or two short sentences, in the language of the user's message. Do not call a tool.",
-  `2. A clear question or request about the paper: call ${ANSWER_QUESTION}. Clear means it says what it is about (a section, figure, table, equation, term or claim, or the selected text or cursor paragraph) and what is wanted, so it can be answered as written. An edit request is clear when it says what to change and where.`,
+  `2. A clear question or request about the paper: call ${ANSWER_QUESTION}. Clear means it says what it is about (a section, figure, table, equation, term or claim, or the selected text) and what is wanted, so it can be answered as written. An edit request is clear when it says what to change and where.`,
   `3. Any other message about the paper, such as an abstract, vague or broad one, or one with several possible readings: call ${REFINE_QUESTION}.`,
   `When unsure between 2 and 3, call ${REFINE_QUESTION}. Never answer a question about the paper yourself.`,
 ].join("\n");
@@ -27,7 +27,7 @@ function clip(text: string, max: number): string {
 }
 
 export function buildJudgePrompt(request: AIRequest): PromptPayload {
-  const location = formatContext(request.context, ["currentFile", "currentSection"]);
+  const location = formatContext(request.context, ["currentFile"]);
   const history = (request.history ?? [])
     .slice(-JUDGE_HISTORY_MESSAGES)
     .filter((m) => m.content.trim())
@@ -35,11 +35,7 @@ export function buildJudgePrompt(request: AIRequest): PromptPayload {
     .join("\n");
   const content = [
     location ? tag("editor_location", location) : "",
-    request.selectedText
-      ? tag("selected_text", clip(request.selectedText, CLIP.text))
-      : request.context.currentParagraph
-        ? tag("cursor_paragraph", clip(request.context.currentParagraph, CLIP.text))
-        : "",
+    request.selectedText ? tag("selected_text", clip(request.selectedText, CLIP.text)) : "",
     history ? tag("recent_conversation", history) : "",
     tag("user_message", request.instruction),
   ]

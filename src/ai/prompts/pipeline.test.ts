@@ -32,8 +32,10 @@ describe("judge prompt", () => {
     const prompt = buildPrompt({ ...turn, task: "judge" });
     expect(prompt.messages).toHaveLength(1);
     const user = prompt.messages[0].content;
-    expect(user).toContain("<current_section>\n4 Experiments\n</current_section>");
-    expect(user).toContain("<cursor_paragraph>\nWe test on three datasets.\n</cursor_paragraph>");
+    expect(user).toContain("<current_file>\nsections/exp.tex\n</current_file>");
+    // The cursor often stays where the user last typed; its section and paragraph are not sent.
+    expect(user).not.toContain("<current_section>");
+    expect(user).not.toContain("<cursor_paragraph>");
     expect(user).toContain("<recent_conversation>\nuser: Hi\nassistant: Hello\n</recent_conversation>");
     expect(user.endsWith("<user_message>\n실험은 어떤 데이터로 했어?\n</user_message>")).toBe(true);
     expect(user).not.toContain("<paper>");
@@ -58,6 +60,8 @@ describe("refine and answer prompts", () => {
     expect(first.startsWith('<paper>\n<file path="main.tex">\n\\input{sections/exp}\n</file>\n<file path="sections/exp.tex">')).toBe(true);
     expect(first).toContain("<omitted_files>\nappendix.tex\n</omitted_files>\n</paper>");
     const last = refine.messages.at(-1)!.content;
+    expect(last).not.toContain("<current_section>");
+    expect(last).not.toContain("<cursor_paragraph>");
     expect(last.indexOf("<editor_location>")).toBeLessThan(last.indexOf("<user_message>"));
     expect(last.indexOf("<user_message>")).toBeLessThan(last.indexOf("<task>"));
     expect(last).toContain('{"refined_question":"..."} or {"clarify":"..."}');

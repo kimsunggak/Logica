@@ -15,7 +15,7 @@ import { CHAT_MODELS } from "../ai/models/modelConfig";
 import { aiService, newRequestId } from "../ai/service";
 import { lineOf, locateEdit, type ProposedEdit } from "../ai/agent/edits";
 import { deleteSession, listSessions, loadSession, newSessionId, saveSession, SESSION_VERSION, type SessionSummary } from "./chatHistory";
-import { editorLocation, runChatTurn, type Outcome, type Paper, type Stage, type Turn } from "./orchestrator";
+import { editorLocation, runChatTurn, turnCount, type Outcome, type Paper, type Stage, type Turn } from "./orchestrator";
 import { endSpan, failSpan, startSpan, step } from "../debug/trace";
 import type { AIContext, AIMessage, ProjectFile, ProviderId } from "../ai/types";
 import { editorSession } from "../editor/editorSession";
@@ -183,7 +183,7 @@ export async function sendChatMessage(text: string): Promise<void> {
 
   // One trace per question; its id is the answer's message id.
   const root = startSpan(requestId, null, "pipeline", "sendChatMessage", () => ({ question: instruction, models: CHAT_MODELS }));
-  step(requestId, root, "user", "receiveUserInput", instruction, () => ({ question: instruction, ...editorLocation(turn), history_pairs: turn.history.length / 2 }));
+  step(requestId, root, "user", "receiveUserInput", instruction, () => ({ question: instruction, ...editorLocation(turn), chat_history_turns: turnCount(turn.history) }));
   const control: RunControl = { stopped: false, activeRequest: null };
   running = control;
   try {

@@ -23,17 +23,14 @@ function formatPaper(request: AIRequest): string {
   return `<paper>\n${files.length ? files.join("\n") : "(no files)"}\n</paper>`;
 }
 
-/** Where the user is: file, section, and the selected text or the paragraph at the cursor. */
+/**
+ * What the user points at: the open file and the selected text. The cursor's
+ * paragraph and section are left out, since the cursor often stays where the
+ * user last typed, unrelated to the question.
+ */
 export function editorBlocks(request: AIRequest): string[] {
-  const location = formatContext(request.context, ["currentFile", "currentSection"]);
-  return [
-    location ? tag("editor_location", location) : "",
-    request.selectedText
-      ? tag("selected_text", request.selectedText)
-      : request.context.currentParagraph
-        ? tag("cursor_paragraph", request.context.currentParagraph)
-        : "",
-  ];
+  const location = formatContext(request.context, ["currentFile"]);
+  return [location ? tag("editor_location", location) : "", request.selectedText ? tag("selected_text", request.selectedText) : ""];
 }
 
 /** System prompt, paper, conversation, then the module's last message. */
