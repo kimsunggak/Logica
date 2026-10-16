@@ -239,7 +239,7 @@ function routeOf(t) {
   const path = route === "reply" ? ["user", "orchestrator", "reply", "final"]
     : route === "answer" ? ["user", "orchestrator", "answer", "final"]
     : clarify ? ["user", "orchestrator", "refine", "final"] : ["user", "orchestrator", "refine", "answer", "final"];
-  return { route, clarify, path, reason: orch.output.reason };
+  return { route, clarify, path, reason: orch.output.reason, reasonIssue: orch.output.reason_issue };
 }
 /** Model calls: a failed attempt that Claude took over does not make the call fail. */
 function llmStatus(t) {
@@ -305,7 +305,10 @@ function nodeLines(t, module) {
   }
   const lines = fns.map((s) => ({ status: s.status, text: (s.source === "rust" ? "rust  " : "") + s.fn + time(s) }));
   const r = module === "orchestrator" && routeOf(t);
-  if (r) lines.unshift({ status: "route", text: "갈래 " + ROUTE_LABEL[r.clarify ? "clarify" : r.route] });
+  if (r) {
+    if (r.reasonIssue) lines.unshift({ status: "error", text: r.reasonIssue === "arguments_unreadable" ? "⚠ 툴 인자 파싱 실패 (reason 없음)" : "⚠ reason 비어 있음" });
+    lines.unshift({ status: "route", text: "갈래 " + ROUTE_LABEL[r.clarify ? "clarify" : r.route] });
+  }
   return lines;
 }
 

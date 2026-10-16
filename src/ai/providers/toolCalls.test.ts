@@ -100,14 +100,14 @@ describe("OpenAI tool calls", () => {
       { type: "response.completed", response: { usage: {} } },
     ]);
     const response = await new OpenAIProvider(() => "chatgpt").generate(request);
-    expect(response.toolCalls).toEqual([{ id: "c3", name: "refine_question", arguments: {} }]);
+    expect(response.toolCalls).toEqual([{ id: "c3", name: "refine_question", arguments: {}, argumentsError: "invalid_json" }]);
   });
 });
 
 describe("Claude tool calls", () => {
   it("offers tools with an input schema and requires exactly one call", () => {
     const out = new AnthropicProvider().buildBody({ ...request, model: "claude-sonnet-5-5", reasoningEffort: undefined });
-    expect(out.tools).toEqual([{ name: "answer_question", description: "Answer from the paper.", input_schema: tool.parameters }]);
+    expect(out.tools).toEqual([{ name: "answer_question", description: "Answer from the paper.", strict: true, input_schema: tool.parameters }]);
     expect(out.tool_choice).toEqual({ type: "any", disable_parallel_tool_use: true });
     expect(out).not.toHaveProperty("reasoning");
   });

@@ -76,6 +76,12 @@ describe("chooseRoute", () => {
     expect(chooseRoute(response("", tool("refine_question")))).toEqual({ route: "refine", reason: "because" });
     expect(chooseRoute(response("", tool("reply_directly", "a thank-you, not a question")))).toEqual({ route: "reply", reason: "a thank-you, not a question" });
   });
+  it("keeps the route when the arguments are broken, and reports why the reason is missing", () => {
+    const broken = response("", [{ id: "c1", name: "answer_question", arguments: {}, argumentsError: "invalid_json" }]);
+    expect(chooseRoute(broken)).toEqual({ route: "answer", reasonIssue: "arguments_unreadable" });
+    const empty = response("", [{ id: "c1", name: "reply_directly", arguments: { reason: "  " } }]);
+    expect(chooseRoute(empty)).toEqual({ route: "reply", reasonIssue: "reason_missing" });
+  });
   it("reads text without a tool call as small talk", () => {
     expect(chooseRoute(response("You're welcome."))).toEqual({ route: "reply" });
   });

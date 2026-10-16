@@ -78,8 +78,21 @@ export interface OrchestratorDeps {
   call?: typeof callModel;
 }
 
-/** The judge's choice: the tool it called, and why. */
-export function chooseRoute(response: AIResponse): { route: Route; reason?: string } {
+/** Why a tool call came without a usable reason (it only goes to the debugger). */
+export type ReasonIssue = "arguments_unreadable" | "reason_missing";
+
+/**
+ * The judge's choice: the tool it called, and why. The route comes from the
+ * tool's name, so a broken argument never changes it; it is only reported.
+ */
+export function chooseRoute(response: AIResponse): { route: Route; reason?: string; reasonIssue?: ReasonIssue } {
+  const decision = routeOf(response);
+  const call = response.toolCalls?.[0];
+  if (!call || decision.reason) return decision;
+  return { ...decision, reasonIssue: call.argumentsError ? "arguments_unreadable" : "reason_missing" };
+}
+
+function routeOf(response: AIResponse): { route: Route; reason?: string } {
   const call = response.toolCalls?.[0];
   const reason = typeof call?.arguments.reason === "string" ? call.arguments.reason.trim() || undefined : undefined;
   if (call?.name === REPLY_DIRECTLY) return { route: "reply", reason };
@@ -160,7 +173,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
       step(turn.id, span, "orchestrator", "chooseRoute", () => ({ text: result.response.text, tool_calls: result.response.toolCalls ?? [] }), decision);
       return { ...decision, result };
     },
-    (judged) => ({ route: judged.route, reason: judged.reason ?? null }),
+    (judged) => ({ route: judged.route, reason: judged.reason ?? null, ...(judged.reasonIssue ? { reason_issue: judged.reasonIssue } : {}) }),
   );
 
   // 2a. Small talk: the Reply Module answers without the paper.

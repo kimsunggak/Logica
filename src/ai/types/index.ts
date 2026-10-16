@@ -55,6 +55,8 @@ export interface ToolCall {
   name: string;
   /** Parsed arguments; empty when the model sent none or invalid JSON. */
   arguments: Record<string, unknown>;
+  /** Set when the streamed arguments could not be read as a JSON object. */
+  argumentsError?: "invalid_json" | "not_object";
 }
 
 export interface ProjectFile {
