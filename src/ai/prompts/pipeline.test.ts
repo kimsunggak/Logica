@@ -45,18 +45,19 @@ describe("judge prompt", () => {
     expect(prompt.system).toContain("never write the answer yourself");
   });
 
-  it("keeps only the last two exchanges, clipped", () => {
-    const long = Array.from({ length: 8 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `turn ${i} ${"x".repeat(700)}` }));
-    const user = buildPrompt({ ...turn, task: "judge", history: long }).messages[0].content;
+  it.each(["judge", "reply"] as const)("%s keeps only the last four exchanges, clipped", (task) => {
+    const long = Array.from({ length: 12 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", content: `turn ${i} ${"x".repeat(700)}` }));
+    const user = buildPrompt({ ...turn, task, history: long }).messages[0].content;
     expect(user).not.toContain("turn 3");
     expect(user).toContain("turn 4");
-    expect(user).toContain("turn 7");
+    expect(user).toContain("turn 11");
+    expect(user).not.toContain("x".repeat(601));
     expect(user).toContain("…");
   });
 });
 
 describe("reply prompt", () => {
-  it("sends the message and the last two exchanges, but not the paper or the open file", () => {
+  it("sends the message and recent exchanges, but not the paper or the open file", () => {
     const prompt = buildPrompt({ ...turn, task: "reply" });
     expect(prompt.messages).toHaveLength(1);
     const user = prompt.messages[0].content;

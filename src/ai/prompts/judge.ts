@@ -20,8 +20,8 @@ const JUDGE_RULES = [
 ].join("\n");
 
 const CLIP = { turn: 600 };
-/** Earlier messages the judge sees (to resolve follow-up messages). */
-export const JUDGE_HISTORY_MESSAGES = 4;
+/** Last four completed exchanges (user + assistant), shared with Reply. */
+export const JUDGE_HISTORY_MESSAGES = 8;
 
 function clip(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
