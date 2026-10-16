@@ -90,7 +90,7 @@ export class OpenAIProvider implements AIProvider {
               parameters: tool.parameters,
               strict: true,
             })),
-            tool_choice: "auto",
+            tool_choice: "required",
             parallel_tool_calls: false,
           }
         : {}),

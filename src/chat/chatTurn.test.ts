@@ -1,4 +1,5 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { aiService } from "../ai/service";
 import { call } from "../lib/backend";
 import { useSettings } from "../settings/settingsStore";
 import { conversation, sendChatMessage, stopChat, useChat } from "./chatStore";
@@ -19,9 +20,9 @@ beforeEach(() => {
 });
 
 describe("chat turn through the demo backend", () => {
-  it("A: small talk is answered by the orchestrator itself", async () => {
+  it("A: small talk is routed by the judge and answered by the Reply Module", async () => {
     await sendChatMessage("고마워");
-    expect(answer()).toMatchObject({ status: "done", route: "reply", content: "천만에요! 논문에 대해 궁금한 점을 물어보세요.", provider: "anthropic", model: "claude-sonnet-5-5" });
+    expect(answer()).toMatchObject({ status: "done", route: "reply", content: "천만에요! 논문에 대해 궁금한 점을 물어보세요.", provider: "openai", model: "gpt-6.1-sol" });
     expect(answer().refined).toBeUndefined();
   });
 
@@ -97,12 +98,17 @@ describe("chat turn through the demo backend", () => {
 
   it("uses GPT for judge when Claude is not connected", async () => {
     await call("credential_delete", { provider: "anthropic" });
+    const generate = vi.spyOn(aiService, "generate");
     try {
       await sendChatMessage("고마워");
-      expect(answer()).toMatchObject({
-        status: "done", route: "reply", provider: "openai", model: "gpt-6.1-sol", fallbackFrom: "claude-sonnet-5-5",
-      });
+      expect(answer()).toMatchObject({ status: "done", route: "reply", provider: "openai", model: "gpt-6.1-sol" });
+      const judge = generate.mock.calls.filter(([, request]) => request.task === "judge").map(([provider, request]) => [provider, request.model]);
+      expect(judge).toEqual([
+        ["anthropic", "claude-sonnet-5-5"],
+        ["openai", "gpt-6.1-sol"],
+      ]);
     } finally {
+      generate.mockRestore();
       await call("credential_set", { provider: "anthropic", secret: "sk-ant-demo-0000" });
     }
   });

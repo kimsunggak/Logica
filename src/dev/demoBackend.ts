@@ -198,11 +198,11 @@ const SMALL_TALK = /^\s*(hi|hello|hey|thanks|thank you|ok|okay|안녕|고마워|
 const VAGUE = /핵심|요약|전체|전반|무슨 내용|어때|왜|이거|그거|summar|overall|main idea|key point|gist|why/i;
 const hangul = (text: string) => /[가-힣]/.test(text);
 
-/** Chat Orchestrator's judge: reply to small talk, refine vague questions, answer clear ones. */
+/** Chat Orchestrator's judge: one tool per route, with the reason for it. */
 function simulateJudge(last: string): DemoReply {
   const question = between(last, "user_message") ?? "";
   if (SMALL_TALK.test(question) && question.length < 40) {
-    return { text: hangul(question) ? "천만에요! 논문에 대해 궁금한 점을 물어보세요." : "You're welcome! Ask me anything about the paper." };
+    return { tool: { name: "reply_directly", args: { reason: "The message is small talk, not a question about the paper." } } };
   }
   if (VAGUE.test(question) && !EDIT_REQUEST.test(question)) {
     return { tool: { name: "refine_question", args: { reason: "The message is broad; refine it with the paper first." } } };
@@ -266,6 +266,10 @@ function simulateReply(body: Record<string, any>, messages: { content: string }[
   const last = messages[messages.length - 1]?.content ?? "";
   const all = messages.map((m) => m.content).join("\n\n");
   if (Array.isArray(body.tools) && body.tools.length) return simulateJudge(last);
+  if (last.includes("<task>\nReply to the user's message.")) {
+    const question = between(last, "user_message") ?? "";
+    return { text: hangul(question) ? "천만에요! 논문에 대해 궁금한 점을 물어보세요." : "You're welcome! Ask me anything about the paper." };
+  }
   if (last.includes('{"refined_question":"..."}')) return { text: simulateRefine(all, last) };
   if (last.includes("You are the Answer Module")) return { text: simulateAnswerModule(all, last) };
   return { text: simulateAnswer(last) };

@@ -41,10 +41,10 @@ beforeEach(() => {
 });
 
 describe("OpenAI tool calls", () => {
-  it("offers tools as functions and sets the reasoning effort", () => {
+  it("offers tools as functions, requires a call, and sets the reasoning effort", () => {
     const out = new OpenAIProvider(() => "chatgpt").buildBody(request);
     expect(out.tools).toEqual([{ type: "function", name: "answer_question", description: "Answer from the paper.", parameters: tool.parameters, strict: true }]);
-    expect(out).toMatchObject({ tool_choice: "auto", parallel_tool_calls: false, reasoning: { effort: "low" }, store: false, stream: true });
+    expect(out).toMatchObject({ tool_choice: "required", parallel_tool_calls: false, reasoning: { effort: "low" }, store: false, stream: true });
   });
 
   it("leaves tools and reasoning out when the request has none", () => {
@@ -105,10 +105,10 @@ describe("OpenAI tool calls", () => {
 });
 
 describe("Claude tool calls", () => {
-  it("offers tools with an input schema and one call at a time", () => {
-    const out = new AnthropicProvider().buildBody({ ...request, model: "claude-sonnet-5-5" });
+  it("offers tools with an input schema and requires exactly one call", () => {
+    const out = new AnthropicProvider().buildBody({ ...request, model: "claude-sonnet-5-5", reasoningEffort: undefined });
     expect(out.tools).toEqual([{ name: "answer_question", description: "Answer from the paper.", input_schema: tool.parameters }]);
-    expect(out.tool_choice).toEqual({ type: "auto", disable_parallel_tool_use: true });
+    expect(out.tool_choice).toEqual({ type: "any", disable_parallel_tool_use: true });
     expect(out).not.toHaveProperty("reasoning");
   });
 

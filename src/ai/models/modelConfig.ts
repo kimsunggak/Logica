@@ -30,8 +30,10 @@ export const DEFAULT_MODEL_ID: Record<ProviderId, string> = {
 /** Output token budget per task (reasoning models spend part of it thinking first). */
 export const MAX_OUTPUT_TOKENS = {
   "inline-edit": 8192,
-  // A tool call or a one-sentence reply.
+  // One tool call with a one-sentence reason.
   judge: 4096,
+  // A one or two sentence reply to small talk.
+  reply: 4096,
   // One rewritten question as JSON.
   refine: 8192,
   // Answers may carry edits for several places and files.
@@ -55,6 +57,7 @@ export const CHAT_MODELS: Record<ChatTask, { primary: ModelChoice; fallback: Mod
     primary: { provider: "anthropic", model: "claude-sonnet-5-5", reasoningEffort: "high" },
     fallback: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" },
   },
+  reply: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
   refine: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
   answer: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
 };

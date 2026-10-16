@@ -30,13 +30,14 @@ export interface AIMessage {
 }
 
 /**
- * Chat is run by the Chat Orchestrator: `judge` decides what to do with a
- * message (reply, answer, or refine first), `refine` rewrites an abstract
- * question into a clear one, and `answer` answers from the whole paper.
+ * Chat is run by the Chat Orchestrator: `judge` picks the route of a message
+ * by calling a tool, `reply` answers small talk, `refine` rewrites an
+ * abstract question into a clear one, and `answer` answers from the whole
+ * paper.
  */
-export type AITask = "inline-edit" | "judge" | "refine" | "answer";
+export type AITask = "inline-edit" | "judge" | "reply" | "refine" | "answer";
 
-/** The three model calls of a chat turn. */
+/** The model calls of a chat turn. */
 export type ChatTask = Exclude<AITask, "inline-edit">;
 
 export type ReasoningEffort = "low" | "medium" | "high";
@@ -75,7 +76,7 @@ export interface AIRequest {
   omittedFiles?: string[];
   /** The question as rewritten by the Refine Module (answer only). */
   refinedQuestion?: string;
-  /** Functions the model may call instead of replying (judge only). */
+  /** Functions the model must choose one of (judge only). */
   tools?: ToolDefinition[];
   model: string;
   /** Reasoning effort, mapped to each provider’s API format. */

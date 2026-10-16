@@ -142,7 +142,7 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
   </aside>
   <main class="center">
     <div class="section-title">Execution Graph</div>
-    <div class="graph-wrap"><svg id="graph" viewBox="0 0 720 580" role="img" aria-label="User Input, Chat Orchestrator, Refine Module, Answer Module, Final Answer 실행 그래프와 LLM 호출"></svg></div>
+    <div class="graph-wrap"><svg id="graph" viewBox="0 0 720 690" role="img" aria-label="User Input, Chat Orchestrator, Refine Module, Answer Module, Final Answer 실행 그래프와 LLM 호출"></svg></div>
     <div class="legend">
       <span><i style="border-color:var(--wait);border-style:dashed"></i>waiting</span>
       <span><i style="border-color:var(--run);background:var(--run-soft)"></i>running</span>
@@ -166,16 +166,17 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
 const MODULES = {
   user:         { title: "👤 User Input" },
   orchestrator: { title: "Chat Orchestrator" },
+  reply:        { title: "Reply Module" },
   refine:       { title: "Refine Module" },
   answer:       { title: "Answer Module" },
   final:        { title: "💬 Final Answer" },
   llm:          { title: "LLM Gateway" },
 };
 // The column, top to bottom; a turn runs along part of it (its route).
-const CHAIN = ["user", "orchestrator", "refine", "answer", "final"];
+const CHAIN = ["user", "orchestrator", "reply", "refine", "answer", "final"];
 // Top-level span of each module: its output is what the module hands on.
-const MAIN_FN = { user: "receiveUserInput", orchestrator: "runOrchestrator", refine: "runRefineModule", answer: "runAnswerModule", final: "showFinalAnswer" };
-const ROUTE_LABEL = { reply: "A 바로 답 (툴 없음)", answer: "B answer_question", refine: "C refine_question", clarify: "C refine_question → 되묻기" };
+const MAIN_FN = { user: "receiveUserInput", orchestrator: "runOrchestrator", reply: "runReplyModule", refine: "runRefineModule", answer: "runAnswerModule", final: "showFinalAnswer" };
+const ROUTE_LABEL = { reply: "A reply_directly", answer: "B answer_question", refine: "C refine_question", clarify: "C refine_question → 되묻기" };
 const PREVIEW = 1500;
 
 let traces = new Map();   // trace_id -> trace
@@ -235,9 +236,9 @@ function routeOf(t) {
   if (!route) return null;
   const refine = mainSpan(t, "refine");
   const clarify = Boolean(refine && refine.output && refine.output.kind === "clarify");
-  const path = route === "reply" ? ["user", "orchestrator", "final"]
+  const path = route === "reply" ? ["user", "orchestrator", "reply", "final"]
     : route === "answer" ? ["user", "orchestrator", "answer", "final"]
-    : clarify ? ["user", "orchestrator", "refine", "final"] : CHAIN;
+    : clarify ? ["user", "orchestrator", "refine", "final"] : ["user", "orchestrator", "refine", "answer", "final"];
   return { route, clarify, path, reason: orch.output.reason };
 }
 /** Model calls: a failed attempt that Claude took over does not make the call fail. */
@@ -334,10 +335,10 @@ function edgeClass(t, from, to) {
 
 function renderGraph(t) {
   // The column of modules on the left; the LLM Gateway is a shared node on the right.
-  const X = 50, W = 320, H = 88, LX = 436, LW = 276, LY = 170, LH = 190;
-  const Y = { user: 12, orchestrator: 124, refine: 236, answer: 348, final: 460 };
+  const X = 50, W = 320, H = 88, LX = 436, LW = 276, LY = 200, LH = 220;
+  const Y = { user: 12, orchestrator: 124, reply: 236, refine: 348, answer: 460, final: 572 };
   const r = routeOf(t);
-  const LABEL = { "user>orchestrator": "question + editor location", "orchestrator>refine": "refine_question", "refine>answer": "refined question", "answer>final": "answer (streamed)" };
+  const LABEL = { "user>orchestrator": "question + open file", "orchestrator>reply": "reply_directly", "reply>refine": "", "orchestrator>refine": "refine_question", "refine>answer": "refined question", "answer>final": "answer (streamed)" };
   const arrow = (c, x, y, dir) => dir === "down"
     ? `<path class="ah ${c}" d="M${x - 5} ${y - 8} L${x} ${y} L${x + 5} ${y - 8} z"></path>`
     : `<path class="ah ${c}" d="M${x - 8} ${y - 5} L${x} ${y} L${x - 8} ${y + 5} z"></path>`;
@@ -369,9 +370,10 @@ function renderGraph(t) {
   };
   $("graph").innerHTML = [
     ...edges,
-    callEdge("orchestrator", LY + 36),
-    callEdge("refine", LY + 76),
-    callEdge("answer", LY + 116),
+    callEdge("orchestrator", LY + 30),
+    callEdge("reply", LY + 70),
+    callEdge("refine", LY + 110),
+    callEdge("answer", LY + 150),
     ...CHAIN.map((m) => nodeSvg(t, m, X, Y[m], W, H)),
     nodeSvg(t, "llm", LX, LY, LW, LH),
   ].join("");

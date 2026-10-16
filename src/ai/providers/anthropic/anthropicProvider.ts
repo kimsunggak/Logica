@@ -59,7 +59,8 @@ export class AnthropicProvider implements AIProvider {
       ...(request.tools?.length
         ? {
             tools: request.tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })),
-            tool_choice: { type: "auto", disable_parallel_tool_use: true },
+            // Thinking only allows "auto"; without it a tool call is required.
+            tool_choice: { type: request.reasoningEffort ? "auto" : "any", disable_parallel_tool_use: true },
           }
         : {}),
     };

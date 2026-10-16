@@ -23,7 +23,7 @@ LOGICA는 개인 연구용 로컬 LaTeX 논문 작성 도구입니다. 논문 �
 | Editor | CodeMirror 6, LaTeX 문법 강조, 줄 번호, 괄호 매칭, undo/redo, 검색/바꾸기, 저장 상태 표시, `\section` `\cite` `\ref` `\eqref` `\label` 등 자동완성 |
 | 미리보기와 PDF | TeX 엔진 내장(설치된 TeX가 없으면 자동 사용), 입력을 멈추면 자동 저장 후 컴파일하는 실시간 미리보기(설정에서 끌 수 있음), 논문 페이지만 보이는 미리보기, **PDF 내보내기**로 원하는 위치에 저장, `latexmk` > `pdflatex` > `xelatex` 순 자동 선택(또는 직접 지정/사용자 명령), 타임아웃, 주요 오류만 추출(파일:줄 클릭 이동) |
 | AI 인라인 편집 | 텍스트 선택 후 `Cmd/Ctrl+K`, 기본 명령(Improve writing, Make concise, Make academic, Improve clarity, Fix grammar, Rewrite, 직접 입력), streaming 표시, Stop, diff 확인 후 Accept / Reject / Regenerate(다른 provider로 재생성 가능) |
-| AI 채팅 (에이전트) | Chat Orchestrator가 질문마다 처리 갈래를 고름: 잡담은 바로 답하고, 명확한 질문은 바로 답변하고, 모호한 질문은 논문 전체를 보고 명확한 질문으로 정제한 뒤 답변(정제해도 모호하면 되물음). 수정 요청에는 여러 곳, 여러 파일의 수정안을 제안하고 수정마다 diff와 LaTeX 검사 결과를 보여 주며 하나씩 또는 모두 적용/거절 |
+| AI 채팅 (에이전트) | Chat Orchestrator가 질문마다 처리 갈래를 고름: 잡담은 Reply Module이 답하고, 명확한 질문은 바로 답변하고, 모호한 질문은 논문 전체를 보고 명확한 질문으로 정제한 뒤 답변(정제해도 모호하면 되물음). 수정 요청에는 여러 곳, 여러 파일의 수정안을 제안하고 수정마다 diff와 LaTeX 검사 결과를 보여 주며 하나씩 또는 모두 적용/거절 |
 | Citation / Reference | `references.bib` 파싱, `\cite{` 입력 시 key/제목/저자/연도 자동완성, `\ref{` 라벨 자동완성, `\ref` `\eqref` `\cite` `\input` 위에서 `F12` 또는 `Cmd/Ctrl+클릭`으로 정의 위치 이동 |
 | 상태 복원 | 마지막 프로젝트, 열린 파일, 파일별 커서 위치, outline 접힘 상태, 패널 크기와 표시 여부, 테마, provider와 model 선택 |
 
@@ -142,8 +142,9 @@ LOGICA는 특정 provider에 묶이지 않도록 공통 `AIProvider` 인터페�
 인라인 편집은 선택 텍스트만 보내지 않고, 같은 문서 모델(`PaperDocument`)에서 필요한 부분만 골라 공통 semantic context를 만듭니다. 채팅은 아래처럼 원고 전체를 보냅니다.
 
 - 인라인 편집: 논문 제목, abstract, outline, 현재 section 경로(예: `3 Method › 3.2 Uncertainty Estimation`), 앞 문단, 선택 텍스트, 다음 문단
-- 채팅: 한 질문에 모델을 최대 3번 부릅니다(모두 `gpt-6.1-sol`, 실패하면 `claude-sonnet-5-5`, `src/ai/models/modelConfig.ts`의 `CHAT_MODELS`).
-  1. 판단(Chat Orchestrator, reasoning low): 질문, 열린 파일 이름, 최근 대화(최대 2턴). 원고는 보내지 않습니다. 모델이 `refine_question` 또는 `answer_question` 툴을 부르거나, 잡담이면 툴 없이 바로 답합니다.
+- 채팅: 한 질문에 모델을 최대 3번 부릅니다. 판단은 `claude-sonnet-5-5`(reasoning high, 실패하면 `gpt-6.1-sol`), 나머지는 `gpt-6.1-sol`(실패하면 `claude-sonnet-5-5`)입니다(`src/ai/models/modelConfig.ts`의 `CHAT_MODELS`).
+  1. 판단(Chat Orchestrator): 질문, 열린 파일 이름, 최근 대화(최대 2턴). 원고는 보내지 않습니다. 모델은 `reply_directly`, `answer_question`, `refine_question` 중 하나를 반드시 부르고, 인자 `reason`에 그 갈래를 고른 근거(다른 두 갈래가 아닌 이유)를 적습니다. 판단 모델은 사용자에게 보이는 글을 쓰지 않습니다. 툴 호출은 강제하되(OpenAI `required`, Claude `any`), Claude는 thinking을 켜면 강제 호출을 받지 않으므로 `auto`로 보내고 프롬프트로 요구합니다. 그래도 툴 없이 글만 오면 잡담으로 처리합니다.
+     - 잡담(`reply_directly`)이면 Reply Module(reasoning low)이 질문과 최근 2턴만 보고 답합니다. 원고는 보내지 않으므로 잡담은 모델을 2번 부릅니다.
   2. 정제(Refine Module, reasoning medium, 판단이 `refine_question`일 때만): 원고 전체(최대 150,000자), 대화(최대 6턴), 열린 파일 이름, 질문. 명확한 질문 하나로 다시 쓰거나 되물을 질문을 JSON으로 돌려줍니다.
   3. 답변(Answer Module, reasoning medium): 원고 전체, 대화(최대 6턴), 열린 파일 이름, 원래 질문, 정제된 질문(있을 때).
   - 편집기의 선택 텍스트, 커서 문단, 커서 section은 보내지 않습니다. 커서와 선택은 마지막으로 작업한 자리에 남아 있어 질문과 관계없는 경우가 많기 때문입니다. 특정 부분을 물으려면 질문에 section 이름이나 문장을 적습니다.

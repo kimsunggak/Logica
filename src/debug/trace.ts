@@ -13,7 +13,7 @@
 import { call, isDesktop } from "../lib/backend";
 
 /** Where a span runs: the steps of a chat turn, and `llm` for model calls (LLM Gateway, Rust). */
-export type TraceModule = "pipeline" | "user" | "orchestrator" | "refine" | "answer" | "llm" | "final";
+export type TraceModule = "pipeline" | "user" | "orchestrator" | "reply" | "refine" | "answer" | "llm" | "final";
 export type TraceStatus = "running" | "completed" | "error";
 
 export interface Span {

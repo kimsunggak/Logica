@@ -159,9 +159,9 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
         </div>
       )}
       <RefinedLine message={message} />
-      {message.stage === "answer" && !message.content && (
+      {(message.stage === "answer" || message.stage === "reply") && !message.content && (
         <div className="text-[11.5px] text-slate-500" data-testid="chat-stage">
-          {t("chat.stageAnswer")}
+          {t(message.stage === "answer" ? "chat.stageAnswer" : "chat.stageReply")}
         </div>
       )}
       {edits.size > 1 && (

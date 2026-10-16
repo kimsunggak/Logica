@@ -74,8 +74,9 @@ describe("chooseRoute", () => {
   it("follows the tool the judge called", () => {
     expect(chooseRoute(response("", tool("answer_question", "names Table 2")))).toEqual({ route: "answer", reason: "names Table 2" });
     expect(chooseRoute(response("", tool("refine_question")))).toEqual({ route: "refine", reason: "because" });
+    expect(chooseRoute(response("", tool("reply_directly", "a thank-you, not a question")))).toEqual({ route: "reply", reason: "a thank-you, not a question" });
   });
-  it("replies directly when the judge wrote text and called no tool", () => {
+  it("reads text without a tool call as small talk", () => {
     expect(chooseRoute(response("You're welcome."))).toEqual({ route: "reply" });
   });
   it("prefers the tool when the judge also wrote text", () => {
@@ -88,20 +89,39 @@ describe("chooseRoute", () => {
 });
 
 describe("Chat Orchestrator", () => {
-  it("A: replies to small talk itself, with one model call and without the paper", async () => {
-    const r = run({ judge: () => response(" 천만에요! ") });
+  it("A: small talk goes to the Reply Module, with two model calls and without the paper", async () => {
+    const r = run({
+      judge: () => response("", tool("reply_directly", "a thank-you, not a question about the paper")),
+      reply: (_req, options) => {
+        options.onText?.("천만에요!");
+        return response(" 천만에요! ");
+      },
+    });
     const result = await r.result;
-    expect(result).toMatchObject({ route: "reply", outcome: "reply", content: "천만에요!", choice: CHAT_MODELS.judge.primary });
-    expect(r.log.map((c) => c.task)).toEqual(["judge"]);
+    expect(result).toMatchObject({
+      route: "reply",
+      outcome: "reply",
+      reason: "a thank-you, not a question about the paper",
+      content: "천만에요!",
+      choice: CHAT_MODELS.reply.primary,
+    });
+    expect(r.log.map((c) => c.task)).toEqual(["judge", "reply"]);
+    const reply = r.log[1].request;
+    expect(reply.instruction).toBe(turn.instruction);
+    expect(reply.history).toEqual(turn.history);
+    expect(reply.projectFiles).toBeUndefined();
+    expect(reply.tools).toBeUndefined();
     expect(r.reads()).toBe(0);
-    expect(r.stages).toEqual(["judge"]);
+    expect(r.text).toEqual(["천만에요!"]);
+    expect(r.stages).toEqual(["judge", "reply"]);
   });
 
-  it("gives the judge the tools, the message and the conversation, but not the paper", async () => {
-    const r = run({ judge: () => response("hi") });
+  it("gives the judge the three route tools, the message and the conversation, but not the paper", async () => {
+    const r = run({ judge: () => response("", tool("reply_directly")), reply: () => response("hi") });
     await r.result;
     const judge = r.log[0].request;
-    expect(judge.tools?.map((t) => t.name)).toEqual(["refine_question", "answer_question"]);
+    expect(judge.tools?.map((t) => t.name)).toEqual(["reply_directly", "answer_question", "refine_question"]);
+    for (const t of judge.tools ?? []) expect(t.parameters).toMatchObject({ required: ["reason"] });
     expect(judge.instruction).toBe(turn.instruction);
     expect(judge.history).toEqual(turn.history);
     expect(judge.projectFiles).toBeUndefined();

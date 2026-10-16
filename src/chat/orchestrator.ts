@@ -1,22 +1,23 @@
 /**
  * Chat Orchestrator: the agent that runs one chat turn.
  *
- *   👤 User → Chat Orchestrator ─┬─ (small talk) reply directly ───────────────────→ 💬
- *                                ├─ answer_question → Answer Module ───────────────→ 💬
+ *   👤 User → Chat Orchestrator ─┬─ reply_directly  → Reply Module ─────────────────→ 💬
+ *                                ├─ answer_question → Answer Module ────────────────→ 💬
  *                                └─ refine_question → Refine Module → Answer Module → 💬
- *                                                                 └─ (still unclear) ask back → 💬
+ *                                                                  └─ (still unclear) ask back → 💬
  *
- * Its judge model picks the route by calling a tool, or by replying itself.
- * The Refine and Answer modules are the tools: each builds its own request
- * and makes one model call. Every model call goes through the LLM Gateway
- * (model choice and fallback). In development each step is reported to
- * the runtime debugger (see `src/debug/trace.ts`).
+ * Its judge model picks the route by calling one tool, with the reason for
+ * it; it never writes text for the user. The Reply, Refine and Answer
+ * modules are the tools: each builds its own request and makes one model
+ * call. Every model call goes through the LLM Gateway (model choice and
+ * fallback). In development each step is reported to the runtime debugger
+ * (see `src/debug/trace.ts`).
  */
 import { parseRefine, type RefineResult } from "../ai/agent/refine";
 import { callModel, type GatewayOptions, type GatewayResult, type RunControl } from "../ai/gateway";
 import type { ModelChoice } from "../ai/models/modelConfig";
 import { JUDGE_HISTORY_MESSAGES } from "../ai/prompts/judge";
-import { ANSWER_QUESTION, CHAT_TOOLS, REFINE_QUESTION } from "../ai/tools/chatTools";
+import { ANSWER_QUESTION, CHAT_TOOLS, REFINE_QUESTION, REPLY_DIRECTLY } from "../ai/tools/chatTools";
 import type { AIContext, AIMessage, AIResponse, AIUsage, FinishReason, ProjectFile } from "../ai/types";
 import { step, traced, type Span } from "../debug/trace";
 
@@ -24,7 +25,7 @@ import { step, traced, type Span } from "../debug/trace";
 export type Route = "reply" | "answer" | "refine";
 /** How the turn ended: a direct reply, an answer, or a question back to the user. */
 export type Outcome = "reply" | "answer" | "clarify";
-export type Stage = "judge" | "refine" | "answer";
+export type Stage = "judge" | "reply" | "refine" | "answer";
 
 export interface Turn {
   id: string;
@@ -77,15 +78,17 @@ export interface OrchestratorDeps {
   call?: typeof callModel;
 }
 
-/** The judge's choice: the tool it called, or a direct reply when it called none. */
+/** The judge's choice: the tool it called, and why. */
 export function chooseRoute(response: AIResponse): { route: Route; reason?: string } {
   const call = response.toolCalls?.[0];
-  const reason = typeof call?.arguments.reason === "string" ? call.arguments.reason : undefined;
+  const reason = typeof call?.arguments.reason === "string" ? call.arguments.reason.trim() || undefined : undefined;
+  if (call?.name === REPLY_DIRECTLY) return { route: "reply", reason };
   if (call?.name === ANSWER_QUESTION) return { route: "answer", reason };
   if (call?.name === REFINE_QUESTION) return { route: "refine", reason };
-  // An unknown tool or an empty reply: refine, as the judge is told to when unsure.
-  if (call || !response.text.trim()) return { route: "refine", reason };
-  return { route: "reply" };
+  // The judge must call a tool. Text without one is read as small talk;
+  // an unknown tool or no reply at all as a question to refine, as when unsure.
+  if (!call && response.text.trim()) return { route: "reply" };
+  return { route: "refine", reason };
 }
 
 /** Where the user is, as handed to the orchestrator: the open file. */
@@ -157,14 +160,25 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
       step(turn.id, span, "orchestrator", "chooseRoute", () => ({ text: result.response.text, tool_calls: result.response.toolCalls ?? [] }), decision);
       return { ...decision, result };
     },
-    (judged) => ({ route: judged.route, reason: judged.reason ?? null, reply: judged.route === "reply" ? judged.result.response.text : null }),
+    (judged) => ({ route: judged.route, reason: judged.reason ?? null }),
   );
 
+  // 2a. Small talk: the Reply Module answers without the paper.
   if (judged.route === "reply") {
-    return { route: "reply", outcome: "reply", content: judged.result.response.text.trim(), ...finished(judged.result) };
+    hooks.onStage?.("reply");
+    const replied = await traced(
+      turn.id,
+      deps.root,
+      "reply",
+      "runReplyModule",
+      () => ({ question: turn.instruction, chat_history_turns: turnCount(turn.history.slice(-JUDGE_HISTORY_MESSAGES)) }),
+      (span) => call("reply", { ...ask, id: `${turn.id}-reply` }, options(span, hooks.onText)),
+      (result) => ({ text: result.response.text, finishReason: result.response.finishReason, model: result.choice.model }),
+    );
+    return { route: "reply", outcome: "reply", reason: judged.reason, content: replied.response.text.trim(), ...finished(replied) };
   }
 
-  // 2. Refine an abstract question first, or ask the user back.
+  // 2b. Refine an abstract question first, or ask the user back.
   let refined: string | undefined;
   if (judged.route === "refine") {
     hooks.onStage?.("refine");

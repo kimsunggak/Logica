@@ -39,8 +39,10 @@ describe("judge prompt", () => {
     expect(user).toContain("<recent_conversation>\nuser: Hi\nassistant: Hello\n</recent_conversation>");
     expect(user.endsWith("<user_message>\n실험은 어떤 데이터로 했어?\n</user_message>")).toBe(true);
     expect(user).not.toContain("<paper>");
+    expect(prompt.system).toContain("reply_directly");
     expect(prompt.system).toContain("refine_question");
     expect(prompt.system).toContain("answer_question");
+    expect(prompt.system).toContain("never write the answer yourself");
   });
 
   it("keeps only the last two exchanges, clipped", () => {
@@ -50,6 +52,19 @@ describe("judge prompt", () => {
     expect(user).toContain("turn 4");
     expect(user).toContain("turn 7");
     expect(user).toContain("…");
+  });
+});
+
+describe("reply prompt", () => {
+  it("sends the message and the last two exchanges, but not the paper or the open file", () => {
+    const prompt = buildPrompt({ ...turn, task: "reply" });
+    expect(prompt.messages).toHaveLength(1);
+    const user = prompt.messages[0].content;
+    expect(user).toContain("<recent_conversation>\nuser: Hi\nassistant: Hello\n</recent_conversation>");
+    expect(user).toContain("<user_message>\n실험은 어떤 데이터로 했어?\n</user_message>");
+    expect(user).not.toContain("<paper>");
+    expect(user).not.toContain("<current_file>");
+    expect(prompt.system).toContain("Reply Module");
   });
 });
 

@@ -6,6 +6,7 @@ import type { AIMessage, AIRequest, AITask } from "../types";
 import { buildAnswerPrompt } from "./answer";
 import { buildJudgePrompt } from "./judge";
 import { buildRefinePrompt } from "./refine";
+import { buildReplyPrompt } from "./reply";
 import { buildInlineEditPrompt } from "./rewrite";
 
 export interface PromptPayload {
@@ -28,6 +29,7 @@ function normalizeMessages(messages: AIMessage[]): AIMessage[] {
 const BUILDERS: Record<AITask, (request: AIRequest) => PromptPayload> = {
   "inline-edit": buildInlineEditPrompt,
   judge: buildJudgePrompt,
+  reply: buildReplyPrompt,
   refine: buildRefinePrompt,
   answer: buildAnswerPrompt,
 };
