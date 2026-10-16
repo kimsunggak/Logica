@@ -141,6 +141,10 @@ LOGICA는 특정 provider에 묶이지 않도록 공통 `AIProvider` 인터페�
 
 인라인 편집은 선택 텍스트만 보내지 않고, 같은 문서 모델(`PaperDocument`)에서 필요한 부분만 골라 공통 semantic context를 만듭니다. 채팅은 아래처럼 원고 전체를 보냅니다.
 
+![AI 채팅 에이전트 구조: Chat Orchestrator가 판단 LLM으로 Reply, Answer, Refine 중 갈래를 고르고, 모든 LLM 호출은 LLM Gateway와 Rust를 거쳐 OpenAI나 Anthropic으로 갑니다](docs/images/chat-agent-architecture.png)
+
+AI 채팅 에이전트 구조 (원본: [`docs/images/chat-agent-architecture.svg`](docs/images/chat-agent-architecture.svg)). 사용자 질문은 Chat Orchestrator로 들어가고, 판단 LLM이 툴 하나로 갈래(A 잡담, B 바로 답변, C 정제 후 답변)를 고릅니다. 각 모듈의 결과는 오케스트레이터를 거쳐 화면에 표시되고, 답이 끝난 질문은 대화 메모리에 1턴으로 저장됩니다.
+
 - 인라인 편집: 논문 제목, abstract, outline, 현재 section 경로(예: `3 Method › 3.2 Uncertainty Estimation`), 앞 문단, 선택 텍스트, 다음 문단
 - 채팅: 한 질문에 모델을 최대 3번 부릅니다. 판단은 `claude-sonnet-5-5`(reasoning high, 실패하면 `gpt-6.1-sol`), 나머지는 `gpt-6.1-sol`(실패하면 `claude-sonnet-5-5`)입니다(`src/ai/models/modelConfig.ts`의 `CHAT_MODELS`).
   1. 판단(Chat Orchestrator): 질문, 열린 파일 이름, 최근 대화(최대 2턴). 원고는 보내지 않습니다. 모델은 `reply_directly`, `answer_question`, `refine_question` 중 하나를 반드시 부르고, 인자 `reason`에 그 갈래를 고른 근거(다른 두 갈래가 아닌 이유)를 적습니다. 판단 모델은 사용자에게 보이는 글을 쓰지 않습니다. 툴 호출은 강제하되(OpenAI `required`, Claude `any`), Claude는 thinking을 켜면 강제 호출을 받지 않으므로 `auto`로 보내고 프롬프트로 요구합니다. 그래도 툴 없이 글만 오면 잡담으로 처리합니다.
