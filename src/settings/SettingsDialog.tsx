@@ -19,7 +19,7 @@ import { detectCompilers, type DetectedTool } from "../latex/compiler/compileApi
 import { useT, type MessageKey } from "../i18n";
 import { errorKind, errorMessage, openExternal } from "../lib/backend";
 import { isConnected, refreshAllConnections, refreshConnection, setConnection, useConnections } from "./connectionStore";
-import { useSettings, type CompilerSetting, type ThemeSetting } from "./settingsStore";
+import { CHAT_FONT_SIZES, useSettings, type CompilerSetting, type ThemeSetting } from "./settingsStore";
 
 function Row({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return (
@@ -380,6 +380,20 @@ function EditorSettingsPanel() {
           value={editor.fontSize}
           onChange={(e) => update({ fontSize: Math.max(10, Math.min(28, Number(e.target.value) || 14)) })}
         />
+      </Row>
+      <Row label={t("settings.chatFontSize")} hint={t("settings.chatFontSizeHint")}>
+        <select
+          className="select"
+          value={editor.chatFontSize}
+          onChange={(e) => update({ chatFontSize: Number(e.target.value) })}
+          data-testid="chat-font-size"
+        >
+          {CHAT_FONT_SIZES.map((n) => (
+            <option key={n} value={n}>
+              {n}px
+            </option>
+          ))}
+        </select>
       </Row>
       <Row label={t("settings.tabSize")}>
         <select className="select" value={editor.tabSize} onChange={(e) => update({ tabSize: Number(e.target.value) })}>

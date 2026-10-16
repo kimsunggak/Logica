@@ -232,7 +232,33 @@ function simulateAnswerModule(all: string, last: string): string {
   }
   const refined = between(last, "refined_question");
   const files = [...all.matchAll(/<file path="([^"]+)">/g)].map((m) => m[1]);
-  return `Demo answer to "${refined ?? question}". In the desktop app, the connected model answers from the whole paper (${files.join(", ") || "no files"}).`;
+  const answer = `Demo answer to "${refined ?? question}". In the desktop app, the connected model answers from the whole paper (${files.join(", ") || "no files"}).`;
+  // Ask about "markdown" or "형식" to see how answers are rendered.
+  if (!/markdown|마크다운|형식/i.test(question)) return answer;
+  return [
+    answer,
+    "",
+    "### 답변 형식 미리보기",
+    "",
+    "이 문단은 **강조**한다. **'인용'**이라는 표현과 **서론(Introduction)**에서는 처럼 한국어 조사가 붙어도 굵게 보입니다.",
+    "",
+    "1. 인라인 수식: $E = mc^2$, 그리고 \\(\\alpha + \\beta\\)",
+    "2. `\\cite{key}` 같은 인라인 코드",
+    "3. [LaTeX 문서](https://www.latex-project.org/help/documentation/) 링크",
+    "",
+    "\\[ \\int_0^1 x^2\\,dx = \\frac{1}{3} \\]",
+    "",
+    "> 인용문은 왼쪽 선과 흐린 색으로 표시됩니다.",
+    "",
+    "| 항목 | 값 |",
+    "| --- | --- |",
+    "| 정확도 | 95% |",
+    "",
+    "```latex",
+    "\\section{Introduction}",
+    "We prove that $f(x) = x^2$ is convex \\cite{boyd2004}.",
+    "```",
+  ].join("\n");
 }
 
 /** Which call a request body is, from the request itself. */

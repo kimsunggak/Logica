@@ -1,5 +1,5 @@
 import { Check, CheckCheck, FileText, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
 import { CHAT_MODELS } from "../ai/models/modelConfig";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
@@ -10,6 +10,7 @@ import { timeAgo } from "../lib/time";
 import { currentTexts, navigateTo } from "../project/projectActions";
 import { useProject } from "../project/projectStore";
 import { useT, type MessageKey } from "../i18n";
+import { useSettings } from "../settings/settingsStore";
 import { CollapseButton } from "../components/panes";
 import {
   applyAllChatEdits,
@@ -26,8 +27,28 @@ import {
   type ChatMessage,
   type EditState,
 } from "./chatStore";
+import type { ChatMarkdownProps } from "./markdown/ChatMarkdown";
+import { fencedCode } from "./markdown/source";
 
 const EXAMPLES: MessageKey[] = ["chat.example1", "chat.example2", "chat.example3", "chat.example4"];
+
+function PlainText({ text }: ChatMarkdownProps) {
+  return <div className="whitespace-pre-wrap">{text}</div>;
+}
+
+// The Markdown, math and highlighting code loads with the first answer, not with the app.
+// Until then (or if it cannot load) the answer shows as plain text.
+const ChatMarkdown = lazy<ComponentType<ChatMarkdownProps>>(() =>
+  import("./markdown/ChatMarkdown").catch(() => ({ default: PlainText })),
+);
+
+function MarkdownBlock(props: ChatMarkdownProps) {
+  return (
+    <Suspense fallback={<PlainText {...props} />}>
+      <ChatMarkdown {...props} />
+    </Suspense>
+  );
+}
 
 /** One proposed change: file, location, diff, checks, and Apply / Reject. */
 function EditCard({ messageId, index, edit, state }: { messageId: string; index: number; edit: ProposedEdit; state?: EditState }) {
@@ -129,8 +150,9 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
     });
   }
   const pending = [...edits.values()].filter(({ index }) => !message.editStates?.[index]);
+  const streaming = message.status === "streaming";
   return (
-    <div className="space-y-2 text-[13px] leading-relaxed">
+    <div className="space-y-2">
       {(message.stage === "judge" || message.stage === "refine") && (
         <div className="text-[11.5px] text-slate-500" data-testid="chat-stage">
           {t(message.stage === "judge" ? "chat.stageJudge" : "chat.stageRefine")}
@@ -166,9 +188,7 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
       )}
       {blocks.map((block, i) =>
         block.kind === "text" ? (
-          <div key={i} className="whitespace-pre-wrap">
-            {block.text.trim()}
-          </div>
+          <MarkdownBlock key={i} text={block.text.trim()} streaming={streaming && i === blocks.length - 1} />
         ) : edits.has(i) ? (
           <EditCard
             key={i}
@@ -178,9 +198,11 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
             state={message.editStates?.[edits.get(i)!.index]}
           />
         ) : (
-          <div key={i} className="overflow-hidden rounded-md border border-slate-200 dark:border-slate-700">
-            <pre className="max-h-72 overflow-auto bg-slate-50 p-2 font-mono text-[12px] whitespace-pre-wrap dark:bg-slate-900">{block.text}</pre>
-          </div>
+          <MarkdownBlock
+            key={i}
+            text={fencedCode(block.text, block.lang)}
+            streaming={streaming && i === blocks.length - 1}
+          />
         ),
       )}
       {message.status === "streaming" && <span className="inline-block h-3 w-1.5 animate-pulse bg-slate-400" />}
@@ -282,6 +304,7 @@ export function ChatPanel() {
   const models = t("chat.modelLabel", { primary: CHAT_MODELS.answer.primary.model, fallback: CHAT_MODELS.answer.fallback.model });
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+  const chatFontSize = useSettings((s) => s.editor.chatFontSize);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -313,7 +336,7 @@ export function ChatPanel() {
           <CollapseButton pane="chat" />
         </div>
       </div>
-      <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
+      <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3" style={{ fontSize: chatFontSize }}>
         {messages.length === 0 && (
           <div className="space-y-2 text-[12.5px] text-slate-500">
             <p>{t("chat.intro")}</p>
@@ -335,7 +358,7 @@ export function ChatPanel() {
             <div key={message.id} className="ml-6">
               {message.contextLabel && <div className="mb-0.5 truncate text-right text-[10.5px] text-slate-400">{message.contextLabel}</div>}
               <div className="flex items-start justify-end gap-1.5">
-                <div className="min-w-0 rounded-lg bg-sky-50 px-2.5 py-1.5 text-[13px] whitespace-pre-wrap text-slate-800 dark:bg-sky-950/50 dark:text-slate-100">
+                <div className="min-w-0 rounded-lg bg-sky-50 px-2.5 py-1.5 leading-normal whitespace-pre-wrap text-slate-800 dark:bg-sky-950/50 dark:text-slate-100">
                   {message.content}
                 </div>
                 <span className="shrink-0 pt-1 text-[14px] leading-none" aria-hidden>

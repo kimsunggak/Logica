@@ -13,4 +13,11 @@ describe("mergeSettings", () => {
     expect(mergeSettings({ latex: { livePreview: false } }).latex.livePreview).toBe(false);
     expect(mergeSettings(null).latex).toEqual(DEFAULT_SETTINGS.latex);
   });
+
+  it("adds the chat text size to older settings and ignores an unusable one", () => {
+    expect(mergeSettings({ editor: { fontSize: 16 } }).editor).toMatchObject({ fontSize: 16, chatFontSize: 14 });
+    expect(mergeSettings({ editor: { chatFontSize: 16 } }).editor.chatFontSize).toBe(16);
+    expect(mergeSettings({ editor: { chatFontSize: 99 } }).editor.chatFontSize).toBe(14);
+    expect(mergeSettings({ editor: { chatFontSize: "big" } }).editor.chatFontSize).toBe(14);
+  });
 });

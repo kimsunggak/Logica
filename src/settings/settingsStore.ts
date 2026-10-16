@@ -28,6 +28,8 @@ export interface EditorSettings {
   fontSize: number;
   tabSize: number;
   wordWrap: boolean;
+  /** Text size of chat messages, px. */
+  chatFontSize: number;
 }
 
 export interface LatexSettings {
@@ -50,6 +52,8 @@ export interface Settings {
   latex: LatexSettings;
 }
 
+export const CHAT_FONT_SIZES = [12, 13, 14, 15, 16, 18] as const;
+
 export const DEFAULT_SETTINGS: Settings = {
   ui: { language: detectLanguage() },
   ai: {
@@ -65,6 +69,7 @@ export const DEFAULT_SETTINGS: Settings = {
     fontSize: 14,
     tabSize: 2,
     wordWrap: true,
+    chatFontSize: 14,
   },
   latex: {
     compiler: "auto",
@@ -125,7 +130,13 @@ export function mergeSettings(saved: unknown): Settings {
       defaultProvider: ai.defaultProvider === "anthropic" ? "anthropic" : "openai",
       openaiAuth: ai.openaiAuth === "api_key" ? "api_key" : "chatgpt",
     },
-    editor: { ...DEFAULT_SETTINGS.editor, ...(s.editor ?? {}) },
+    editor: withChatFontSize({ ...DEFAULT_SETTINGS.editor, ...(s.editor ?? {}) }),
     latex: pickKnown(DEFAULT_SETTINGS.latex, s.latex),
   };
+}
+
+function withChatFontSize(editor: EditorSettings): EditorSettings {
+  const size = Number(editor.chatFontSize);
+  const valid = Number.isFinite(size) && size >= CHAT_FONT_SIZES[0] && size <= CHAT_FONT_SIZES[CHAT_FONT_SIZES.length - 1];
+  return { ...editor, chatFontSize: valid ? size : DEFAULT_SETTINGS.editor.chatFontSize };
 }
