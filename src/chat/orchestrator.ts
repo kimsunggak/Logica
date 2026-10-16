@@ -9,7 +9,7 @@
  * Its judge model picks the route by calling a tool, or by replying itself.
  * The Refine and Answer modules are the tools: each builds its own request
  * and makes one model call. Every model call goes through the LLM Gateway
- * (model choice, Claude fallback). In development each step is reported to
+ * (model choice and fallback). In development each step is reported to
  * the runtime debugger (see `src/debug/trace.ts`).
  */
 import { parseRefine, type RefineResult } from "../ai/agent/refine";
@@ -63,7 +63,7 @@ export interface TurnResult {
   usage?: AIUsage;
   /** The model that wrote `content`. */
   choice: ModelChoice;
-  /** The OpenAI model that failed when Claude wrote `content`. */
+  /** The primary model that failed when the fallback wrote `content`. */
   fallbackFrom?: ModelChoice;
 }
 

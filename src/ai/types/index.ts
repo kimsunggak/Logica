@@ -78,7 +78,7 @@ export interface AIRequest {
   /** Functions the model may call instead of replying (judge only). */
   tools?: ToolDefinition[];
   model: string;
-  /** Reasoning effort for reasoning models (OpenAI only). */
+  /** Reasoning effort, mapped to each provider’s API format. */
   reasoningEffort?: ReasoningEffort;
   maxOutputTokens?: number;
 }

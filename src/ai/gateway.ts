@@ -3,9 +3,9 @@
  *
  *   Chat Orchestrator, Refine Module, Answer Module → callModel → aiService → Rust
  *
- * It picks the model for the call's task (`CHAT_MODELS`) and, when the OpenAI
+ * It picks the model for the call's task (`CHAT_MODELS`) and, when the primary
  * call fails before any text reached the screen, sends the same request to
- * Claude. Each attempt is reported to the runtime debugger.
+ * the fallback provider. Each attempt is reported to the runtime debugger.
  */
 import { AIError, toAIError } from "./errors";
 import { CHAT_MODELS, MAX_OUTPUT_TOKENS, type ModelChoice } from "./models/modelConfig";
@@ -26,7 +26,7 @@ export interface GatewayOptions {
   control: RunControl;
   /** Report the attempts under this span. */
   trace?: { traceId: string; parent: Span };
-  /** Streamed text so far. Once text has been shown, a failure is not retried with Claude. */
+  /** Streamed text so far. Once text has been shown, a failure is not retried with the fallback provider. */
   onText?: (full: string) => void;
   /** Called before each attempt with the model it uses. */
   onAttempt?: (choice: ModelChoice, fallback: boolean) => void;
@@ -36,7 +36,7 @@ export interface GatewayResult {
   response: AIResponse;
   /** The model that produced `response`. */
   choice: ModelChoice;
-  /** Set when Claude answered because the OpenAI call failed. */
+  /** Set when the fallback answered because the primary call failed. */
   fallbackFrom?: { choice: ModelChoice; error: AIError };
 }
 
@@ -120,7 +120,7 @@ async function attempt(
 }
 
 /**
- * Call the model for `task`. Claude takes over when the OpenAI call fails,
+ * Call the model for `task`. The fallback takes over when the primary call fails,
  * unless the user stopped the turn or part of the answer is already shown.
  */
 export async function callModel(task: ChatTask, request: ChatRequest, options: GatewayOptions): Promise<GatewayResult> {
@@ -153,7 +153,7 @@ export async function callModel(task: ChatTask, request: ChatRequest, options: G
     const from = { provider: primary.provider, model: primary.model, error: error.message };
     if (!(await canUse(fallback))) {
       report("fallback", from, { skipped: true, reason: `${fallback.provider} is not connected` });
-      throw new AIError(error.kind, `${error.message}\n${t("chat.noFallback")}`, { provider: error.provider, status: error.status });
+      throw new AIError(error.kind, `${error.message}\n${t("chat.noFallback", { provider: fallback.provider === "anthropic" ? "Anthropic API key" : "OpenAI" })}`, { provider: error.provider, status: error.status });
     }
     report("fallback", from, { provider: fallback.provider, model: fallback.model });
     try {
@@ -162,7 +162,7 @@ export async function callModel(task: ChatTask, request: ChatRequest, options: G
     } catch (err2) {
       const second = toAIError(err2, fallback.provider);
       if (second.kind === "cancelled") throw second;
-      throw new AIError(second.kind, `${error.message}\n${t("chat.fallbackFailed", { message: second.message })}`, {
+      throw new AIError(second.kind, `${error.message}\n${t("chat.fallbackFailed", { provider: fallback.provider === "anthropic" ? "Claude" : "OpenAI", message: second.message })}`, {
         provider: second.provider,
         status: second.status,
       });

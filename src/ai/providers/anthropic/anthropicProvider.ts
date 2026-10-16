@@ -53,6 +53,9 @@ export class AnthropicProvider implements AIProvider {
       messages: prompt.messages.map((m) => ({ role: m.role, content: m.content })),
       max_tokens: request.maxOutputTokens ?? DEFAULT_MAX_TOKENS,
       stream: true,
+      ...(request.reasoningEffort
+        ? { thinking: { type: "adaptive" }, output_config: { effort: request.reasoningEffort } }
+        : {}),
       ...(request.tools?.length
         ? {
             tools: request.tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })),

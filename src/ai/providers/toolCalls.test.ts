@@ -112,6 +112,18 @@ describe("Claude tool calls", () => {
     expect(out).not.toHaveProperty("reasoning");
   });
 
+  it("maps reasoning effort to adaptive thinking and leaves it out when unset", () => {
+    const provider = new AnthropicProvider();
+    expect(provider.buildBody({ ...request, model: "claude-sonnet-5-5", reasoningEffort: "high" })).toMatchObject({
+      thinking: { type: "adaptive" },
+      output_config: { effort: "high" },
+      tool_choice: { type: "auto", disable_parallel_tool_use: true },
+    });
+    const out = provider.buildBody({ ...request, reasoningEffort: undefined });
+    expect(out).not.toHaveProperty("thinking");
+    expect(out).not.toHaveProperty("output_config");
+  });
+
   it("reads a streamed tool_use block", async () => {
     body = sse([
       { type: "message_start", message: { usage: { input_tokens: 1200, cache_read_input_tokens: 1024 } } },

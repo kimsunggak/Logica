@@ -47,11 +47,14 @@ export interface ModelChoice {
 const CLAUDE_FALLBACK: ModelChoice = { provider: "anthropic", model: "claude-sonnet-5-5" };
 
 /**
- * Model for each chat call. The OpenAI model runs first; when it fails, the
- * LLM Gateway sends the same request to Claude.
+ * Primary and fallback models for each chat call. The LLM Gateway retries
+ * with the fallback provider when the primary call fails.
  */
 export const CHAT_MODELS: Record<ChatTask, { primary: ModelChoice; fallback: ModelChoice }> = {
-  judge: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
+  judge: {
+    primary: { provider: "anthropic", model: "claude-sonnet-5-5", reasoningEffort: "high" },
+    fallback: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" },
+  },
   refine: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
   answer: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
 };

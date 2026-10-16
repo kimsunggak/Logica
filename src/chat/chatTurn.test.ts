@@ -21,7 +21,7 @@ beforeEach(() => {
 describe("chat turn through the demo backend", () => {
   it("A: small talk is answered by the orchestrator itself", async () => {
     await sendChatMessage("고마워");
-    expect(answer()).toMatchObject({ status: "done", route: "reply", content: "천만에요! 논문에 대해 궁금한 점을 물어보세요.", provider: "openai", model: "gpt-6.1-sol" });
+    expect(answer()).toMatchObject({ status: "done", route: "reply", content: "천만에요! 논문에 대해 궁금한 점을 물어보세요.", provider: "anthropic", model: "claude-sonnet-5-5" });
     expect(answer().refined).toBeUndefined();
   });
 
@@ -82,13 +82,26 @@ describe("chat turn through the demo backend", () => {
     expect(message.refined).toContain("핵심 아이디어");
   });
 
-  it("shows the OpenAI error with a hint when Claude is not connected", async () => {
+  it("reports both errors when Claude is not connected and OpenAI fails", async () => {
     demo.__LOGICA_DEMO_FAIL_OPENAI = true;
     await call("credential_delete", { provider: "anthropic" });
     try {
       await sendChatMessage("What does Table 2 report?");
       expect(answer().status).toBe("error");
-      expect(answer().content).toContain("Anthropic API key");
+      expect(answer().content).toContain("Claude (Anthropic) is not connected");
+      expect(answer().content).toContain("OpenAI also failed");
+    } finally {
+      await call("credential_set", { provider: "anthropic", secret: "sk-ant-demo-0000" });
+    }
+  });
+
+  it("uses GPT for judge when Claude is not connected", async () => {
+    await call("credential_delete", { provider: "anthropic" });
+    try {
+      await sendChatMessage("고마워");
+      expect(answer()).toMatchObject({
+        status: "done", route: "reply", provider: "openai", model: "gpt-6.1-sol", fallbackFrom: "claude-sonnet-5-5",
+      });
     } finally {
       await call("credential_set", { provider: "anthropic", secret: "sk-ant-demo-0000" });
     }
