@@ -38,6 +38,8 @@ export const MAX_OUTPUT_TOKENS = {
   refine: 8192,
   // Answers may carry edits for several places and files.
   answer: 16384,
+  // One tool call with the changes to the session summary.
+  summary: 4096,
 } as const;
 
 export interface ModelChoice {
@@ -60,6 +62,8 @@ export const CHAT_MODELS: Record<ChatTask, { primary: ModelChoice; fallback: Mod
   reply: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
   refine: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
   answer: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
+  // Runs in the background every two turns.
+  summary: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
 };
 
 /**

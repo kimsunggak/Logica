@@ -1,13 +1,14 @@
 /**
  * Judge prompt: the Chat Orchestrator's own model call. It picks the route
  * of a message (reply, answer, or refine first) by calling one tool, from the
- * message, the open file and the recent conversation. It does not see the
- * paper and writes no text for the user.
+ * message, the open file, the session summary and the last four turns. It
+ * does not see the paper and writes no text for the user.
  */
 import type { AIRequest } from "../types";
 import { ANSWER_QUESTION, REFINE_QUESTION, REPLY_DIRECTLY } from "../tools/chatTools";
 import { formatContext, tag } from "./context";
 import type { PromptPayload } from "./index";
+import { conversationBlock, SESSION_RULES, summaryBlock } from "./session";
 
 const JUDGE_RULES = [
   "You are the Chat Orchestrator of LOGICA, a LaTeX writing tool for research papers. For each user message you choose what happens next by calling exactly one tool. You cannot see the paper, and you never write the answer yourself.",
@@ -19,27 +20,16 @@ const JUDGE_RULES = [
   "In reason, say why this route fits the message and the other two do not.",
 ].join("\n");
 
-const CLIP = { turn: 600 };
-/** Last four completed exchanges (user + assistant), shared with Reply. */
-export const JUDGE_HISTORY_MESSAGES = 8;
-
-function clip(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max)}…` : text;
-}
-
 export function buildJudgePrompt(request: AIRequest): PromptPayload {
+  // What changes least comes first, so a new file tab does not change the conversation's prefix.
   const location = formatContext(request.context, ["currentFile"]);
-  const history = (request.history ?? [])
-    .slice(-JUDGE_HISTORY_MESSAGES)
-    .filter((m) => m.content.trim())
-    .map((m) => `${m.role}: ${clip(m.content, CLIP.turn)}`)
-    .join("\n");
   const content = [
+    summaryBlock(request),
+    conversationBlock(request),
     location ? tag("editor_location", location) : "",
-    history ? tag("recent_conversation", history) : "",
     tag("user_message", request.instruction),
   ]
     .filter(Boolean)
     .join("\n\n");
-  return { system: JUDGE_RULES, messages: [{ role: "user", content }] };
+  return { system: `${JUDGE_RULES}\n\n${SESSION_RULES}`, messages: [{ role: "user", content }] };
 }

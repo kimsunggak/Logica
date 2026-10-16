@@ -4,7 +4,9 @@ import type { ChatRequest, GatewayOptions, GatewayResult } from "../ai/gateway";
 import { CHAT_MODELS } from "../ai/models/modelConfig";
 import type { AIResponse, ChatTask, ToolCall } from "../ai/types";
 import { startSpan } from "../debug/trace";
-import { chooseRoute, runChatTurn, turnCount, type Stage, type Turn } from "./orchestrator";
+import { chooseRoute, conversationFor, runChatTurn, type Stage, type Turn } from "./orchestrator";
+import { addUnresolved, emptySummary } from "./session/summary";
+import type { TurnRecord } from "./session/turns";
 
 const response = (text: string, toolCalls?: ToolCall[]): AIResponse => ({
   id: "r",
@@ -36,12 +38,13 @@ const turn: Turn = {
   id: "t1",
   instruction: "이 논문 핵심이 뭐야?",
   context: { currentFile: "main.tex" },
-  history: [
-    { role: "user", content: "hi" },
-    { role: "assistant", content: "hello" },
-  ],
+  turns: [{ index: 1, question: "hi", answer: "hello", status: "done" }],
   activePath: "main.tex",
 };
+const history = [
+  { role: "user", content: "hi" },
+  { role: "assistant", content: "hello" },
+];
 const paper = { files: [{ path: "main.tex", text: "\\section{Method} We route tokens." }], omitted: [], budget: 1000 };
 
 function run(replies: Partial<Record<ChatTask, Reply>>) {
@@ -63,10 +66,31 @@ function run(replies: Partial<Record<ChatTask, Reply>>) {
   return { result, log, stages, refined, text, reads: () => paperReads };
 }
 
-describe("turnCount", () => {
-  it("counts finished question and answer exchanges", () => {
-    expect(turnCount([])).toBe(0);
-    expect(turnCount(turn.history)).toBe(1);
+describe("conversationFor", () => {
+  const many: TurnRecord[] = Array.from({ length: 6 }, (_, i) => ({ index: i + 1, question: `q${i + 1}`, answer: `a${i + 1}`, status: "done" }));
+  const at = (turns: TurnRecord[], coveredTurns: number): Turn => ({
+    ...turn,
+    turns,
+    summary: coveredTurns ? { ...addUnresolved(emptySummary(), []), coveredTurns, goal: "Tighten section 4" } : null,
+  });
+
+  it("has no turns before the first answer", () => {
+    expect(conversationFor({ ...turn, turns: [] }, "judge").info).toMatchObject({ chat_history_turns: 0, history_turn_numbers: [] });
+  });
+
+  it("gives the judge the last four turns, and the modules the turns the summary does not cover", () => {
+    const t = at(many, 4);
+    expect(conversationFor(t, "judge").info.history_turn_numbers).toEqual([3, 4, 5, 6]);
+    expect(conversationFor(t, "module").info.history_turn_numbers).toEqual([5, 6]);
+    expect(conversationFor(t, "module").history.map((m) => m.content)).toEqual(["q5", "a5", "q6", "a6"]);
+    expect(conversationFor(t, "module").sessionSummary).toContain("Goal: Tighten section 4");
+    expect(conversationFor(at(many, 0), "module").info.history_turn_numbers).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("cuts long messages harder for the modules than for the judge", () => {
+    const long: TurnRecord[] = [{ index: 1, question: "x".repeat(6000), answer: "ok", status: "done" }];
+    expect(conversationFor({ ...turn, turns: long }, "judge").info.clipped).toBeUndefined();
+    expect(conversationFor({ ...turn, turns: long }, "module").info.clipped).toEqual([{ turn: 1, role: "user", original_chars: 6000 }]);
   });
 });
 
@@ -114,7 +138,7 @@ describe("Chat Orchestrator", () => {
     expect(r.log.map((c) => c.task)).toEqual(["judge", "reply"]);
     const reply = r.log[1].request;
     expect(reply.instruction).toBe(turn.instruction);
-    expect(reply.history).toEqual(turn.history);
+    expect(reply.history).toEqual(history);
     expect(reply.projectFiles).toBeUndefined();
     expect(reply.tools).toBeUndefined();
     expect(r.reads()).toBe(0);
@@ -129,7 +153,7 @@ describe("Chat Orchestrator", () => {
     expect(judge.tools?.map((t) => t.name)).toEqual(["reply_directly", "answer_question", "refine_question"]);
     for (const t of judge.tools ?? []) expect(t.parameters).toMatchObject({ required: ["reason"] });
     expect(judge.instruction).toBe(turn.instruction);
-    expect(judge.history).toEqual(turn.history);
+    expect(judge.history).toEqual(history);
     expect(judge.projectFiles).toBeUndefined();
   });
 
@@ -165,7 +189,7 @@ describe("Chat Orchestrator", () => {
     expect(r.log.map((c) => c.task)).toEqual(["judge", "refine", "answer"]);
     const [, refine, answer] = r.log.map((c) => c.request);
     expect(refine.projectFiles).toEqual(paper.files);
-    expect(refine.history).toEqual(turn.history);
+    expect(refine.history).toEqual(history);
     expect(answer.refinedQuestion).toBe("이 논문이 제안한 방법의 핵심 아이디어를 요약해 달라");
     expect(answer.instruction).toBe(turn.instruction);
     // Both modules get the same paper, read once.

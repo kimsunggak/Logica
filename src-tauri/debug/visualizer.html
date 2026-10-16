@@ -171,11 +171,12 @@ const MODULES = {
   answer:       { title: "Answer Module" },
   final:        { title: "💬 Final Answer" },
   llm:          { title: "LLM Gateway" },
+  summary:      { title: "Summary Module" },
 };
 // The column, top to bottom; a turn runs along part of it (its route).
 const CHAIN = ["user", "orchestrator", "reply", "refine", "answer", "final"];
 // Top-level span of each module: its output is what the module hands on.
-const MAIN_FN = { user: "receiveUserInput", orchestrator: "runOrchestrator", reply: "runReplyModule", refine: "runRefineModule", answer: "runAnswerModule", final: "showFinalAnswer" };
+const MAIN_FN = { user: "receiveUserInput", orchestrator: "runOrchestrator", reply: "runReplyModule", refine: "runRefineModule", answer: "runAnswerModule", final: "showFinalAnswer", summary: "runSummaryModule" };
 const ROUTE_LABEL = { reply: "A reply_directly", answer: "B answer_question", refine: "C refine_question", clarify: "C refine_question → 되묻기" };
 const PREVIEW = 1500;
 
@@ -219,13 +220,16 @@ function apply(ev) {
     s.status = ev.status || (ev.event_type === "span_end" ? "completed" : "error");
     s.end = ev.timestamp; s.duration = ev.duration_ms; s.output = ev.output; s.error = ev.error;
   }
-  if (followLatest() && !s.parent && ev.event_type === "span_start") { selTrace = ev.trace_id; selSpan = null; selModule = "orchestrator"; }
-  if (!selTrace) selTrace = ev.trace_id;
+  // A session summary runs right after a turn; following it would hide the turn just watched.
+  if (followLatest() && !s.parent && ev.event_type === "span_start" && ev.module !== "summary") { selTrace = ev.trace_id; selSpan = null; selModule = "orchestrator"; }
+  if (!selTrace) { selTrace = ev.trace_id; if (ev.module === "summary") selModule = "summary"; }
 }
 
 const followLatest = () => $("follow").checked;
 
 function rootOf(t) { return t.order.map((id) => t.spans.get(id)).find((s) => !s.parent); }
+/** A Summary Module run (its own trace, after a turn) rather than a chat turn. */
+function isSummary(t) { const root = t && rootOf(t); return Boolean(root && root.module === "summary"); }
 function spansOf(t, module) { return t.order.map((id) => t.spans.get(id)).filter((s) => s.module === module); }
 function depth(t, s) { let d = 0, p = s.parent; while (p && t.spans.get(p)) { d++; p = t.spans.get(p).parent; } return d; }
 function mainSpan(t, module) { return spansOf(t, module).find((s) => s.fn === MAIN_FN[module]); }
@@ -287,7 +291,7 @@ function renderTraces() {
     const dur = root && root.duration != null ? fmtMs(root.duration) : status === "running" ? "…" : "";
     return `<button type="button" class="trace ${t.id === selTrace ? "sel" : ""}" data-trace="${esc(t.id)}">
       <span class="q">${esc(t.question || t.id)}</span>
-      <span class="m"><span>${clock(t.start)}</span><span class="badge ${status}">${status}</span><span>${dur}</span></span></button>`;
+      <span class="m"><span>${clock(t.start)}</span><span class="badge ${status}">${status}</span>${isSummary(t) ? '<span class="badge rust">요약</span>' : ""}<span>${dur}</span></span></button>`;
   }).join("");
 }
 
@@ -304,6 +308,17 @@ function nodeLines(t, module) {
     }));
   }
   const lines = fns.map((s) => ({ status: s.status, text: (s.source === "rust" ? "rust  " : "") + s.fn + time(s) }));
+  const main = t && mainSpan(t, module);
+  if (module === "summary" && main && main.output) {
+    lines.unshift({ status: "route", text: `턴 1~${main.output.covered_turns} 요약됨, 변경 ${main.output.ops}개, 무시 ${main.output.ignored}개` });
+  }
+  // What the call reads of the conversation: the summary (L1) and the turns word for word (L2).
+  if (main && main.input && Array.isArray(main.input.history_turn_numbers)) {
+    const turns = main.input.history_turn_numbers;
+    const covered = main.input.summary_covered_turns;
+    const reads = `${covered ? `요약 턴 1~${covered}` : "요약 없음"} + 원문 ${turns.length ? `턴 ${turns.join(", ")}` : "없음"}`;
+    lines.unshift({ status: main.input.clipped ? "error" : "route", text: reads + (main.input.clipped ? `  (${main.input.clipped.length}개 메시지 잘림)` : "") });
+  }
   const r = module === "orchestrator" && routeOf(t);
   if (r) {
     if (r.reasonIssue) lines.unshift({ status: "error", text: r.reasonIssue === "arguments_unreadable" ? "⚠ 툴 인자 파싱 실패 (reason 없음)" : "⚠ reason 비어 있음" });
@@ -336,7 +351,20 @@ function edgeClass(t, from, to) {
   return "";
 }
 
+/** A Summary Module run: the module and the model call it makes. */
+function renderSummaryGraph(t) {
+  const X = 50, W = 320, Y = 200, H = 160, LX = 436, LW = 276;
+  const calls = spansOf(t, "llm");
+  const active = calls.some((s) => s.status === "running");
+  $("graph").innerHTML = [
+    calls.length ? `<path class="edge call ${active ? "active" : "done"}" d="M${X + W} ${Y + H / 2} H${LX}"></path>` : "",
+    nodeSvg(t, "summary", X, Y, W, H),
+    nodeSvg(t, "llm", LX, Y, LW, H),
+  ].join("");
+}
+
 function renderGraph(t) {
+  if (isSummary(t)) return renderSummaryGraph(t);
   // The column of modules on the left; the LLM Gateway is a shared node on the right.
   const X = 50, W = 320, H = 88, LX = 436, LW = 276, LY = 200, LH = 220;
   const Y = { user: 12, orchestrator: 124, reply: 236, refine: 348, answer: 460, final: 572 };
@@ -432,7 +460,7 @@ function renderInspector(t) {
     const main = s.fn === MAIN_FN[selModule];
     const r = routeOf(t);
     const path = r ? r.path : CHAIN;
-    const after = path[path.indexOf(selModule) + 1];
+    const after = path.includes(selModule) ? path[path.indexOf(selModule) + 1] : null;
     const next = main && after && MODULES[after].title;
     const data = s.data.map((d, i) => `<div class="blk"><div class="lbl">중간값: ${esc(d.label)} <span class="dim">${clock(d.ts)}</span></div>${valueHtml(s.id + ":d" + i, d.value)}</div>`).join("");
     return `<div class="span ${selSpan === s.id ? "sel" : ""}" id="span-${esc(s.id)}">
@@ -462,7 +490,11 @@ setInterval(() => { const t = traces.get(selTrace); if (t && [...t.spans.values(
 
 document.addEventListener("click", (e) => {
   const tr = e.target.closest("[data-trace]");
-  if (tr) { selTrace = tr.dataset.trace; selSpan = null; $("follow").checked = false; schedule(); return; }
+  if (tr) {
+    selTrace = tr.dataset.trace; selSpan = null; $("follow").checked = false;
+    if (isSummary(traces.get(selTrace))) selModule = "summary"; else if (selModule === "summary") selModule = "orchestrator";
+    schedule(); return;
+  }
   const ex = e.target.closest("[data-expand]");
   if (ex) { expanded.add(ex.dataset.expand); schedule(); return; }
   const tb = e.target.closest("[data-tab]");

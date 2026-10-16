@@ -2,8 +2,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { aiService } from "../ai/service";
 import { call } from "../lib/backend";
 import { useSettings } from "../settings/settingsStore";
-import { conversation, sendChatMessage, stopChat, useChat } from "./chatStore";
-import { turnCount } from "./orchestrator";
+import { sendChatMessage, stopChat, summaryIdle, useChat } from "./chatStore";
+import { renderSummary } from "./session/summary";
+import { turnsOf } from "./session/turns";
 
 const demo = globalThis as { __LOGICA_DEMO_FAIL_OPENAI?: boolean };
 const answer = () => useChat.getState().messages.at(-1)!;
@@ -14,9 +15,11 @@ beforeAll(async () => {
   await call("credential_set", { provider: "anthropic", secret: "sk-ant-demo-0000" });
 });
 
-beforeEach(() => {
+beforeEach(async () => {
+  // A summary still being made for the previous test must not land in this one.
+  await summaryIdle();
   demo.__LOGICA_DEMO_FAIL_OPENAI = false;
-  useChat.setState({ messages: [], runningId: null });
+  useChat.setState({ messages: [], runningId: null, summary: null });
 });
 
 describe("chat turn through the demo backend", () => {
@@ -58,12 +61,11 @@ describe("chat turn through the demo backend", () => {
     ]);
   });
 
-  it("counts a turn only once its answer is finished", async () => {
+  it("keeps a failed turn in the conversation, marked as not answered", async () => {
     // The first question has no earlier turns.
-    expect(turnCount(conversation())).toBe(0);
+    expect(turnsOf(useChat.getState().messages)).toHaveLength(0);
     await sendChatMessage("고마워");
-    expect(turnCount(conversation())).toBe(1);
-    // A question whose answer failed is not a turn.
+    expect(turnsOf(useChat.getState().messages)).toHaveLength(1);
     demo.__LOGICA_DEMO_FAIL_OPENAI = true;
     await call("credential_delete", { provider: "anthropic" });
     try {
@@ -72,8 +74,55 @@ describe("chat turn through the demo backend", () => {
       await call("credential_set", { provider: "anthropic", secret: "sk-ant-demo-0000" });
     }
     expect(answer().status).toBe("error");
-    expect(turnCount(conversation())).toBe(1);
+    const turns = turnsOf(useChat.getState().messages);
+    expect(turns.map((t) => [t.index, t.status])).toEqual([
+      [1, "done"],
+      [2, "error"],
+    ]);
+    // The next question's judge reads it with the note, not the error text.
+    demo.__LOGICA_DEMO_FAIL_OPENAI = false;
+    const generate = vi.spyOn(aiService, "generate");
+    try {
+      await sendChatMessage("고마워");
+      const judge = generate.mock.calls.find(([, request]) => request.task === "judge")![1];
+      expect(judge.history?.at(-1)).toEqual({ role: "assistant", content: "[answer failed]" });
+    } finally {
+      generate.mockRestore();
+    }
   });
+
+  it("folds the oldest turns into the session summary every two turns", async () => {
+    const questions = ["앞으로 답은 짧게 해줘", "What does Table 2 report?", "고마워", "What is in Section 3?", "Define the routing loss", "What does Figure 1 show?"];
+    const covered: number[] = [];
+    for (const q of questions) {
+      await sendChatMessage(q);
+      await summaryIdle();
+      covered.push(useChat.getState().summary?.coveredTurns ?? 0);
+    }
+    // Four open turns: all but the last two are folded.
+    expect(covered).toEqual([0, 0, 0, 2, 2, 4]);
+    const summary = useChat.getState().summary!;
+    // Small talk (turn 3) gets no topic line.
+    expect(summary.items.map((item) => [item.id, item.turn])).toEqual([
+      ["P1", 1],
+      ["T1", 2],
+      ["T2", 4],
+    ]);
+    expect(renderSummary(summary)).toContain("Turns 1-4 of this conversation are folded");
+
+    // The next question reads the summary and only the turns after it.
+    const generate = vi.spyOn(aiService, "generate");
+    try {
+      await sendChatMessage("What does Table 3 report?");
+      const answerCall = generate.mock.calls.find(([, request]) => request.task === "answer")![1];
+      expect(answerCall.sessionSummary).toContain("P1: 앞으로 답은 짧게 해줘");
+      expect(answerCall.history?.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["Define the routing loss", "What does Figure 1 show?"]);
+      const judge = generate.mock.calls.find(([, request]) => request.task === "judge")![1];
+      expect(judge.history?.filter((m) => m.role === "user")).toHaveLength(4);
+    } finally {
+      generate.mockRestore();
+    }
+  }, 30_000);
 
   it("falls back to Claude when OpenAI fails, and says so", async () => {
     demo.__LOGICA_DEMO_FAIL_OPENAI = true;

@@ -1,10 +1,12 @@
 /**
  * Chat about the current paper.
  *
- * This store holds the conversation; each question is run by the Chat
- * Orchestrator (`./orchestrator.ts`), which decides whether to reply
- * directly, answer, or refine the question first, and reports every step to
- * the localhost runtime debugger in development.
+ * This store holds the conversation and its session summary; each question
+ * is run by the Chat Orchestrator (`./orchestrator.ts`), which decides
+ * whether to reply directly, answer, or refine the question first, and
+ * reports every step to the localhost runtime debugger in development. After
+ * a turn the Summary Module (`./session/summarizer.ts`) folds older turns
+ * into the summary in the background.
  */
 import { create } from "zustand";
 import { AIError } from "../ai/errors";
@@ -13,11 +15,14 @@ import { CHAT_MODELS } from "../ai/models/modelConfig";
 import { aiService, newRequestId } from "../ai/service";
 import { lineOf, locateEdit, type ProposedEdit } from "../ai/agent/edits";
 import { deleteSession, listSessions, loadSession, newSessionId, saveSession, SESSION_VERSION, type SessionSummary } from "./chatHistory";
-import { editorLocation, runChatTurn, turnCount, type Outcome, type Paper, type Stage, type Turn } from "./orchestrator";
+import { conversationFor, editorLocation, runChatTurn, type Outcome, type Paper, type Stage, type Turn } from "./orchestrator";
+import { foldTurns, turnsToFold } from "./session/summarizer";
+import { readSummary, type ConversationSummary } from "./session/summary";
+import { turnsOf } from "./session/turns";
 import { endSpan, failSpan, startSpan, step } from "../debug/trace";
-import type { AIMessage, ProjectFile, ProviderId } from "../ai/types";
+import type { ProjectFile, ProviderId } from "../ai/types";
 import { editorSession } from "../editor/editorSession";
-import { sectionAt, sectionTrail } from "../latex/parser/documentModel";
+import { outlineText, sectionAt, sectionTrail } from "../latex/parser/documentModel";
 import { currentTexts, navigateTo, openFile } from "../project/projectActions";
 import { notify, useProject } from "../project/projectStore";
 import { t } from "../i18n";
@@ -44,6 +49,8 @@ export interface ChatMessage {
   refined?: string;
   /** The OpenAI model that failed when Claude wrote this answer. */
   fallbackFrom?: string;
+  /** The answer hit the output limit. */
+  truncated?: boolean;
 }
 
 export type EditState = "applied" | "rejected" | "failed";
@@ -55,6 +62,8 @@ interface ChatState {
   root: string | null;
   sessionId: string;
   createdAt: number;
+  /** Older turns of the shown conversation, summarized (L1). */
+  summary: ConversationSummary | null;
   /** Saved conversations of this project, most recent first. */
   sessions: SessionSummary[];
 }
@@ -65,10 +74,10 @@ export const useChat = create<ChatState>()(() => ({
   root: null,
   sessionId: newSessionId(),
   createdAt: Date.now(),
+  summary: null,
   sessions: [],
 }));
 
-const MAX_HISTORY_MESSAGES = 12;
 /** Characters of paper source sent to the Refine and Answer modules (roughly 40k tokens). */
 const PAPER_BUDGET = 150_000;
 
@@ -98,22 +107,6 @@ function paperFiles(activePath: string | undefined): Paper {
   return { files, omitted, budget: PAPER_BUDGET };
 }
 
-/**
- * The conversation sent with a new question: earlier questions with their
- * finished answers. A question whose answer failed or was stopped is left out,
- * and so is the question being sent.
- */
-export function conversation(): AIMessage[] {
-  const { messages } = useChat.getState();
-  const out: AIMessage[] = [];
-  messages.forEach((m, i) => {
-    const question = messages[i - 1];
-    if (m.role !== "assistant" || m.status !== "done" || !m.content.trim() || question?.role !== "user") return;
-    out.push({ role: "user", content: question.content }, { role: "assistant", content: m.content });
-  });
-  return out.slice(-MAX_HISTORY_MESSAGES);
-}
-
 function updateMessage(id: string, patch: Partial<ChatMessage>) {
   useChat.setState((s) => ({ messages: s.messages.map((m) => (m.id === id ? { ...m, ...patch } : m)) }));
 }
@@ -141,7 +134,8 @@ export async function sendChatMessage(text: string): Promise<void> {
     id: requestId,
     instruction,
     context: snapshot ? { currentFile: snapshot.path } : {},
-    history: conversation(),
+    turns: turnsOf(useChat.getState().messages),
+    summary: useChat.getState().summary,
     activePath: snapshot?.path,
   };
 
@@ -161,7 +155,14 @@ export async function sendChatMessage(text: string): Promise<void> {
 
   // One trace per question; its id is the answer's message id.
   const root = startSpan(requestId, null, "pipeline", "sendChatMessage", () => ({ question: instruction, models: CHAT_MODELS }));
-  step(requestId, root, "user", "receiveUserInput", instruction, () => ({ question: instruction, ...editorLocation(turn), chat_history_turns: turnCount(turn.history) }));
+  step(requestId, root, "user", "receiveUserInput", instruction, () => ({
+    question: instruction,
+    ...editorLocation(turn),
+    session_turns: turn.turns.length,
+    summary_covered_turns: turn.summary?.coveredTurns ?? 0,
+    judge_reads_turns: conversationFor(turn, "judge").info.history_turn_numbers,
+    modules_read_turns: conversationFor(turn, "module").info.history_turn_numbers,
+  }));
   const control: RunControl = { stopped: false, activeRequest: null };
   running = control;
   try {
@@ -185,6 +186,7 @@ export async function sendChatMessage(text: string): Promise<void> {
       provider: result.choice.provider,
       model: result.choice.model,
       fallbackFrom: result.fallbackFrom?.model,
+      ...(result.finishReason === "length" ? { truncated: true } : {}),
     });
     step(requestId, root, "final", "showFinalAnswer", content, () => ({
       route: result.route,
@@ -204,6 +206,8 @@ export async function sendChatMessage(text: string): Promise<void> {
   } finally {
     if (running === control) running = null;
     useChat.setState({ runningId: null });
+    // Stopped and failed turns count too: they are turns left unanswered.
+    scheduleSummary();
   }
 }
 
@@ -214,13 +218,71 @@ export function stopChat() {
   if (control.activeRequest) void aiService.cancel(control.activeRequest);
 }
 
+// ---------------------------------------------------------------- session summary
+
+/** The Summary Module run in the background, for one session at a time. */
+let summarizing: { control: RunControl; again: boolean; done: Promise<void> } | null = null;
+
+/**
+ * Fold older turns into the session summary when four are open (see
+ * `./session/summarizer.ts`). It keeps folding while a long session catches
+ * up, and stops when the user leaves the session. A failure is tried again
+ * after the next turn; until then the modules read more turns word for word.
+ */
+export function scheduleSummary() {
+  if (summarizing) {
+    summarizing.again = true;
+    return;
+  }
+  const { sessionId } = useChat.getState();
+  const control: RunControl = { stopped: false, activeRequest: null };
+  const current = () => !control.stopped && useChat.getState().sessionId === sessionId;
+  const run = async () => {
+    while (current()) {
+      const { messages, summary } = useChat.getState();
+      const fold = turnsToFold(turnsOf(messages), summary);
+      if (!fold.length) return;
+      const { doc } = useProject.getState();
+      const result = await foldTurns(summary, fold, {
+        traceId: newRequestId(),
+        control,
+        outline: doc?.flatSections.length ? outlineText(doc, 3000) : undefined,
+      }).catch(() => null);
+      if (!result || !current()) return;
+      useChat.setState({ summary: result.summary });
+    }
+  };
+  const job = { control, again: false, done: Promise.resolve() };
+  job.done = run().finally(() => {
+    if (summarizing !== job) return;
+    summarizing = null;
+    if (job.again && !control.stopped) scheduleSummary();
+  });
+  summarizing = job;
+}
+
+/** Stop folding for the session being left. */
+function stopSummary() {
+  const job = summarizing;
+  if (!job) return;
+  summarizing = null;
+  job.control.stopped = true;
+  if (job.control.activeRequest) void aiService.cancel(job.control.activeRequest);
+}
+
+/** Resolves once no summary is being made (for tests). */
+export async function summaryIdle(): Promise<void> {
+  while (summarizing) await summarizing.done;
+}
+
 // ---------------------------------------------------------------- saved sessions
 
 /** Load the project's conversations and show the most recent one (or a new one). */
 export async function openChatsFor(root: string | null): Promise<void> {
   stopChat();
+  stopSummary();
   clearTimeout(saveTimer);
-  useChat.setState({ root, messages: [], sessions: [], sessionId: newSessionId(), createdAt: Date.now() });
+  useChat.setState({ root, messages: [], summary: null, sessions: [], sessionId: newSessionId(), createdAt: Date.now() });
   if (!root) return;
   const sessions = await listSessions(root).catch(() => [] as SessionSummary[]);
   if (useChat.getState().root !== root) return;
@@ -231,20 +293,25 @@ export async function openChatsFor(root: string | null): Promise<void> {
 /** Start an empty conversation; it is saved once it has a message. */
 export function newChatSession() {
   stopChat();
+  stopSummary();
   flushSave();
-  useChat.setState({ messages: [], sessionId: newSessionId(), createdAt: Date.now() });
+  useChat.setState({ messages: [], summary: null, sessionId: newSessionId(), createdAt: Date.now() });
 }
 
 export async function switchChatSession(id: string): Promise<void> {
   const { root } = useChat.getState();
   if (!root) return;
   stopChat();
+  stopSummary();
   flushSave();
   const file = await loadSession<ChatMessage>(root, id).catch(() => null);
   if (!file || useChat.getState().root !== root) return;
   // An answer that was still streaming when the app closed is shown as stopped.
   const messages = file.messages.map((m) => (m.status === "streaming" ? { ...m, status: "cancelled" as const, stage: undefined } : m));
-  useChat.setState({ messages, sessionId: id, createdAt: file.createdAt });
+  // A summary of more turns than the session has does not belong to it.
+  const summary = readSummary(file.summary);
+  const fits = summary && summary.coveredTurns <= turnsOf(messages).length ? summary : null;
+  useChat.setState({ messages, summary: fits, sessionId: id, createdAt: file.createdAt });
 }
 
 export async function deleteChatSession(id: string): Promise<void> {
@@ -253,8 +320,9 @@ export async function deleteChatSession(id: string): Promise<void> {
   if (id === sessionId) {
     // Leave the conversation first so nothing saves it again while it is being removed.
     stopChat();
+    stopSummary();
     clearTimeout(saveTimer);
-    useChat.setState({ messages: [], sessionId: newSessionId(), createdAt: Date.now() });
+    useChat.setState({ messages: [], summary: null, sessionId: newSessionId(), createdAt: Date.now() });
   }
   await deleteSession(root, id);
   const sessions = useChat.getState().sessions.filter((s) => s.id !== id);
@@ -273,19 +341,19 @@ function sessionTitle(messages: ChatMessage[]): string {
 /** Write the shown conversation now (when it has messages and no answer is streaming). */
 function flushSave() {
   clearTimeout(saveTimer);
-  const { root, sessionId, createdAt, messages, runningId, sessions } = useChat.getState();
+  const { root, sessionId, createdAt, messages, summary, runningId, sessions } = useChat.getState();
   if (!root || messages.length === 0 || runningId) return;
   const updatedAt = Date.now();
-  void saveSession(root, sessionId, { version: SESSION_VERSION, createdAt, updatedAt, messages }).catch(() => {
+  void saveSession(root, sessionId, { version: SESSION_VERSION, createdAt, updatedAt, messages, ...(summary ? { summary } : {}) }).catch(() => {
     // Saving is best effort; the conversation stays usable in memory.
   });
-  const summary: SessionSummary = { id: sessionId, title: sessionTitle(messages), createdAt, updatedAt, messageCount: messages.length };
-  useChat.setState({ sessions: [summary, ...sessions.filter((s) => s.id !== sessionId)] });
+  const entry: SessionSummary = { id: sessionId, title: sessionTitle(messages), createdAt, updatedAt, messageCount: messages.length };
+  useChat.setState({ sessions: [entry, ...sessions.filter((s) => s.id !== sessionId)] });
 }
 
-// Save shortly after the conversation changes (new message, finished answer, applied edit).
+// Save shortly after the conversation changes (new message, finished answer, applied edit, new summary).
 useChat.subscribe((state, prev) => {
-  if (state.messages === prev.messages && state.runningId === prev.runningId) return;
+  if (state.messages === prev.messages && state.runningId === prev.runningId && state.summary === prev.summary) return;
   if (state.sessionId !== prev.sessionId || state.root !== prev.root) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flushSave, SAVE_DELAY_MS);

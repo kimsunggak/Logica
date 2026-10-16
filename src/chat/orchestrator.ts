@@ -12,14 +12,19 @@
  * call. Every model call goes through the LLM Gateway (model choice and
  * fallback). In development each step is reported to the runtime debugger
  * (see `src/debug/trace.ts`).
+ *
+ * Every call reads the session summary (L1) and recent turns word for word
+ * (L2): the judge the last four turns, the modules the turns the summary
+ * does not cover yet (see `./session/`).
  */
 import { parseRefine, type RefineResult } from "../ai/agent/refine";
 import { callModel, type GatewayOptions, type GatewayResult, type RunControl } from "../ai/gateway";
 import type { ModelChoice } from "../ai/models/modelConfig";
-import { JUDGE_HISTORY_MESSAGES } from "../ai/prompts/judge";
 import { ANSWER_QUESTION, CHAT_TOOLS, REFINE_QUESTION, REPLY_DIRECTLY } from "../ai/tools/chatTools";
 import type { AIContext, AIMessage, AIResponse, AIUsage, FinishReason, ProjectFile } from "../ai/types";
 import { step, traced, type Span } from "../debug/trace";
+import { renderSummary, type ConversationSummary } from "./session/summary";
+import { JUDGE_MESSAGE_CHARS, judgeTurns, MODULE_MESSAGE_CHARS, moduleTurns, turnMessages, type Clipped, type TurnRecord } from "./session/turns";
 
 /** What the judge chose: reply itself, answer, or refine first. */
 export type Route = "reply" | "answer" | "refine";
@@ -32,8 +37,10 @@ export interface Turn {
   instruction: string;
   /** The open file (`currentFile`) only. */
   context: AIContext;
-  /** Earlier question and answer pairs. */
-  history: AIMessage[];
+  /** Every earlier turn of the session, finished or not. */
+  turns: TurnRecord[];
+  /** The session summary of the older turns, when there is one. */
+  summary?: ConversationSummary | null;
   activePath?: string;
 }
 
@@ -109,13 +116,33 @@ export function editorLocation(turn: Turn) {
   return { file: turn.context.currentFile ?? null };
 }
 
+/** What a call reads of the conversation: the summary text and the turns word for word. */
+export interface Conversation {
+  sessionSummary?: string;
+  history: AIMessage[];
+  /** For the debugger. */
+  info: { chat_history_turns: number; history_turn_numbers: number[]; summary_covered_turns: number; clipped?: Clipped[] };
+}
+
 /**
- * Completed exchanges in a history: one turn is a question together with its
- * finished answer. The question being asked is not history yet, so the first
- * message of a conversation reports 0 and the second reports 1.
+ * The conversation for the judge (last four turns) and for the modules (the
+ * turns the summary does not cover). The question being asked is not a turn
+ * yet, so the first message of a session has none.
  */
-export function turnCount(history: AIMessage[]): number {
-  return Math.floor(history.length / 2);
+export function conversationFor(turn: Turn, reader: "judge" | "module"): Conversation {
+  const covered = turn.summary?.coveredTurns ?? 0;
+  const turns = reader === "judge" ? judgeTurns(turn.turns) : moduleTurns(turn.turns, covered);
+  const { messages, clipped } = turnMessages(turns, reader === "judge" ? JUDGE_MESSAGE_CHARS : MODULE_MESSAGE_CHARS);
+  return {
+    sessionSummary: renderSummary(turn.summary ?? null) || undefined,
+    history: messages,
+    info: {
+      chat_history_turns: turns.length,
+      history_turn_numbers: turns.map((t) => t.index),
+      summary_covered_turns: covered,
+      ...(clipped.length ? { clipped } : {}),
+    },
+  };
 }
 
 function paperSummary(paper: Paper) {
@@ -145,7 +172,9 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
     onAttempt: hooks.onModel,
     onText,
   });
-  const ask = { instruction: turn.instruction, context: turn.context, history: turn.history };
+  const judgeReads = conversationFor(turn, "judge");
+  const moduleReads = conversationFor(turn, "module");
+  const ask = { instruction: turn.instruction, context: turn.context, sessionSummary: moduleReads.sessionSummary, history: moduleReads.history };
   let paper: Paper | null = null;
   const readPaper = (span: Span, module: "refine" | "answer"): Paper => {
     paper ??= deps.paper();
@@ -164,11 +193,11 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
     () => ({
       question: turn.instruction,
       ...editorLocation(turn),
-      chat_history_turns: turnCount(turn.history.slice(-JUDGE_HISTORY_MESSAGES)),
+      ...judgeReads.info,
       tools: CHAT_TOOLS.map((tool) => tool.name),
     }),
     async (span) => {
-      const result = await call("judge", { ...ask, id: `${turn.id}-judge`, tools: CHAT_TOOLS }, options(span));
+      const result = await call("judge", { ...ask, history: judgeReads.history, id: `${turn.id}-judge`, tools: CHAT_TOOLS }, options(span));
       const decision = chooseRoute(result.response);
       step(turn.id, span, "orchestrator", "chooseRoute", () => ({ text: result.response.text, tool_calls: result.response.toolCalls ?? [] }), decision);
       return { ...decision, result };
@@ -184,7 +213,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
       deps.root,
       "reply",
       "runReplyModule",
-      () => ({ question: turn.instruction, chat_history_turns: turnCount(turn.history.slice(-JUDGE_HISTORY_MESSAGES)) }),
+      () => ({ question: turn.instruction, ...moduleReads.info }),
       (span) => call("reply", { ...ask, id: `${turn.id}-reply` }, options(span, hooks.onText)),
       (result) => ({ text: result.response.text, finishReason: result.response.finishReason, model: result.choice.model }),
     );
@@ -200,7 +229,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
       deps.root,
       "refine",
       "runRefineModule",
-      () => ({ question: turn.instruction, ...editorLocation(turn), chat_history_turns: turnCount(turn.history) }),
+      () => ({ question: turn.instruction, ...editorLocation(turn), ...moduleReads.info }),
       async (span): Promise<{ parsed: RefineResult; result: GatewayResult }> => {
         const read = readPaper(span, "refine");
         const result = await call(
@@ -228,7 +257,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
     deps.root,
     "answer",
     "runAnswerModule",
-    () => ({ question: turn.instruction, refined_question: refined ?? null, chat_history_turns: turnCount(turn.history) }),
+    () => ({ question: turn.instruction, refined_question: refined ?? null, ...moduleReads.info }),
     async (span) => {
       const read = readPaper(span, "answer");
       return call(

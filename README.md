@@ -146,18 +146,23 @@ LOGICA는 특정 provider에 묶이지 않도록 공통 `AIProvider` 인터페�
 AI 채팅 에이전트 구조 (원본: [`docs/images/chat-agent-architecture.svg`](docs/images/chat-agent-architecture.svg)). 사용자 질문은 Chat Orchestrator로 들어가고, 판단 LLM이 툴 하나로 갈래(A 잡담, B 바로 답변, C 정제 후 답변)를 고릅니다. 각 모듈의 결과는 오케스트레이터를 거쳐 화면에 표시되고, 답이 끝난 질문은 대화 메모리에 1턴으로 저장됩니다.
 
 - 인라인 편집: 논문 제목, abstract, outline, 현재 section 경로(예: `3 Method › 3.2 Uncertainty Estimation`), 앞 문단, 선택 텍스트, 다음 문단
-- 채팅: 한 질문에 모델을 최대 3번 부릅니다. 판단은 `claude-sonnet-5-5`(reasoning high, 실패하면 `gpt-6.1-sol`), 나머지는 `gpt-6.1-sol`(실패하면 `claude-sonnet-5-5`)입니다(`src/ai/models/modelConfig.ts`의 `CHAT_MODELS`).
-  1. 판단(Chat Orchestrator): 질문, 열린 파일 이름, 최근 대화(최대 2턴). 원고는 보내지 않습니다. 모델은 `reply_directly`, `answer_question`, `refine_question` 중 하나를 반드시 부르고, 인자 `reason`에 그 갈래를 고른 근거(다른 두 갈래가 아닌 이유)를 적습니다. 판단 모델은 사용자에게 보이는 글을 쓰지 않습니다. 툴 호출은 강제하되(OpenAI `required`, Claude `any`), Claude는 thinking을 켜면 강제 호출을 받지 않으므로 `auto`로 보내고 프롬프트로 요구합니다. 그래도 툴 없이 글만 오면 잡담으로 처리합니다.
-     - 잡담(`reply_directly`)이면 Reply Module(reasoning low)이 질문과 최근 2턴만 보고 답합니다. 원고는 보내지 않으므로 잡담은 모델을 2번 부릅니다.
-  2. 정제(Refine Module, reasoning medium, 판단이 `refine_question`일 때만): 원고 전체(최대 150,000자), 대화(최대 6턴), 열린 파일 이름, 질문. 명확한 질문 하나로 다시 쓰거나 되물을 질문을 JSON으로 돌려줍니다.
-  3. 답변(Answer Module, reasoning medium): 원고 전체, 대화(최대 6턴), 열린 파일 이름, 원래 질문, 정제된 질문(있을 때).
+- 채팅: 한 질문에 모델을 최대 3번 부릅니다(2턴마다 백그라운드 요약 1번 추가). 판단은 `claude-sonnet-5-5`(reasoning high, 실패하면 `gpt-6.1-sol`), 나머지는 `gpt-6.1-sol`(실패하면 `claude-sonnet-5-5`)입니다(`src/ai/models/modelConfig.ts`의 `CHAT_MODELS`).
+  1. 판단(Chat Orchestrator): 세션 요약, 최근 4턴 원문, 열린 파일 이름, 질문. 원고는 보내지 않습니다. 모델은 `reply_directly`, `answer_question`, `refine_question` 중 하나를 반드시 부르고, 인자 `reason`에 그 갈래를 고른 근거(다른 두 갈래가 아닌 이유)를 적습니다. 판단 모델은 사용자에게 보이는 글을 쓰지 않습니다. 툴 호출은 강제하되(OpenAI `required`, Claude `any`), Claude는 thinking을 켜면 강제 호출을 받지 않으므로 `auto`로 보내고 프롬프트로 요구합니다. 그래도 툴 없이 글만 오면 잡담으로 처리합니다.
+     - 잡담(`reply_directly`)이면 Reply Module(reasoning low)이 세션 요약, 요약에 아직 안 들어간 턴, 질문만 보고 답합니다. 원고는 보내지 않으므로 잡담은 모델을 2번 부릅니다.
+  2. 정제(Refine Module, reasoning medium, 판단이 `refine_question`일 때만): 원고 전체(최대 150,000자), 세션 요약, 요약에 아직 안 들어간 턴, 열린 파일 이름, 질문. 명확한 질문 하나로 다시 쓰거나 되물을 질문을 JSON으로 돌려줍니다.
+  3. 답변(Answer Module, reasoning medium): 원고 전체, 세션 요약, 요약에 아직 안 들어간 턴, 열린 파일 이름, 원래 질문, 정제된 질문(있을 때). 요약에 답하지 못한 요청이 있으면 관련 있을 때 함께 처리하고, 관련 없으면 끝에 이어서 할지 한 줄로 묻습니다.
   - 편집기의 선택 텍스트, 커서 문단, 커서 section은 보내지 않습니다. 커서와 선택은 마지막으로 작업한 자리에 남아 있어 질문과 관계없는 경우가 많기 때문입니다. 특정 부분을 물으려면 질문에 section 이름이나 문장을 적습니다.
-  - 1턴은 질문 하나와 그 답이 끝난 것을 뜻합니다. 지금 보내는 질문은 아직 턴이 아니므로, 대화의 첫 질문에서 디버거의 `chat_history_turns`는 0이고 두 번째 질문에서 1입니다. 답이 실패하거나 중지된 질문은 세지 않습니다.
-  - 정제와 답변 요청은 같은 system prompt, 원고, 대화로 시작하고 각자의 지시와 질문을 마지막 메시지에 둡니다. 앞부분이 같아야 provider의 prompt cache가 두 번째 호출에서 원고를 다시 계산하지 않기 때문입니다. 캐시된 토큰 수는 런타임 디버거에서 확인합니다.
+  - 대화 상태는 네 층으로 보냅니다(`src/chat/session/`).
+    - L0: 규칙과 툴(정제와 답변은 원고 포함). 바뀌지 않으므로 맨 앞에 둡니다.
+    - L1 세션 요약: 목표, 선호 P#(답변 스타일과 계속 지킬 요구), 답하지 못한 요청 U#, 다룬 내용 T#(응답마다 한 줄), 사용자가 준 논문 밖 자료 R#. 요약에 안 들어간 턴이 4개가 되면 마지막 2턴을 남기고 나머지를 접습니다(4턴 끝, 6턴 끝, 8턴 끝처럼 2턴마다). 요약 모듈(`gpt-6.1-sol` low)은 요약을 새로 쓰지 않고 `update_summary` 툴로 바뀐 항목(add, replace, close, set_goal)만 돌려주며, 코드가 검사해 적용합니다. U#는 코드가 턴 상태(중지, 실패, 길이 초과로 잘림, 되물음)로 만들고 모델은 닫기만 합니다. 렌더링 결과는 최대 4,000자이고, 넘치면 닫힌 요청, 대체된 선호, 오래된 다룬 내용 순으로 뺍니다. 요약은 세션 파일에 함께 저장됩니다.
+    - L2 최근 턴 원문: 판단은 최근 4턴(메시지당 10,000자), 나머지 모듈은 요약에 안 들어간 턴(2~3턴, 메시지당 4,000자, 요약이 계속 실패해도 최대 8턴). 상한을 넘는 메시지는 앞 70%와 뒤 30%를 남기고 가운데를 생략 표시합니다.
+    - L3: 열린 파일 이름, 지금 질문, 모듈의 작업 지시. 지금 질문은 자르지 않습니다.
+  - 1턴은 질문 하나와 그 결과입니다. 중지되거나 실패하거나 길이 초과로 잘린 답도 턴으로 남기고 `[answer stopped by the user]` 같은 표시를 붙여, 다음 질문에서 모델이 답하지 못한 요청을 알 수 있게 합니다(오류 문구 자체는 보내지 않습니다). 지금 보내는 질문은 아직 턴이 아니므로, 첫 질문에서 디버거의 `chat_history_turns`는 0입니다. 디버거에는 각 호출이 읽은 요약 범위와 원문 턴 번호, 잘린 메시지가 표시되고, 요약 실행은 별도 실행으로 나타납니다.
+  - 정제와 답변 요청은 같은 system prompt, 원고, 세션 요약, 대화로 시작하고 각자의 지시와 질문을 마지막 메시지에 둡니다. 앞부분이 같아야 provider의 prompt cache가 두 번째 호출에서 원고를 다시 계산하지 않기 때문입니다. 캐시된 토큰 수는 런타임 디버거에서 확인합니다.
 
 문단은 빈 줄로 나누며, `\section`, `\begin`/`\end`, `\label`, 주석 줄 같은 구조 줄과 `\title`, `\author`, `\date` 같은 앞부분 명령(여러 줄에 걸치면 닫는 중괄호까지), 그리고 `\begin{document}` 앞의 preamble 전체는 문단에 넣지 않습니다. 그래서 "이 문단 고쳐줘"가 section 제목이나 논문 제목을 바꾸지 않습니다.
 
-prompt는 provider와 무관하게 `src/ai/prompts/`에서 만들고(LaTeX 규칙: 명령어, citation key, `\label`, 수식, 기호, custom macro, `%` 주석 보존, 선택 영역 밖 반환 금지), 각 adapter는 이를 자기 메시지 형식으로만 바꿉니다.
+prompt는 provider와 무관하게 `src/ai/prompts/`에서 만들고(LaTeX 규칙: 명령어, citation key, `\label`, 수식, 기호, custom macro, `%` 주석 보존, 인라인 편집은 선택 영역 밖 반환 금지), 각 adapter는 이를 자기 메시지 형식으로만 바꿉니다.
 
 AI 결과는 적용 전에 `src/latex/validation.ts`로 검사합니다: 중괄호, `\begin`/`\end`, `$` 수식 구분자 균형, 사라지거나 바뀐 `\label`, bib에 없는 새 citation key는 오류로, 바뀐 수식, 삭제된 citation/ref/주석/명령어는 경고로 diff 아래에 표시합니다. 오류가 있으면 버튼이 **Accept anyway**로 바뀝니다.
 
@@ -184,7 +189,7 @@ src/
 │   ├── tools/         Chat Orchestrator가 부르는 툴 정의 (refine_question, answer_question)
 │   ├── gateway.ts     LLM Gateway: 채팅 호출의 모델 선택, Claude fallback, 호출 추적
 │   └── service.ts     UI가 쓰는 유일한 AI 진입점
-├── chat/              AI 채팅 패널, 대화 상태(chatStore), Chat Orchestrator(orchestrator.ts)
+├── chat/              AI 채팅 패널, 대화 상태(chatStore), Chat Orchestrator(orchestrator.ts), 세션 요약과 턴 기록(session/)
 ├── pdf/               pdf.js 미리보기
 ├── settings/          설정 저장소, 연결 상태, 설정 창
 ├── storage/           작업 상태 저장/복원

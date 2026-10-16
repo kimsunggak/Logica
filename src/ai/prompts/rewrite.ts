@@ -4,7 +4,7 @@
 import type { AIRequest } from "../types";
 import { formatContext, tag } from "./context";
 import type { PromptPayload } from "./index";
-import { systemPrompt } from "./system";
+import { SELECTION_RULE, systemPrompt } from "./system";
 
 const OUTPUT_RULES = [
   "Return only the revised LaTeX that replaces <selected_text>.",
@@ -32,5 +32,5 @@ export function buildInlineEditPrompt(request: AIRequest): PromptPayload {
   ]
     .filter(Boolean)
     .join("\n\n");
-  return { system: systemPrompt(), messages: [{ role: "user", content: user }] };
+  return { system: systemPrompt([SELECTION_RULE]), messages: [{ role: "user", content: user }] };
 }

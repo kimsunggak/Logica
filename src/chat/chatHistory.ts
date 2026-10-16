@@ -6,7 +6,8 @@
  */
 import { call } from "../lib/backend";
 
-export const SESSION_VERSION = 1;
+/** 2 adds the session summary; a version 1 file has none and is summarized again. */
+export const SESSION_VERSION = 2;
 
 export interface SessionSummary {
   id: string;
@@ -21,6 +22,8 @@ export interface SessionFile<M> {
   createdAt: number;
   updatedAt: number;
   messages: M[];
+  /** The session summary (`./session/summary.ts`), read with `readSummary`. */
+  summary?: unknown;
 }
 
 export function listSessions(root: string): Promise<SessionSummary[]> {

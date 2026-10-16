@@ -33,9 +33,9 @@ export interface AIMessage {
  * Chat is run by the Chat Orchestrator: `judge` picks the route of a message
  * by calling a tool, `reply` answers small talk, `refine` rewrites an
  * abstract question into a clear one, and `answer` answers from the whole
- * paper.
+ * paper. `summary` folds older turns into the session summary.
  */
-export type AITask = "inline-edit" | "judge" | "reply" | "refine" | "answer";
+export type AITask = "inline-edit" | "judge" | "reply" | "refine" | "answer" | "summary";
 
 /** The model calls of a chat turn. */
 export type ChatTask = Exclude<AITask, "inline-edit">;
@@ -59,6 +59,13 @@ export interface ToolCall {
   argumentsError?: "invalid_json" | "not_object";
 }
 
+/** A turn handed to the Summary Module to fold into the session summary. */
+export interface FoldTurn {
+  index: number;
+  question: string;
+  answer: string;
+}
+
 export interface ProjectFile {
   path: string;
   text: string;
@@ -70,15 +77,19 @@ export interface AIRequest {
   instruction: string;
   selectedText?: string;
   context: AIContext;
-  /** Earlier chat turns. */
+  /** Earlier chat turns sent word for word (L2). */
   history?: AIMessage[];
+  /** The session summary of the turns before them (L1), as prompt text. */
+  sessionSummary?: string;
+  /** The turns to fold into the session summary (summary only). */
+  foldTurns?: FoldTurn[];
   /** The paper's source files (refine and answer, size-limited). */
   projectFiles?: ProjectFile[];
   /** Paper files left out of `projectFiles` to stay within the budget. */
   omittedFiles?: string[];
   /** The question as rewritten by the Refine Module (answer only). */
   refinedQuestion?: string;
-  /** Functions the model must choose one of (judge only). */
+  /** Functions the model must choose one of (judge and summary). */
   tools?: ToolDefinition[];
   model: string;
   /** Reasoning effort, mapped to each provider’s API format. */
