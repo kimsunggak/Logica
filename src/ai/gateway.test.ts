@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AIError } from "./errors";
 import type { AIRequest, AIResponse, ProviderId, StreamHandlers } from "./types";
+import * as trace from "../debug/trace";
 
 type Script = (request: AIRequest, handlers?: StreamHandlers) => Promise<AIResponse>;
 const calls: { provider: ProviderId; request: AIRequest }[] = [];
@@ -39,6 +40,25 @@ beforeEach(() => {
 });
 
 describe("LLM Gateway", () => {
+  it("reports the same turn numbers for primary and fallback model calls", async () => {
+    scripts.anthropic = failing(new AIError("unavailable", "Claude is down", { provider: "anthropic" }));
+    scripts.openai = reply("openai", "ok");
+    const parent = trace.startSpan("history", null, "orchestrator", "test");
+    const start = vi.spyOn(trace, "startSpan");
+    try {
+      await callModel("judge", request, {
+        control: control(),
+        trace: { traceId: "history", parent, input: { turn_numbers: [6, 7, 8, 9] } },
+      });
+      const inputs = start.mock.calls.filter(([, , , fn]) => fn === "aiService.generate").map(([, , , , input]) => typeof input === "function" ? input() : input);
+      expect(inputs).toHaveLength(2);
+      expect(inputs[0]).toMatchObject({ task: "judge", fallback: false, turn_numbers: [6, 7, 8, 9] });
+      expect(inputs[1]).toMatchObject({ task: "judge", fallback: true, turn_numbers: [6, 7, 8, 9] });
+    } finally {
+      start.mockRestore();
+    }
+  });
+
   it("uses the primary model and reasoning effort for each task", async () => {
     scripts.openai = reply("openai", "ok");
     scripts.anthropic = reply("anthropic", "ok");

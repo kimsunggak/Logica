@@ -25,7 +25,7 @@ export interface RunControl {
 export interface GatewayOptions {
   control: RunControl;
   /** Report the attempts under this span. */
-  trace?: { traceId: string; parent: Span };
+  trace?: { traceId: string; parent: Span; input?: Record<string, unknown> };
   /** Streamed text so far. Once text has been shown, a failure is not retried with the fallback provider. */
   onText?: (full: string) => void;
   /** Called before each attempt with the model it uses. */
@@ -79,6 +79,7 @@ async function attempt(
         "llm",
         "aiService.generate",
         () => ({
+          ...options.trace?.input,
           task,
           provider: choice.provider,
           model: choice.model,

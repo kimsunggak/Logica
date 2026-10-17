@@ -16,7 +16,7 @@ import { callModel, type RunControl } from "../../ai/gateway";
 import { SUMMARY_TOOLS, UPDATE_SUMMARY } from "../../ai/tools/summaryTools";
 import { step, traced } from "../../debug/trace";
 import { addUnresolved, applyOps, emptySummary, pruneSummary, readOps, renderSummary, type ConversationSummary, type IgnoredOp, type SummaryOp } from "./summary";
-import { MODULE_MIN_TURNS, type TurnRecord } from "./turns";
+import { MODULE_TURNS, type TurnRecord } from "./turns";
 
 /** Fold once this many turns are not in the summary. */
 export const FOLD_AT = 4;
@@ -30,7 +30,7 @@ export function turnsToFold(turns: TurnRecord[], summary: ConversationSummary | 
   const covered = summary?.coveredTurns ?? 0;
   const open = turns.filter((turn) => turn.index > covered);
   if (open.length < FOLD_AT) return [];
-  return open.slice(0, open.length - MODULE_MIN_TURNS).slice(0, FOLD_BATCH);
+  return open.slice(0, open.length - MODULE_TURNS).slice(0, FOLD_BATCH);
 }
 
 export interface FoldOptions {

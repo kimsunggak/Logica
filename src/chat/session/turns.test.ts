@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { t } from "../../i18n";
-import { capText, judgeTurns, moduleTurns, turnMessages, turnsOf, type TurnMessage, type TurnRecord } from "./turns";
+import { capText, selectHistory, turnMessages, turnsOf, type TurnMessage, type TurnRecord } from "./turns";
 
 const q = (content: string): TurnMessage => ({ role: "user", content, status: "done" });
 const a = (content: string, extra: Partial<TurnMessage> = {}): TurnMessage => ({ role: "assistant", content, status: "done", ...extra });
@@ -54,16 +54,27 @@ describe("capText", () => {
 });
 
 describe("windows", () => {
-  it("gives the judge the last four turns", () => {
-    expect(judgeTurns(turns(6)).map((turn) => turn.index)).toEqual([3, 4, 5, 6]);
-    expect(judgeTurns(turns(2)).map((turn) => turn.index)).toEqual([1, 2]);
+  it("uses the same selector for four- and two-turn windows, sliding as the session grows", () => {
+    for (const last of [9, 10]) {
+      const list = turns(last);
+      const judge = selectHistory(list, last - 2, 4, 10_000);
+      const module = selectHistory(list, last - 2, 2, 4_000);
+      expect(judge.turnNumbers).toEqual([last - 3, last - 2, last - 1, last]);
+      expect(module.turnNumbers).toEqual([last - 1, last]);
+      expect(module.messages.map((m) => m.content)).toEqual([`q${last - 1}`, `a${last - 1}`, `q${last}`, `a${last}`]);
+    }
   });
 
-  it("gives the modules the turns after the summary, at least two and at most eight", () => {
-    expect(moduleTurns(turns(5), 2).map((turn) => turn.index)).toEqual([3, 4, 5]);
-    expect(moduleTurns(turns(4), 4).map((turn) => turn.index)).toEqual([3, 4]);
-    expect(moduleTurns(turns(3), 0).map((turn) => turn.index)).toEqual([1, 2, 3]);
-    expect(moduleTurns(turns(12), 0).map((turn) => turn.index)).toEqual([5, 6, 7, 8, 9, 10, 11, 12]);
+  it.each([4, 2])("keeps every unsummarized turn when the %i-turn window must expand", (keep) => {
+    expect(selectHistory(turns(9), 5, keep, 4_000).turnNumbers).toEqual([6, 7, 8, 9]);
+    expect(selectHistory(turns(12), 1, keep, 4_000).turnNumbers).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(selectHistory(turns(12), 0, keep, 4_000).turnNumbers).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  });
+
+  it.each([4, 2])("handles empty or short sessions and fully summarized history for a %i-turn window", (keep) => {
+    expect(selectHistory([], 0, keep, 4_000)).toEqual({ messages: [], clipped: [], turnNumbers: [] });
+    expect(selectHistory(turns(1), 0, keep, 4_000).turnNumbers).toEqual([1]);
+    expect(selectHistory(turns(9), 9, keep, 4_000).turnNumbers).toEqual(keep === 4 ? [6, 7, 8, 9] : [8, 9]);
   });
 
   it("turns them into messages and reports what was cut", () => {

@@ -381,11 +381,14 @@ function nodeLines(t, module) {
     lines.unshift({ status: "route", text: `턴 1~${main.output.covered_turns} 요약됨, 변경 ${main.output.ops}개, 무시 ${main.output.ignored}개` });
   }
   // What the call reads of the conversation: the summary (L1) and the turns word for word (L2).
-  if (main && main.input && Array.isArray(main.input.history_turn_numbers)) {
-    const turns = main.input.history_turn_numbers;
-    const covered = main.input.summary_covered_turns;
+  const judgeCall = module === "orchestrator" && t && spansOf(t, "llm").find((s) => s.fn === "aiService.generate" && s.input && s.input.task === "judge");
+  const history = judgeCall ? judgeCall.input : main && main.input;
+  if (history && Array.isArray(history.turn_numbers)) {
+    const turns = history.turn_numbers;
+    const orchestrator = mainSpan(t, "orchestrator");
+    const covered = orchestrator && orchestrator.input && orchestrator.input.summary_covered_turns;
     const reads = `${covered ? `요약 턴 1~${covered}` : "요약 없음"} + 원문 ${turns.length ? `턴 ${turns.join(", ")}` : "없음"}`;
-    lines.unshift({ status: main.input.clipped ? "error" : "route", text: reads + (main.input.clipped ? `  (${main.input.clipped.length}개 메시지 잘림)` : "") });
+    lines.unshift({ status: history.clipped ? "error" : "route", text: reads + (history.clipped ? `  (${history.clipped.length}개 메시지 잘림)` : "") });
   }
   const r = module === "orchestrator" && routeOf(t);
   if (r) {

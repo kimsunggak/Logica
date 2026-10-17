@@ -15,7 +15,7 @@ import { CHAT_MODELS } from "../ai/models/modelConfig";
 import { aiService, newRequestId } from "../ai/service";
 import { lineOf, locateEdit, type ProposedEdit } from "../ai/agent/edits";
 import { deleteSession, listSessions, loadSession, newSessionId, saveSession, SESSION_VERSION, type SessionSummary } from "./chatHistory";
-import { conversationFor, editorLocation, runChatTurn, type Outcome, type Paper, type Stage, type Turn } from "./orchestrator";
+import { editorLocation, runChatTurn, type Outcome, type Paper, type Stage, type Turn } from "./orchestrator";
 import { foldTurns, turnsToFold } from "./session/summarizer";
 import { readSummary, type ConversationSummary } from "./session/summary";
 import { turnsOf } from "./session/turns";
@@ -160,8 +160,6 @@ export async function sendChatMessage(text: string): Promise<void> {
     ...editorLocation(turn),
     session_turns: turn.turns.length,
     summary_covered_turns: turn.summary?.coveredTurns ?? 0,
-    judge_reads_turns: conversationFor(turn, "judge").info.history_turn_numbers,
-    modules_read_turns: conversationFor(turn, "module").info.history_turn_numbers,
   }));
   const control: RunControl = { stopped: false, activeRequest: null };
   running = control;

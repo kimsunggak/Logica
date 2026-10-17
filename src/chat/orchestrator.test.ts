@@ -22,9 +22,9 @@ type Reply = (request: ChatRequest, options: GatewayOptions) => AIResponse;
 
 /** A fake LLM Gateway: one scripted reply per task, and a log of what each call received. */
 function gateway(replies: Partial<Record<ChatTask, Reply>>) {
-  const log: { task: ChatTask; request: ChatRequest }[] = [];
+  const log: { task: ChatTask; request: ChatRequest; options: GatewayOptions }[] = [];
   const call = async (task: ChatTask, request: ChatRequest, options: GatewayOptions): Promise<GatewayResult> => {
-    log.push({ task, request });
+    log.push({ task, request, options });
     const choice = CHAT_MODELS[task].primary;
     options.onAttempt?.(choice, false);
     const out = replies[task];
@@ -47,13 +47,13 @@ const history = [
 ];
 const paper = { files: [{ path: "main.tex", text: "\\section{Method} We route tokens." }], omitted: [], budget: 1000 };
 
-function run(replies: Partial<Record<ChatTask, Reply>>) {
+function run(replies: Partial<Record<ChatTask, Reply>>, inputTurn: Turn = turn) {
   const { call, log } = gateway(replies);
   const stages: Stage[] = [];
   const refined: string[] = [];
   const text: string[] = [];
   let paperReads = 0;
-  const result = runChatTurn(turn, {
+  const result = runChatTurn(inputTurn, {
     root: startSpan("t1", null, "pipeline", "test"),
     control: { stopped: false, activeRequest: null },
     paper: () => {
@@ -75,16 +75,17 @@ describe("conversationFor", () => {
   });
 
   it("has no turns before the first answer", () => {
-    expect(conversationFor({ ...turn, turns: [] }, "judge").info).toMatchObject({ chat_history_turns: 0, history_turn_numbers: [] });
+    expect(conversationFor({ ...turn, turns: [] }, "judge").info).toEqual({ turn_numbers: [] });
   });
 
   it("gives the judge the last four turns, and the modules the turns the summary does not cover", () => {
     const t = at(many, 4);
-    expect(conversationFor(t, "judge").info.history_turn_numbers).toEqual([3, 4, 5, 6]);
-    expect(conversationFor(t, "module").info.history_turn_numbers).toEqual([5, 6]);
+    expect(conversationFor(t, "judge").info.turn_numbers).toEqual([3, 4, 5, 6]);
+    expect(conversationFor(t, "module").info.turn_numbers).toEqual([5, 6]);
     expect(conversationFor(t, "module").history.map((m) => m.content)).toEqual(["q5", "a5", "q6", "a6"]);
     expect(conversationFor(t, "module").sessionSummary).toContain("Goal: Tighten section 4");
-    expect(conversationFor(at(many, 0), "module").info.history_turn_numbers).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(conversationFor(at(many, 0), "module").info.turn_numbers).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(conversationFor(at(many, 0), "judge").info.turn_numbers).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
   it("cuts long messages harder for the modules than for the judge", () => {
@@ -119,6 +120,23 @@ describe("chooseRoute", () => {
 });
 
 describe("Chat Orchestrator", () => {
+  it.each(["reply", "answer", "refine"] as const)("passes the selected history and its turn numbers along the %s route", async (route) => {
+    const turns: TurnRecord[] = Array.from({ length: 9 }, (_, i) => ({ index: i + 1, question: `q${i + 1}`, answer: `a${i + 1}`, status: "done" }));
+    const r = run({
+      judge: () => response("", tool(route === "reply" ? "reply_directly" : route === "answer" ? "answer_question" : "refine_question")),
+      reply: () => response("ok"),
+      refine: () => response('{"refined_question":"A clearer question"}'),
+      answer: () => response("ok"),
+    }, { ...turn, turns, summary: { ...emptySummary(), coveredTurns: 7, goal: "Keep the context" } });
+    await r.result;
+    for (const { task, request, options } of r.log) {
+      const expected = task === "judge" ? [6, 7, 8, 9] : [8, 9];
+      expect(request.history?.map((m) => m.content)).toEqual(expected.flatMap((i) => [`q${i}`, `a${i}`]));
+      expect(options.trace?.input).toEqual({ turn_numbers: expected });
+      expect(request.sessionSummary).toContain("Keep the context");
+    }
+  });
+
   it("A: small talk goes to the Reply Module, with two model calls and without the paper", async () => {
     const r = run({
       judge: () => response("", tool("reply_directly", "a thank-you, not a question about the paper")),

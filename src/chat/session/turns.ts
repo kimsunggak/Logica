@@ -9,9 +9,9 @@
  * that did not finish stay in the conversation with a note, so the next
  * model call knows the request was not answered.
  *
- * The judge reads the last four turns. The other modules read every turn
- * the session summary does not cover yet (two or three, see
- * `./summarizer.ts`). Long messages keep their start and end.
+ * Every call reads a recent window (four turns for the judge, two for the
+ * other modules), extended to include every turn not yet summarized.
+ * Long messages keep their start and end.
  */
 import type { AIMessage } from "../../ai/types";
 import { t } from "../../i18n";
@@ -35,15 +35,13 @@ export interface TurnMessage {
   truncated?: boolean;
 }
 
-/** The judge sees the last four turns, each message up to 10,000 characters. */
+/** The judge keeps at least four recent turns, each message up to 10,000 characters. */
 export const JUDGE_TURNS = 4;
 export const JUDGE_MESSAGE_CHARS = 10_000;
-/** The other modules see the turns the summary does not cover, each message up to 4,000 characters. */
+/** The other modules keep at least two recent turns, each message up to 4,000 characters. */
 export const MODULE_MESSAGE_CHARS = 4_000;
 /** At least the last two turns go word for word, even when the summary covers them. */
-export const MODULE_MIN_TURNS = 2;
-/** When the summary keeps failing, the other modules still get at most eight turns. */
-export const MODULE_MAX_TURNS = 8;
+export const MODULE_TURNS = 2;
 
 /** Notes after an answer that did not finish; the prompts explain them. */
 export const TURN_NOTES: Record<Exclude<TurnStatus, "done" | "clarify">, string> = {
@@ -91,15 +89,15 @@ export function capText(text: string, max: number): string {
   return `${text.slice(0, head)}\n[... ${text.length - max} of ${text.length} characters omitted ...]\n${text.slice(-tail)}`;
 }
 
-export function judgeTurns(turns: TurnRecord[]): TurnRecord[] {
-  return turns.slice(-JUDGE_TURNS);
-}
-
-/** The turns after `coveredTurns`; never fewer than two, never more than eight. */
-export function moduleTurns(turns: TurnRecord[], coveredTurns: number): TurnRecord[] {
+/** Select a recent window, include all unsummarized turns, then format the messages. */
+export function selectHistory(turns: TurnRecord[], coveredTurns: number, keepTurns: number, maxChars: number) {
   const last = turns.at(-1)?.index ?? 0;
-  const from = Math.min(coveredTurns, last - MODULE_MIN_TURNS);
-  return turns.filter((turn) => turn.index > from).slice(-MODULE_MAX_TURNS);
+  const from = Math.min(coveredTurns, last - keepTurns);
+  const selected = turns.filter((turn) => turn.index > from);
+  return {
+    ...turnMessages(selected, maxChars),
+    turnNumbers: selected.map((turn) => turn.index),
+  };
 }
 
 /** A message that was cut, for the debugger. */

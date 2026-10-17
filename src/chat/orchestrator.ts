@@ -14,8 +14,8 @@
  * (see `src/debug/trace.ts`).
  *
  * Every call reads the session summary (L1) and recent turns word for word
- * (L2): the judge the last four turns, the modules the turns the summary
- * does not cover yet (see `./session/`).
+ * (L2): at least four turns for the judge, two for the other modules,
+ * including every turn the summary does not cover yet (see `./session/`).
  */
 import { parseRefine, type RefineResult } from "../ai/agent/refine";
 import { callModel, type GatewayOptions, type GatewayResult, type RunControl } from "../ai/gateway";
@@ -24,7 +24,7 @@ import { ANSWER_QUESTION, CHAT_TOOLS, REFINE_QUESTION, REPLY_DIRECTLY } from "..
 import type { AIContext, AIMessage, AIResponse, AIUsage, FinishReason, ProjectFile } from "../ai/types";
 import { step, traced, type Span } from "../debug/trace";
 import { renderSummary, type ConversationSummary } from "./session/summary";
-import { JUDGE_MESSAGE_CHARS, judgeTurns, MODULE_MESSAGE_CHARS, moduleTurns, turnMessages, type Clipped, type TurnRecord } from "./session/turns";
+import { JUDGE_MESSAGE_CHARS, JUDGE_TURNS, MODULE_MESSAGE_CHARS, MODULE_TURNS, selectHistory, type Clipped, type TurnRecord } from "./session/turns";
 
 /** What the judge chose: reply itself, answer, or refine first. */
 export type Route = "reply" | "answer" | "refine";
@@ -121,25 +121,27 @@ export interface Conversation {
   sessionSummary?: string;
   history: AIMessage[];
   /** For the debugger. */
-  info: { chat_history_turns: number; history_turn_numbers: number[]; summary_covered_turns: number; clipped?: Clipped[] };
+  info: { turn_numbers: number[]; clipped?: Clipped[] };
 }
 
 /**
- * The conversation for the judge (last four turns) and for the modules (the
- * turns the summary does not cover). The question being asked is not a turn
- * yet, so the first message of a session has none.
+ * One history selector for all calls, using a four- or two-turn window and
+ * the summary's coverage. The question being asked is not a turn yet, so
+ * the first message of a session has none.
  */
 export function conversationFor(turn: Turn, reader: "judge" | "module"): Conversation {
   const covered = turn.summary?.coveredTurns ?? 0;
-  const turns = reader === "judge" ? judgeTurns(turn.turns) : moduleTurns(turn.turns, covered);
-  const { messages, clipped } = turnMessages(turns, reader === "judge" ? JUDGE_MESSAGE_CHARS : MODULE_MESSAGE_CHARS);
+  const { messages, turnNumbers, clipped } = selectHistory(
+    turn.turns,
+    covered,
+    reader === "judge" ? JUDGE_TURNS : MODULE_TURNS,
+    reader === "judge" ? JUDGE_MESSAGE_CHARS : MODULE_MESSAGE_CHARS,
+  );
   return {
     sessionSummary: renderSummary(turn.summary ?? null) || undefined,
     history: messages,
     info: {
-      chat_history_turns: turns.length,
-      history_turn_numbers: turns.map((t) => t.index),
-      summary_covered_turns: covered,
+      turn_numbers: turnNumbers,
       ...(clipped.length ? { clipped } : {}),
     },
   };
@@ -166,9 +168,9 @@ function finished(result: GatewayResult) {
 export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<TurnResult> {
   const call = deps.call ?? callModel;
   const { hooks } = deps;
-  const options = (parent: Span, onText?: (full: string) => void): GatewayOptions => ({
+  const options = (parent: Span, reads: Conversation, onText?: (full: string) => void): GatewayOptions => ({
     control: deps.control,
-    trace: { traceId: turn.id, parent },
+    trace: { traceId: turn.id, parent, input: reads.info },
     onAttempt: hooks.onModel,
     onText,
   });
@@ -193,11 +195,12 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
     () => ({
       question: turn.instruction,
       ...editorLocation(turn),
-      ...judgeReads.info,
+      session_turns: turn.turns.length,
+      summary_covered_turns: turn.summary?.coveredTurns ?? 0,
       tools: CHAT_TOOLS.map((tool) => tool.name),
     }),
     async (span) => {
-      const result = await call("judge", { ...ask, history: judgeReads.history, id: `${turn.id}-judge`, tools: CHAT_TOOLS }, options(span));
+      const result = await call("judge", { ...ask, history: judgeReads.history, id: `${turn.id}-judge`, tools: CHAT_TOOLS }, options(span, judgeReads));
       const decision = chooseRoute(result.response);
       step(turn.id, span, "orchestrator", "chooseRoute", () => ({ text: result.response.text, tool_calls: result.response.toolCalls ?? [] }), decision);
       return { ...decision, result };
@@ -214,7 +217,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
       "reply",
       "runReplyModule",
       () => ({ question: turn.instruction, ...moduleReads.info }),
-      (span) => call("reply", { ...ask, id: `${turn.id}-reply` }, options(span, hooks.onText)),
+      (span) => call("reply", { ...ask, id: `${turn.id}-reply` }, options(span, moduleReads, hooks.onText)),
       (result) => ({ text: result.response.text, finishReason: result.response.finishReason, model: result.choice.model }),
     );
     return { route: "reply", outcome: "reply", reason: judged.reason, content: replied.response.text.trim(), ...finished(replied) };
@@ -235,7 +238,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
         const result = await call(
           "refine",
           { ...ask, id: `${turn.id}-refine`, projectFiles: read.files, omittedFiles: read.omitted },
-          options(span),
+          options(span, moduleReads),
         );
         const parsed = parseRefine(result.response.text, turn.instruction);
         step(turn.id, span, "refine", "parseRefine", result.response.text, parsed);
@@ -263,7 +266,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
       return call(
         "answer",
         { ...ask, id: turn.id, projectFiles: read.files, omittedFiles: read.omitted, refinedQuestion: refined },
-        options(span, hooks.onText),
+        options(span, moduleReads, hooks.onText),
       );
     },
     (result) => ({ text: result.response.text, finishReason: result.response.finishReason, model: result.choice.model }),
