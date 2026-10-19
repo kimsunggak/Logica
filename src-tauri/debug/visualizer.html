@@ -97,6 +97,11 @@ svg text { font-family: var(--sans); fill: var(--ink); }
 .node.skipped rect { stroke-dasharray: 2 4; }
 .node .route { font: 600 11px var(--mono); fill: var(--llm); }
 .node { cursor: pointer; }
+/* Final Answer only records the turn's result; the answer reaches the screen elsewhere. */
+.node.debug rect { fill: var(--soft); }
+.node.debug.running rect { fill: var(--run-soft); }
+.node g.tag rect { fill: var(--panel); stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: none; animation: none; }
+.node g.tag text { font: 600 10px var(--sans); fill: var(--ink-2); }
 .node .title { font-size: 14px; font-weight: 600; }
 .node .meta { font: 11px var(--mono); fill: var(--ink-2); }
 .node .fn { font: 11px var(--mono); fill: var(--ink-2); }
@@ -197,6 +202,7 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
       <span><i style="border-color:var(--err);background:var(--err-soft)"></i>error</span>
       <span><i style="border-color:var(--wait);border-style:dotted;opacity:.5"></i>skipped (이 갈래에서 건너뜀)</span>
       <span><i style="border-color:var(--llm)"></i>LLM 호출 (Gateway + Rust)</span>
+      <span><i style="border-color:var(--ink-2);background:var(--soft);border-radius:999px"></i>디버깅 모듈 (결과 기록만 함)</span>
     </div>
   </section>
     <div class="gutter h" data-gutter="graph" role="separator" aria-orientation="horizontal" aria-label="그래프 높이" tabindex="0" title="드래그로 높이 조절, 더블클릭으로 기본값"></div>
@@ -234,7 +240,7 @@ const MODULES = {
   reply:        { title: "Reply Module" },
   refine:       { title: "Refine Module" },
   answer:       { title: "Answer Module" },
-  final:        { title: "💬 Final Answer" },
+  final:        { title: "💬 Final Answer", debug: true },
   llm:          { title: "LLM Gateway" },
   summary:      { title: "Summary Module" },
 };
@@ -411,8 +417,10 @@ function nodeSvg(t, module, x, y, w, h) {
   const lines = nodeLines(t, module).slice(0, max).map((l, i) =>
     `<text class="${l.status === "route" ? "route" : "fn " + l.status}" x="${x + 12}" y="${y + 50 + i * 14}">${esc(l.text)}</text>`).join("");
   const empty = status === "waiting" ? "아직 실행 안 됨" : status === "skipped" ? "이 갈래에서는 건너뜀" : "";
-  return `<g class="node ${status} ${module === "llm" ? "llm" : ""} ${selModule === module ? "sel" : ""}" data-module="${module}" tabindex="0" role="button" aria-label="${esc(MODULES[module].title)} ${status}">
-    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10"></rect>
+  const debug = Boolean(MODULES[module].debug);
+  const tag = debug ? `<g class="tag"><rect x="${x + w - 92}" y="${y - 8}" width="78" height="16" rx="8"></rect><text x="${x + w - 53}" y="${y + 3.5}" text-anchor="middle">디버깅 모듈</text></g>` : "";
+  return `<g class="node ${status} ${module === "llm" ? "llm" : ""} ${debug ? "debug" : ""} ${selModule === module ? "sel" : ""}" data-module="${module}" tabindex="0" role="button" aria-label="${esc(MODULES[module].title)} ${status}${debug ? " (디버깅 모듈)" : ""}">
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${debug ? 24 : 10}"></rect>${tag}
     <text class="title" x="${x + 12}" y="${y + 22}">${esc(MODULES[module].title)}</text>
     <text class="meta" x="${x + w - 12}" y="${y + 22}" text-anchor="end">${statusText(status, dur)}</text>
     <line x1="${x + 12}" y1="${y + 32}" x2="${x + w - 12}" y2="${y + 32}" stroke="var(--line)"></line>
