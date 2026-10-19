@@ -19,7 +19,7 @@ import { editorLocation, runChatTurn, type Outcome, type Paper, type Stage, type
 import { foldTurns, turnsToFold } from "./session/summarizer";
 import { readSummary, type ConversationSummary } from "./session/summary";
 import { turnsOf } from "./session/turns";
-import { endSpan, failSpan, startSpan, step } from "../debug/trace";
+import { endSpan, failSpan, startSpan, step, type Span } from "../debug/trace";
 import type { ProjectFile, ProviderId } from "../ai/types";
 import { editorSession } from "../editor/editorSession";
 import { outlineText, sectionAt, sectionTrail } from "../latex/parser/documentModel";
@@ -205,7 +205,7 @@ export async function sendChatMessage(text: string): Promise<void> {
     if (running === control) running = null;
     useChat.setState({ runningId: null });
     // Stopped and failed turns count too: they are turns left unanswered.
-    scheduleSummary();
+    scheduleSummary({ traceId: requestId, root });
   }
 }
 
@@ -220,6 +220,8 @@ export function stopChat() {
 
 /** The Summary Module run in the background, for one session at a time. */
 let summarizing: { control: RunControl; again: boolean; done: Promise<void> } | null = null;
+/** The turn that ended last; a summary run shows in its trace. */
+let foldTrace: { traceId: string; root: Span } | null = null;
 
 /**
  * Fold older turns into the session summary when four are open (see
@@ -227,7 +229,8 @@ let summarizing: { control: RunControl; again: boolean; done: Promise<void> } | 
  * up, and stops when the user leaves the session. A failure is tried again
  * after the next turn; until then the modules read more turns word for word.
  */
-export function scheduleSummary() {
+export function scheduleSummary(after?: { traceId: string; root: Span }) {
+  if (after) foldTrace = after;
   if (summarizing) {
     summarizing.again = true;
     return;
@@ -242,7 +245,8 @@ export function scheduleSummary() {
       if (!fold.length) return;
       const { doc } = useProject.getState();
       const result = await foldTurns(summary, fold, {
-        traceId: newRequestId(),
+        traceId: foldTrace?.traceId ?? newRequestId(),
+        parent: foldTrace?.root ?? null,
         control,
         outline: doc?.flatSections.length ? outlineText(doc, 3000) : undefined,
       }).catch(() => null);

@@ -14,7 +14,7 @@
 import { AIError } from "../../ai/errors";
 import { callModel, type RunControl } from "../../ai/gateway";
 import { SUMMARY_TOOLS, UPDATE_SUMMARY } from "../../ai/tools/summaryTools";
-import { step, traced } from "../../debug/trace";
+import { step, traced, type Span } from "../../debug/trace";
 import { addUnresolved, applyOps, emptySummary, pruneSummary, readOps, renderSummary, type ConversationSummary, type IgnoredOp, type SummaryOp } from "./summary";
 import { MODULE_TURNS, type TurnRecord } from "./turns";
 
@@ -35,6 +35,8 @@ export function turnsToFold(turns: TurnRecord[], summary: ConversationSummary | 
 
 export interface FoldOptions {
   traceId: string;
+  /** The turn's root span, so the debugger shows the run in that turn. */
+  parent?: Span | null;
   control: RunControl;
   /** The paper's outline, so references name sections the way the paper does. */
   outline?: string;
@@ -58,7 +60,7 @@ export async function foldTurns(summary: ConversationSummary | null, turns: Turn
   const last = turns.at(-1)?.index ?? 0;
   return traced(
     options.traceId,
-    null,
+    options.parent ?? null,
     "summary",
     "runSummaryModule",
     () => ({ question: `세션 요약: 턴 ${first}~${last} 접기`, fold_turns: turns.map((t) => ({ turn: t.index, status: t.status })), covered_before: summary?.coveredTurns ?? 0 }),

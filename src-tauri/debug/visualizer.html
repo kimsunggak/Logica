@@ -95,6 +95,9 @@ svg text { font-family: var(--sans); fill: var(--ink); }
 .node.sel rect { stroke-width: 3.5; }
 .node.skipped { opacity: .45; }
 .node.skipped rect { stroke-dasharray: 2 4; }
+/* Summary Module before four turns are left unsummarized: it does not run yet. */
+.node.inactive { opacity: .55; }
+.node.inactive rect { stroke-dasharray: 6 4; fill: var(--soft); }
 .node .route { font: 600 11px var(--mono); fill: var(--llm); }
 .node { cursor: pointer; }
 /* Final Answer only records the turn's result; the answer reaches the screen elsewhere. */
@@ -194,13 +197,14 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
         <button class="pbtn" type="button" data-max="paneGraph" title="화면 전체로 (Esc로 복귀)">⤢</button>
       </div>
     </div>
-    <div class="graph-wrap" id="graphWrap" title="휠: 확대/축소, 드래그: 이동, 더블클릭: 맞춤"><svg id="graph" viewBox="0 0 840 680" role="img" aria-label="User Input, Chat Orchestrator, 그 아래 나란히 Reply, Answer, Refine Module, Final Answer 실행 그래프와 LLM 호출"></svg></div>
+    <div class="graph-wrap" id="graphWrap" title="휠: 확대/축소, 드래그: 이동, 더블클릭: 맞춤"><svg id="graph" viewBox="0 0 840 680" role="img" aria-label="User Input, Chat Orchestrator, 그 아래 나란히 Reply, Answer, Refine Module, Final Answer와 Summary Module 실행 그래프와 LLM 호출"></svg></div>
     <div class="legend">
       <span><i style="border-color:var(--wait);border-style:dashed"></i>waiting</span>
       <span><i style="border-color:var(--run);background:var(--run-soft)"></i>running</span>
       <span><i style="border-color:var(--ok)"></i>completed</span>
       <span><i style="border-color:var(--err);background:var(--err-soft)"></i>error</span>
       <span><i style="border-color:var(--wait);border-style:dotted;opacity:.5"></i>skipped (이 갈래에서 건너뜀)</span>
+      <span><i style="border-color:var(--wait);border-style:dashed;background:var(--soft);opacity:.55"></i>inactive (요약 조건 전)</span>
       <span><i style="border-color:var(--llm)"></i>LLM 호출 (Gateway + Rust)</span>
       <span><i style="border-color:var(--ink-2);background:var(--soft);border-radius:999px"></i>디버깅 모듈 (결과 기록만 함)</span>
     </div>
@@ -327,9 +331,24 @@ function llmStatus(t) {
   if (ends.some((s) => s.status === "error")) return "error";
   return "completed";
 }
+/**
+ * The Summary Module in a turn's graph before it runs: it starts after the
+ * turn, once four turns are not in the summary. Counts come from the turn's input.
+ */
+function summaryIdle(t) {
+  const root = rootOf(t);
+  if (!root || root.status === "running") return { status: "waiting", lines: ["턴이 끝나면 요약 조건 확인"] };
+  const input = (mainSpan(t, "user") || {}).output || {};
+  const open = (input.session_turns || 0) + 1 - (input.summary_covered_turns || 0);
+  if (open >= FOLD_AT) return { status: "waiting", lines: [`미요약 턴 ${open}/${FOLD_AT}`, "이전 요약이 끝나면 실행"] };
+  return { status: "inactive", lines: [`미요약 턴 ${open}/${FOLD_AT}`, `${FOLD_AT}턴이 쌓이면 실행`] };
+}
+const FOLD_AT = 4;
+
 function moduleStatus(t, module) {
   if (module === "llm") return llmStatus(t);
   const list = spansOf(t, module);
+  if (module === "summary" && !list.length && !isSummary(t)) return summaryIdle(t).status;
   const r = routeOf(t);
   if (!list.length && r && !r.path.includes(module)) return "skipped";
   if (!list.length) return "waiting";
@@ -381,6 +400,7 @@ function nodeLines(t, module) {
         : `${(s.input && s.input.task) || ""}  ${(s.input && s.input.model) || ""}${time(s)}`,
     }));
   }
+  if (module === "summary" && !fns.length && t && !isSummary(t)) return summaryIdle(t).lines.map((text) => ({ status: "wait", text }));
   const lines = fns.map((s) => ({ status: s.status, text: (s.source === "rust" ? "rust  " : "") + s.fn + time(s) }));
   const main = t && mainSpan(t, module);
   if (module === "summary" && main && main.output) {
@@ -496,7 +516,7 @@ function renderGraph(t) {
   if (isSummary(t)) return renderSummaryGraph(t);
   const W = 240, COL = { reply: 20, answer: 300, refine: 580 };
   const Y = { user: 10, orchestrator: 126, branch: 300, final: 486 };
-  const H = { user: 84, orchestrator: 102, branch: 116, final: 76 };
+  const H = { user: 84, orchestrator: 102, branch: 116, final: 76, summary: 104 };
   const at = {
     user: [COL.answer, Y.user, H.user],
     orchestrator: [COL.answer, Y.orchestrator, H.orchestrator],
@@ -504,6 +524,7 @@ function renderGraph(t) {
     answer: [COL.answer, Y.branch, H.branch],
     refine: [COL.refine, Y.branch, H.branch],
     final: [COL.answer, Y.final, H.final],
+    summary: [COL.refine, Y.final, H.summary],
   };
   const r = routeOf(t);
   // An edge is on the turn's path when the route goes straight from one module to the other.
@@ -529,12 +550,19 @@ function renderGraph(t) {
     edgeSvg(cls("answer", "final"), `M${mid("answer")} ${bBottom} V${fTop - 2}`, "answer (streamed)", mid("answer") + 10, (bBottom + fTop) / 2 + 4),
     edgeSvg(cls("refine", "final"), `M${mid("refine")} ${bBottom} C${mid("refine")} ${bBottom + 44}, ${mid("final") + 60} ${fTop - 40}, ${mid("final") + 60} ${fTop - 2}`, "되묻기", mid("refine") - 60, bBottom + 22),
   ];
-  const bar = gatewaySvg(t, 20, bottom("final") + 24, 800);
-  graphSize(840, bottom("final") + 24 + bar.h + 8);
+  // The summary runs after the turn ends, in the background.
+  const sy = fTop + H.final / 2;
+  edges.push(
+    edgeSvg(t && spansOf(t, "summary").length ? edgeClass(t, "final", "summary") : "skip", `M${COL.answer + W} ${sy} H${COL.refine - 2}`),
+    `<text class="elabel" x="${COL.answer + W + 20}" y="${sy - 9}" text-anchor="middle">이후</text>`,
+  );
+  const rowBottom = Math.max(bottom("final"), bottom("summary"));
+  const bar = gatewaySvg(t, 20, rowBottom + 24, 800);
+  graphSize(840, rowBottom + 24 + bar.h + 8);
   $("graph").innerHTML = [
     MARKERS,
     ...edges,
-    ...CHAIN.map((m) => nodeSvg(t, m, at[m][0], at[m][1], W, at[m][2])),
+    ...[...CHAIN, "summary"].map((m) => nodeSvg(t, m, at[m][0], at[m][1], W, at[m][2])),
     bar.svg,
   ].join("");
 }
@@ -589,7 +617,11 @@ function renderInspector(t) {
   const list = spansOf(t, selModule);
   const head = `<div class="insp-head"><h2>${esc(MODULES[selModule].title)}</h2><span class="badge ${status}">${status}</span>
     <span class="dim">${list.length}개 함수 호출</span></div>`;
-  if (!list.length) { box.innerHTML = head + '<div class="empty">이 단계는 아직 실행되지 않았습니다.</div>'; return; }
+  if (!list.length) {
+    const why = selModule === "summary" && !isSummary(t) ? summaryIdle(t).lines.join(", ") : "이 단계는 아직 실행되지 않았습니다.";
+    box.innerHTML = head + `<div class="empty">${esc(why)}</div>`;
+    return;
+  }
   box.innerHTML = head + list.map((s) => {
     const callees = s.children.map((c) => t.spans.get(c)).filter(Boolean).map((c) => c.fn);
     const main = s.fn === MAIN_FN[selModule];
@@ -831,7 +863,7 @@ document.addEventListener("click", (e) => {
   const tr = e.target.closest("[data-trace]");
   if (tr) {
     selTrace = tr.dataset.trace; selSpan = null; $("follow").checked = false;
-    if (isSummary(traces.get(selTrace))) selModule = "summary"; else if (selModule === "summary") selModule = "orchestrator";
+    if (isSummary(traces.get(selTrace))) selModule = "summary";
     schedule(); return;
   }
   const ex = e.target.closest("[data-expand]");
