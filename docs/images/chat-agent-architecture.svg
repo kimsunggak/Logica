@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="780" viewBox="0 0 1440 780" font-family="Pretendard, 'Noto Sans KR', sans-serif">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#5d6678"/></marker><marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#3f9a7a"/></marker><marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#9b8ad6"/></marker><marker id="acs" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#9b8ad6"/></marker><marker id="am" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#c9ad4f"/></marker><marker id="ap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#6f9bd1"/></marker><marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#c97a4a"/></marker>
+<style>
+.t{font-size:15px;font-weight:700;fill:#2b3240;text-anchor:middle}
+.s{font-size:11.5px;fill:#6b7385;text-anchor:middle} .sl{font-size:11.5px;fill:#6b7385}
+.la,.lg,.lc,.lm,.lp,.lo{font-size:11.5px;paint-order:stroke;stroke:#fff;stroke-width:4px}
+.la{fill:#4a5263} .lg{fill:#2f8566} .lc{fill:#7d6cc4} .lm{fill:#a88d2f} .lp{fill:#4f7fb8} .lo{fill:#b8693c}
+.f{fill:none;stroke:#5d6678;stroke-width:1.5}
+.g{fill:none;stroke:#3f9a7a;stroke-width:1.5}
+.c{fill:none;stroke:#9b8ad6;stroke-width:1.3;stroke-dasharray:2 4;stroke-linecap:round}
+.m{fill:none;stroke:#c9ad4f;stroke-width:1.4;stroke-dasharray:6 4}
+.p{fill:none;stroke:#6f9bd1;stroke-width:1.4;stroke-dasharray:6 4}
+.d{fill:none;stroke:#c97a4a;stroke-width:1.4;stroke-dasharray:6 4}
+.chips rect{fill:#fff;stroke:#8c7ad8;stroke-width:1.2} .chips text{font-size:11px;font-weight:700;fill:#7d6cc4;text-anchor:middle}
+</style></defs>
+<rect width="1440" height="780" fill="#ffffff"/>
+<path d="M185 372 H318" class="f" marker-end="url(#a)"/>
+<text x="252" y="362" class="la" text-anchor="middle">질문</text>
+<path d="M318 410 H187" class="g" marker-end="url(#ag)"/>
+<text x="252" y="430" class="lg" text-anchor="middle">잡담 답, 답변, 되묻기</text>
+<path d="M430 168 V313" class="m" marker-end="url(#am)"/>
+<text x="442" y="250" class="lm" text-anchor="start">최근 대화 2턴</text>
+<path d="M430 612 V467" class="p" marker-end="url(#ap)"/>
+<text x="442" y="545" class="lp" text-anchor="start">섹션 원문 + 요약</text>
+<path d="M110 318 C110 160 250 120 348 120" class="m" marker-end="url(#am)"/>
+<text x="150" y="190" class="lm" text-anchor="start">답이 끝나면 1턴 저장</text>
+<path d="M520 313 C560 220 620 140 688 120" class="f" marker-end="url(#a)"/>
+<text x="585" y="200" class="la" text-anchor="end">A 요청</text>
+<path d="M688 146 C640 170 600 240 548 320" class="g" marker-end="url(#ag)"/>
+<text x="640" y="232" class="lg" text-anchor="start">잡담 답</text>
+<path d="M545 360 C600 345 640 330 688 322" class="f" marker-end="url(#a)"/>
+<text x="612" y="328" class="la" text-anchor="middle">B, C 요청</text>
+<path d="M688 348 C640 358 600 372 545 384" class="g" marker-end="url(#ag)"/>
+<text x="655" y="384" class="lg" text-anchor="middle">답변 스트림</text>
+<path d="M545 430 C610 460 640 530 688 546" class="f" marker-end="url(#a)"/>
+<text x="650" y="478" class="la" text-anchor="middle">C 요청</text>
+<path d="M688 574 C620 560 580 500 540 450" class="g" marker-end="url(#ag)"/>
+<text x="600" y="560" class="lg" text-anchor="end">정제된 질문</text>
+<text x="600" y="576" class="lg" text-anchor="end">또는 되물을 질문</text>
+<path d="M546 452 C700 452 820 452 983 428" class="c" marker-end="url(#ac)" marker-start="url(#acs)"/>
+<text x="860" y="470" class="lc" text-anchor="middle">판단 호출</text>
+<path d="M838 120 C920 140 950 300 1000 335" class="c" marker-end="url(#ac)" marker-start="url(#acs)"/>
+<path d="M838 330 C900 335 940 360 983 375" class="c" marker-end="url(#ac)" marker-start="url(#acs)"/>
+<path d="M838 545 C910 530 950 470 1000 445" class="c" marker-end="url(#ac)" marker-start="url(#acs)"/>
+<path d="M1137 390 H1178" class="f" marker-end="url(#a)"/>
+<path d="M1238 335 V278" class="f" marker-end="url(#a)"/>
+<text x="1250" y="300" class="la" text-anchor="start">Reply, Refine, Answer</text>
+<text x="1250" y="316" class="lo" text-anchor="start">판단 실패 시</text>
+<path d="M1238 445 V502" class="f" marker-end="url(#a)"/>
+<text x="1250" y="470" class="la" text-anchor="start">판단</text>
+<text x="1250" y="486" class="lo" text-anchor="start">나머지 실패 시</text>
+<g><rect x="35.0" y="325.0" width="150" height="130" rx="14" fill="#f1f3f7" stroke="#8792a6" stroke-width="1.5"/>
+<g transform="translate(94,339.0)" fill="none" stroke="#8792a6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="10" r="6"/><path d="M4 32c1-8 6-12 12-12s11 4 12 12"/></g>
+<text x="110" y="391.0" class="t">사용자</text>
+<text x="110" y="409.0" class="s">채팅 패널</text>
+</g>
+<g><rect x="345.0" y="72.0" width="170" height="96" rx="14" fill="#fdf6dc" stroke="#c9ad4f" stroke-width="1.5"/>
+<g transform="translate(414,86.0)" fill="none" stroke="#c9ad4f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="13" rx="3"/><path d="M7 16v5l5-5"/><rect x="11" y="13" width="19" height="12" rx="3" fill="#fdf6dc"/><path d="M15 18h11M15 21h7"/></g>
+<text x="430" y="138.0" class="t">대화 메모리</text>
+<text x="430" y="156.0" class="s">완료된 턴만</text>
+</g>
+<g><rect x="315.0" y="313.0" width="230" height="154" rx="14" fill="#efeafc" stroke="#8c7ad8" stroke-width="1.5"/>
+<g transform="translate(414,327.0)" fill="none" stroke="#8c7ad8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="16" r="3"/><path d="M8 16h8"/><path d="M16 16l10-11M16 16h11M16 16l10 11"/><path d="M23 4h4v4M24 13l3 3-3 3M23 28h4v-4"/></g>
+<text x="430" y="379.0" class="t">Chat Orchestrator</text>
+<text x="430" y="397.0" class="s">판단 LLM이 갈래와 섹션 선택</text>
+</g>
+<g class="chips"><rect x="352" y="433" width="44" height="18" rx="9"/><text x="374" y="446">A</text><rect x="408" y="433" width="44" height="18" rx="9"/><text x="430" y="446">B</text><rect x="464" y="433" width="44" height="18" rx="9"/><text x="486" y="446">C</text></g>
+<g><rect x="345.0" y="612.0" width="170" height="96" rx="14" fill="#e7f0fb" stroke="#6f9bd1" stroke-width="1.5"/>
+<g transform="translate(414,626.0)" fill="none" stroke="#6f9bd1" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2h13l7 7v22H7z"/><path d="M20 2v7h7"/><path d="M11 15h12M11 20h12M11 25h8"/></g>
+<text x="430" y="678.0" class="t">논문과 요약 리포트</text>
+<text x="430" y="696.0" class="s">섹션 원문, 섹션별 요약</text>
+</g>
+<g><rect x="687.0" y="70.0" width="150" height="100" rx="14" fill="#fbeaf1" stroke="#c9729b" stroke-width="1.5"/>
+<g transform="translate(746,84.0)" fill="none" stroke="#c9729b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h18v13H11l-6 5v-5H4z"/><path d="M24 12h4v12h-3v4l-5-4h-7"/></g>
+<text x="762" y="136.0" class="t">Reply</text>
+<text x="762" y="154.0" class="s">잡담에 답 (원문 없음)</text>
+</g>
+<g><rect x="687.0" y="285.0" width="150" height="100" rx="14" fill="#fdeee3" stroke="#d6935f" stroke-width="1.5"/>
+<g transform="translate(746,299.0)" fill="none" stroke="#d6935f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h26v19H14l-7 6v-6H3z"/><path d="M8 10h16M8 15h11"/></g>
+<text x="762" y="351.0" class="t">Answer</text>
+<text x="762" y="369.0" class="s">원문 근거로 답변</text>
+</g>
+<g><rect x="687.0" y="505.0" width="150" height="110" rx="14" fill="#e4f4ec" stroke="#55a882" stroke-width="1.5"/>
+<g transform="translate(746,519.0)" fill="none" stroke="#55a882" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h26l-10 12v10l-6 4V16z"/></g>
+<text x="762" y="571.0" class="t">Refine</text>
+<text x="762" y="589.0" class="s">질문을 명확하게</text>
+</g>
+<g><rect x="983.0" y="335.0" width="154" height="110" rx="14" fill="#f3effd" stroke="#9b8ad6" stroke-width="1.5"/>
+<g transform="translate(1044,349.0)" fill="none" stroke="#9b8ad6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="11" width="10" height="10" rx="2"/><path d="M12 16h5M17 16l9-9M17 16l9 9"/><path d="M22 6h5v5M22 26h5v-5"/></g>
+<text x="1060" y="401.0" class="t">LLM Gateway</text>
+<text x="1060" y="419.0" class="s">모델 선택, fallback</text>
+</g>
+<g><rect x="1178.0" y="335.0" width="120" height="110" rx="14" fill="#f5ede8" stroke="#b98466" stroke-width="1.5"/>
+<g transform="translate(1222,349.0)" fill="none" stroke="#b98466" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 2l12 5v8c0 8-5 13-12 16C9 28 4 23 4 15V7z"/><circle cx="16" cy="14" r="3"/><path d="M16 17v6"/></g>
+<text x="1238" y="401.0" class="t">Rust</text>
+<text x="1238" y="419.0" class="s">키 첨부 전송</text>
+</g>
+<g><rect x="1168.0" y="170.0" width="140" height="100" rx="14" fill="#f1f3f7" stroke="#8792a6" stroke-width="1.5"/>
+<g transform="translate(1222,184.0)" fill="none" stroke="#8792a6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 26h15a6 6 0 0 0 1-12 8 8 0 0 0-15-2 7 7 0 0 0-1 14z"/></g>
+<text x="1238" y="236.0" class="t">OpenAI</text>
+<text x="1238" y="254.0" class="s">gpt-6.1-sol</text>
+</g>
+<g><rect x="1168.0" y="510.0" width="140" height="100" rx="14" fill="#f1f3f7" stroke="#8792a6" stroke-width="1.5"/>
+<g transform="translate(1222,524.0)" fill="none" stroke="#8792a6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 26h15a6 6 0 0 0 1-12 8 8 0 0 0-15-2 7 7 0 0 0-1 14z"/></g>
+<text x="1238" y="576.0" class="t">Anthropic</text>
+<text x="1238" y="594.0" class="s">claude-sonnet-5-5</text>
+</g>
+<path d="M40 752 H70" class="f" marker-end="url(#a)"/>
+<text x="78" y="756" class="sl" text-anchor="start">요청</text>
+<path d="M158 752 H188" class="g" marker-end="url(#ag)"/>
+<text x="196" y="756" class="sl" text-anchor="start">결과</text>
+<path d="M276 752 H306" class="c" marker-end="url(#ac)"/>
+<text x="314" y="756" class="sl" text-anchor="start">LLM 호출</text>
+<path d="M394 752 H424" class="m" marker-end="url(#am)"/>
+<text x="432" y="756" class="sl" text-anchor="start">메모리</text>
+<path d="M512 752 H542" class="p" marker-end="url(#ap)"/>
+<text x="550" y="756" class="sl" text-anchor="start">원문</text>
+</svg>

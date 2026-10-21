@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
@@ -23,6 +23,7 @@ use tokio::sync::Notify;
 
 use crate::chatgpt::{self, ChatGptAuth};
 use crate::credentials::read_secret;
+use crate::debug_trace::{now_ms, DebugHub};
 use crate::error::{CmdError, CmdResult};
 
 const OPENAI_BASE: &str = "https://api.openai.com";
@@ -215,14 +216,133 @@ async fn credential_for(chatgpt: &ChatGptAuth, provider: &str, auth: Option<&str
     }
 }
 
-async fn stream_inner(chatgpt: &ChatGptAuth, request: StreamRequest, channel: Channel<StreamEvent>) -> CmdResult<()> {
+async fn stream_inner(
+    chatgpt: &ChatGptAuth,
+    request: StreamRequest,
+    channel: Channel<StreamEvent>,
+    mut observe: impl FnMut(&StreamEvent) + Send,
+) -> CmdResult<()> {
     let secret = credential_for(chatgpt, &request.provider, request.auth.as_deref()).await?;
     stream_with_secret(&request, &secret, |event| {
+        observe(&event);
         channel
             .send(event)
             .map_err(|e| CmdError::new("cancelled", format!("Stream receiver closed: {e}")))
     })
     .await
+}
+
+#[derive(Default)]
+struct StreamStats {
+    status: Option<u16>,
+    chunks: usize,
+    bytes: usize,
+    first_chunk_ms: Option<u128>,
+}
+
+/// One provider request as seen by the debug visualizer. Only requests the
+/// webview traced (the chat pipeline) are reported; the body is summarized,
+/// never copied, and no header or credential is included.
+struct TransportTrace<'a> {
+    hub: &'a DebugHub,
+    link: Option<(String, String)>,
+    request_id: String,
+    started: Instant,
+    stats: Mutex<StreamStats>,
+}
+
+impl<'a> TransportTrace<'a> {
+    fn start(hub: &'a DebugHub, request: &StreamRequest) -> Self {
+        let trace = Self {
+            hub,
+            link: hub.link(&request.request_id),
+            request_id: request.request_id.clone(),
+            started: Instant::now(),
+            stats: Mutex::new(StreamStats::default()),
+        };
+        trace.emit(
+            "span_start",
+            "running",
+            serde_json::json!({
+                "input": {
+                    "provider": request.provider,
+                    "endpoint": endpoint(&request.provider, "POST", &request.path).unwrap_or_default(),
+                    "auth": request.auth.as_deref().unwrap_or("api_key"),
+                    "model": request.body.get("model"),
+                    "body_bytes": request.body.to_string().len(),
+                }
+            }),
+        );
+        trace
+    }
+
+    fn emit(&self, event_type: &str, status: &str, extra: serde_json::Value) {
+        let Some((trace_id, parent)) = &self.link else { return };
+        let mut event = serde_json::json!({
+            "trace_id": trace_id,
+            "span_id": format!("rust-{}", self.request_id),
+            "parent_id": parent,
+            "source": "rust",
+            "module": "llm",
+            "function": "ai_stream",
+            "event_type": event_type,
+            "status": status,
+            "request_id": self.request_id,
+            "timestamp": now_ms(),
+        });
+        if let (Some(obj), Some(more)) = (event.as_object_mut(), extra.as_object()) {
+            obj.extend(more.clone());
+        }
+        self.hub.emit(event);
+    }
+
+    fn observe(&self, event: &StreamEvent) {
+        if self.link.is_none() {
+            return;
+        }
+        let ms = self.started.elapsed().as_millis();
+        let Ok(mut stats) = self.stats.lock() else { return };
+        match event {
+            StreamEvent::Open { status } => {
+                stats.status = Some(*status);
+                drop(stats);
+                self.emit("span_data", "running", serde_json::json!({ "data": { "label": "http_response", "value": { "status": status, "ms": ms } } }));
+            }
+            StreamEvent::Chunk { data } => {
+                stats.chunks += 1;
+                stats.bytes += data.len();
+                if stats.first_chunk_ms.is_none() {
+                    stats.first_chunk_ms = Some(ms);
+                    drop(stats);
+                    self.emit("span_data", "running", serde_json::json!({ "data": { "label": "first_chunk", "value": { "ms": ms } } }));
+                }
+            }
+            StreamEvent::Done => {}
+        }
+    }
+
+    fn finish(&self, result: &CmdResult<()>) {
+        let duration = self.started.elapsed().as_secs_f64() * 1000.0;
+        match result {
+            Ok(()) => {
+                let output = self.stats.lock().map(|s| {
+                    serde_json::json!({
+                        "http_status": s.status,
+                        "chunks": s.chunks,
+                        "bytes": s.bytes,
+                        "first_chunk_ms": s.first_chunk_ms,
+                    })
+                });
+                self.emit("span_end", "completed", serde_json::json!({ "output": output.unwrap_or_default(), "duration_ms": duration }));
+            }
+            Err(e) => self.emit(
+                "span_error",
+                "error",
+                serde_json::json!({ "error": format!("{}: {}", e.kind, e.message), "duration_ms": duration }),
+            ),
+        }
+        self.hub.unlink(&self.request_id);
+    }
 }
 
 async fn stream_with_secret(
@@ -280,6 +400,7 @@ async fn stream_with_secret(
 pub async fn ai_stream(
     state: State<'_, AiRequests>,
     chatgpt: State<'_, ChatGptAuth>,
+    debug: State<'_, DebugHub>,
     request: StreamRequest,
     on_event: Channel<StreamEvent>,
 ) -> CmdResult<()> {
@@ -291,10 +412,12 @@ pub async fn ai_stream(
         .map_err(|_| CmdError::new("internal", "request registry poisoned"))?
         .insert(id.clone(), cancel.clone());
 
+    let trace = TransportTrace::start(&debug, &request);
     let result = tokio::select! {
-        result = stream_inner(&chatgpt, request, on_event) => result,
+        result = stream_inner(&chatgpt, request, on_event, |event| trace.observe(event)) => result,
         _ = cancel.notified() => Err(CmdError::new("cancelled", "Generation cancelled")),
     };
+    trace.finish(&result);
 
     if let Ok(mut map) = state.0.lock() {
         map.remove(&id);

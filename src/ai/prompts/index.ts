@@ -2,8 +2,13 @@
  * Provider-independent prompt construction. Adapters convert the resulting
  * payload into their own message format.
  */
-import type { AIMessage, AIRequest } from "../types";
-import { buildChatPrompt } from "./chat";
+import type { AIMessage, AIRequest, AITask } from "../types";
+import { buildAnswerPrompt } from "./answer";
+import { buildJudgePrompt } from "./judge";
+import { buildRefinePrompt } from "./refine";
+import { buildReplyPrompt } from "./reply";
+import { buildSectionSummaryPrompt } from "./sectionSummary";
+import { buildSummaryPrompt } from "./summary";
 import { buildInlineEditPrompt } from "./rewrite";
 
 export interface PromptPayload {
@@ -23,8 +28,18 @@ function normalizeMessages(messages: AIMessage[]): AIMessage[] {
   return out;
 }
 
+const BUILDERS: Record<AITask, (request: AIRequest) => PromptPayload> = {
+  "inline-edit": buildInlineEditPrompt,
+  judge: buildJudgePrompt,
+  reply: buildReplyPrompt,
+  refine: buildRefinePrompt,
+  answer: buildAnswerPrompt,
+  summary: buildSummaryPrompt,
+  sections: buildSectionSummaryPrompt,
+};
+
 export function buildPrompt(request: AIRequest): PromptPayload {
-  const payload = request.task === "chat" ? buildChatPrompt(request) : buildInlineEditPrompt(request);
+  const payload = BUILDERS[request.task](request);
   return { system: payload.system, messages: normalizeMessages(payload.messages) };
 }
 

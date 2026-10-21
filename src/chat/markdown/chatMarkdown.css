@@ -1,0 +1,99 @@
+/*
+ * Reading rhythm for AI answers in the narrow chat pane. Streamdown's own
+ * classes are sized for a full page (a 30px h1); everything here is in em so
+ * it follows the chat font size setting. Unlayered, so it wins over the
+ * Tailwind utilities Streamdown puts on its elements.
+ */
+.chat-markdown {
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.chat-markdown > :first-child,
+.chat-markdown > :first-child > :first-child {
+  margin-top: 0;
+}
+.chat-markdown > :last-child,
+.chat-markdown > :last-child > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown p {
+  margin: 0.6em 0;
+}
+
+.chat-markdown [data-streamdown^="heading-"] {
+  margin: 1.1em 0 0.4em;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.chat-markdown [data-streamdown="heading-1"] {
+  font-size: 1.3em;
+}
+.chat-markdown [data-streamdown="heading-2"] {
+  font-size: 1.18em;
+}
+.chat-markdown [data-streamdown="heading-3"] {
+  font-size: 1.07em;
+}
+.chat-markdown [data-streamdown="heading-4"],
+.chat-markdown [data-streamdown="heading-5"],
+.chat-markdown [data-streamdown="heading-6"] {
+  font-size: 1em;
+}
+
+.chat-markdown [data-streamdown="unordered-list"],
+.chat-markdown [data-streamdown="ordered-list"] {
+  margin: 0.5em 0;
+  padding-left: 1.3em;
+}
+.chat-markdown [data-streamdown="list-item"] {
+  margin: 0.2em 0;
+}
+.chat-markdown [data-streamdown="list-item"] > p {
+  margin: 0.2em 0;
+}
+
+.chat-markdown [data-streamdown="strong"] {
+  font-weight: 600;
+}
+
+.chat-markdown [data-streamdown="inline-code"] {
+  border-radius: 4px;
+  background: var(--md-muted);
+  padding: 0.1em 0.35em;
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+}
+
+.chat-markdown [data-streamdown="code-block"] {
+  margin: 0.7em 0;
+  font-size: 0.86em;
+}
+
+.chat-markdown [data-streamdown="blockquote"] {
+  margin: 0.7em 0;
+  border-left: 3px solid var(--md-border);
+  padding-left: 0.8em;
+  color: var(--md-muted-foreground);
+  font-style: normal;
+}
+
+.chat-markdown [data-streamdown="table-wrapper"] {
+  margin: 0.7em 0;
+  font-size: 0.92em;
+}
+
+.chat-markdown [data-streamdown="horizontal-rule"] {
+  margin: 1em 0;
+}
+
+/* KaTeX's default 1.21em towers over body text at small sizes. */
+.chat-markdown .katex {
+  font-size: 1.08em;
+}
+.chat-markdown .katex-display {
+  margin: 0.7em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.1em 0;
+}

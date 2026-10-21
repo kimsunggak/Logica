@@ -5,10 +5,11 @@
  * a starting point; once a provider is connected, Settings refreshes the list
  * from the provider's models API, and users can add any model id by hand.
  */
-import type { ModelConfig, ProviderId } from "../types";
+import type { ChatTask, ModelConfig, ProviderId, ReasoningEffort } from "../types";
 
 export const DEFAULT_MODELS: Record<ProviderId, ModelConfig[]> = {
   openai: [
+    { id: "gpt-6.1-sol", provider: "openai", displayName: "GPT-6.1 Sol", supportsStreaming: true, source: "default" },
     { id: "gpt-6-sol", provider: "openai", displayName: "GPT-6 Sol", supportsStreaming: true, source: "default" },
     { id: "gpt-6-luna", provider: "openai", displayName: "GPT-6 Luna", supportsStreaming: true, source: "default" },
     { id: "gpt-6-astra", provider: "openai", displayName: "GPT-6 Astra", supportsStreaming: true, source: "default" },
@@ -26,12 +27,48 @@ export const DEFAULT_MODEL_ID: Record<ProviderId, string> = {
   anthropic: DEFAULT_MODELS.anthropic[0].id,
 };
 
-/** Output token budget per task. */
+/** Output token budget per task (reasoning models spend part of it thinking first). */
 export const MAX_OUTPUT_TOKENS = {
   "inline-edit": 8192,
-  // Agent answers may carry edits for several places and files.
-  chat: 16384,
+  // One tool call with a one-sentence reason.
+  judge: 4096,
+  // A one or two sentence reply to small talk.
+  reply: 4096,
+  // One rewritten question as JSON.
+  refine: 8192,
+  // Answers may carry edits for several places and files.
+  answer: 16384,
+  // One tool call with the changes to the session summary.
+  summary: 4096,
+  // One tool call with a few sentences per section of a batch.
+  sections: 8192,
 } as const;
+
+export interface ModelChoice {
+  provider: ProviderId;
+  model: string;
+  reasoningEffort?: ReasoningEffort;
+}
+
+const CLAUDE_FALLBACK: ModelChoice = { provider: "anthropic", model: "claude-sonnet-5-5" };
+
+/**
+ * Primary and fallback models for each chat call. The LLM Gateway retries
+ * with the fallback provider when the primary call fails.
+ */
+export const CHAT_MODELS: Record<ChatTask, { primary: ModelChoice; fallback: ModelChoice }> = {
+  judge: {
+    primary: { provider: "anthropic", model: "claude-sonnet-5-5", reasoningEffort: "high" },
+    fallback: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" },
+  },
+  reply: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
+  refine: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
+  answer: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
+  // Runs in the background every two turns.
+  summary: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
+  // Runs in the background after a turn that read the paper, for sections without a summary.
+  sections: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
+};
 
 /**
  * OpenAI's models endpoint also lists embedding, audio, image and moderation

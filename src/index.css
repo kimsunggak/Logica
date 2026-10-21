@@ -2,6 +2,24 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Chat answers are rendered by Streamdown (src/chat/markdown); let Tailwind see its classes. */
+@source "../node_modules/streamdown/dist/*.js";
+
+/*
+ * The design tokens Streamdown's components are written against, mapped onto
+ * the app's own slate and sky palette (values in :root / :root.dark below).
+ */
+@theme inline {
+  --color-background: var(--md-background);
+  --color-foreground: var(--md-foreground);
+  --color-muted: var(--md-muted);
+  --color-muted-foreground: var(--md-muted-foreground);
+  --color-border: var(--md-border);
+  --color-primary: var(--md-primary);
+  --color-primary-foreground: var(--md-primary-foreground);
+  --color-sidebar: var(--md-sidebar);
+}
+
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
@@ -23,6 +41,15 @@ body {
 
 :root {
   color-scheme: light;
+  /* Slate and sky, as Tailwind defines them (see @theme inline above). */
+  --md-background: #ffffff;
+  --md-foreground: #1e293b;
+  --md-muted: #f1f5f9;
+  --md-muted-foreground: #64748b;
+  --md-border: #e2e8f0;
+  --md-primary: #0284c7;
+  --md-primary-foreground: #ffffff;
+  --md-sidebar: #f8fafc;
   /*
    * Button text size follows the window width: 12.5px from about 1500px wide
    * down to 11px at about 1060px. Padding, gap, height and icon size are set
@@ -32,6 +59,14 @@ body {
 }
 :root.dark {
   color-scheme: dark;
+  --md-background: #0f141b;
+  --md-foreground: #e2e8f0;
+  --md-muted: #1e293b;
+  --md-muted-foreground: #94a3b8;
+  --md-border: #334155;
+  --md-primary: #38bdf8;
+  --md-primary-foreground: #0f172a;
+  --md-sidebar: #121820;
 }
 
 @layer components {

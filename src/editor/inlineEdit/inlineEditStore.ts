@@ -12,7 +12,6 @@ import type { AIErrorKind } from "../../ai/errors";
 import { AIError } from "../../ai/errors";
 import type { FinishReason, ProviderId } from "../../ai/types";
 import { normalizeRewrite, validateRewrite, type ValidationIssue } from "../../latex/validation";
-import { openFile } from "../../project/projectActions";
 import { notify, useProject } from "../../project/projectStore";
 import { useSettings } from "../../settings/settingsStore";
 import { aiTargetField, setAITarget, type TargetRange } from "../aiTarget";
@@ -36,7 +35,6 @@ interface InlineEditState {
   errorKind?: AIErrorKind;
   finishReason?: FinishReason;
   requestId?: string;
-  origin: "inline" | "chat";
   note?: string;
 }
 
@@ -60,7 +58,6 @@ export const useInlineEdit = create<InlineEditState>()(() => ({
   instruction: "",
   provider: "openai",
   model: "",
-  origin: "inline",
 }));
 
 function setTarget(path: string | null, range: TargetRange | null) {
@@ -98,8 +95,7 @@ export function openInlineEdit(): boolean {
     open: true,
     path: snapshot.path,
     original: snapshot.docText.slice(from, to),
-    origin: "inline",
-    provider: state.open ? state.provider : useSettings.getState().ai.defaultProvider,
+      provider: state.open ? state.provider : useSettings.getState().ai.defaultProvider,
     instruction: "",
   });
   return true;
@@ -217,44 +213,4 @@ export function regenerateInlineEdit(provider?: ProviderId) {
 
 export function setInlineProvider(provider: ProviderId) {
   useInlineEdit.setState({ provider, model: useSettings.getState().ai.models[provider] });
-}
-
-/**
- * Review a replacement proposed in the chat for a given range. The anchor
- * text is looked up again in case the document changed since the request.
- */
-export async function reviewProposal(anchor: { path: string; from: number; to: number; text: string }, proposal: string, instruction: string, provider: ProviderId) {
-  const opened = await openFile(anchor.path);
-  const view = editorSession.getView();
-  if (!opened || !view) return;
-  const doc = view.state.doc.toString();
-  let from = anchor.from;
-  let to = anchor.to;
-  if (doc.slice(from, to) !== anchor.text) {
-    const index = doc.indexOf(anchor.text);
-    if (index < 0 || !anchor.text) {
-      notify("error", t("inline.anchorMissing"));
-      return;
-    }
-    from = index;
-    to = index + anchor.text.length;
-  }
-  if (useInlineEdit.getState().open) rejectInlineEdit();
-  setTarget(anchor.path, { from, to });
-  view.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true });
-  const result = normalizeRewrite(anchor.text, proposal);
-  useInlineEdit.setState({
-    ...closedState,
-    open: true,
-    path: anchor.path,
-    original: anchor.text,
-    phase: "review",
-    origin: "chat",
-    instruction,
-    provider,
-    model: useSettings.getState().ai.models[provider],
-    output: proposal,
-    result,
-    issues: validateRewrite(anchor.text, result, { bibKeys: bibKeys() }),
-  });
 }

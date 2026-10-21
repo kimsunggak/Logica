@@ -1,10 +1,9 @@
-import { Check, CheckCheck, FileText, GitCompare, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, CheckCheck, FileText, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
+import { CHAT_MODELS } from "../ai/models/modelConfig";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
-import { ProviderSelect } from "../components/ProviderSelect";
 import { DiffView } from "../editor/inlineEdit/DiffView";
-import { reviewProposal } from "../editor/inlineEdit/inlineEditStore";
 import { validateRewrite } from "../latex/validation";
 import { confirmDialog } from "../lib/backend";
 import { timeAgo } from "../lib/time";
@@ -16,22 +15,40 @@ import { CollapseButton } from "../components/panes";
 import {
   applyAllChatEdits,
   applyChatEdit,
-  chatProvider,
   deleteChatSession,
   newChatSession,
   switchChatSession,
   rejectAllChatEdits,
   rejectChatEdit,
   sendChatMessage,
-  setChatProvider,
   splitBlocks,
   stopChat,
   useChat,
   type ChatMessage,
   type EditState,
 } from "./chatStore";
+import type { ChatMarkdownProps } from "./markdown/ChatMarkdown";
+import { fencedCode } from "./markdown/source";
 
 const EXAMPLES: MessageKey[] = ["chat.example1", "chat.example2", "chat.example3", "chat.example4"];
+
+function PlainText({ text }: ChatMarkdownProps) {
+  return <div className="whitespace-pre-wrap">{text}</div>;
+}
+
+// The Markdown, math and highlighting code loads with the first answer, not with the app.
+// Until then (or if it cannot load) the answer shows as plain text.
+const ChatMarkdown = lazy<ComponentType<ChatMarkdownProps>>(() =>
+  import("./markdown/ChatMarkdown").catch(() => ({ default: PlainText })),
+);
+
+function MarkdownBlock(props: ChatMarkdownProps) {
+  return (
+    <Suspense fallback={<PlainText {...props} />}>
+      <ChatMarkdown {...props} />
+    </Suspense>
+  );
+}
 
 /** One proposed change: file, location, diff, checks, and Apply / Reject. */
 function EditCard({ messageId, index, edit, state }: { messageId: string; index: number; edit: ProposedEdit; state?: EditState }) {
@@ -103,6 +120,20 @@ function EditCard({ messageId, index, edit, state }: { messageId: string; index:
   );
 }
 
+/** The question as rewritten by the Refine Module before answering. */
+function RefinedLine({ message }: { message: ChatMessage }) {
+  const t = useT();
+  if (!message.refined) return null;
+  return (
+    <div className="flex items-baseline gap-1.5 text-[11.5px] text-slate-500" data-testid="chat-refined">
+      <span className="shrink-0 rounded bg-slate-100 px-1.5 py-px text-[10.5px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+        {t("chat.refined")}
+      </span>
+      <span className="min-w-0">{message.refined}</span>
+    </div>
+  );
+}
+
 function AssistantMessage({ message }: { message: ChatMessage }) {
   const t = useT();
   if (message.status === "error") {
@@ -119,8 +150,20 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
     });
   }
   const pending = [...edits.values()].filter(({ index }) => !message.editStates?.[index]);
+  const streaming = message.status === "streaming";
   return (
-    <div className="space-y-2 text-[13px] leading-relaxed">
+    <div className="space-y-2">
+      {(message.stage === "paper" || message.stage === "judge" || message.stage === "refine") && (
+        <div className="text-[11.5px] text-slate-500" data-testid="chat-stage">
+          {t(message.stage === "paper" ? "chat.stagePaper" : message.stage === "judge" ? "chat.stageJudge" : "chat.stageRefine")}
+        </div>
+      )}
+      <RefinedLine message={message} />
+      {(message.stage === "answer" || message.stage === "reply") && !message.content && (
+        <div className="text-[11.5px] text-slate-500" data-testid="chat-stage">
+          {t(message.stage === "answer" ? "chat.stageAnswer" : "chat.stageReply")}
+        </div>
+      )}
       {edits.size > 1 && (
         <div className="flex items-center gap-1.5 text-[11.5px] text-slate-500" data-testid="agent-edits-bar">
           <span>{t("agent.edits", { count: edits.size })}</span>
@@ -145,9 +188,7 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
       )}
       {blocks.map((block, i) =>
         block.kind === "text" ? (
-          <div key={i} className="whitespace-pre-wrap">
-            {block.text.trim()}
-          </div>
+          <MarkdownBlock key={i} text={block.text.trim()} streaming={streaming && i === blocks.length - 1} />
         ) : edits.has(i) ? (
           <EditCard
             key={i}
@@ -157,25 +198,20 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
             state={message.editStates?.[edits.get(i)!.index]}
           />
         ) : (
-          <div key={i} className="overflow-hidden rounded-md border border-slate-200 dark:border-slate-700">
-            <pre className="max-h-72 overflow-auto bg-slate-50 p-2 font-mono text-[12px] whitespace-pre-wrap dark:bg-slate-900">{block.text}</pre>
-            {message.status === "done" && message.anchor && (block.lang === "latex" || block.lang === "tex" || !block.lang) && (
-              <div className="flex items-center gap-2 border-t border-slate-200 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-800">
-                <button
-                  className="btn h-6 shrink-0 text-[11.5px] whitespace-nowrap"
-                  data-testid="chat-review"
-                  onClick={() => void reviewProposal(message.anchor!, block.text, message.instruction ?? "", message.provider ?? chatProvider())}
-                >
-                  <GitCompare size={12} /> {t("chat.reviewDiff")}
-                </button>
-                <span className="truncate text-[11px] text-slate-400">{t("chat.replaces", { count: message.anchor.text.length })}</span>
-              </div>
-            )}
-          </div>
+          <MarkdownBlock
+            key={i}
+            text={fencedCode(block.text, block.lang)}
+            streaming={streaming && i === blocks.length - 1}
+          />
         ),
       )}
       {message.status === "streaming" && <span className="inline-block h-3 w-1.5 animate-pulse bg-slate-400" />}
       {message.status === "cancelled" && <div className="text-[11.5px] text-slate-400">{t("chat.stopped")}</div>}
+      {message.fallbackFrom && message.status === "done" && (
+        <div className="text-[11px] text-amber-700 dark:text-amber-400" data-testid="chat-fallback">
+          {t("chat.fallbackUsed", { primary: message.fallbackFrom, fallback: message.model ?? "Claude" })}
+        </div>
+      )}
     </div>
   );
 }
@@ -265,12 +301,10 @@ export function ChatPanel() {
   const t = useT();
   const messages = useChat((s) => s.messages);
   const running = useChat((s) => s.runningId !== null);
-  const providerOverride = useChat((s) => s.provider);
-  const defaultProvider = useSettings((s) => s.ai.defaultProvider);
-  const models = useSettings((s) => s.ai.models);
-  const provider = providerOverride ?? defaultProvider;
+  const models = t("chat.modelLabel", { primary: CHAT_MODELS.answer.primary.model, fallback: CHAT_MODELS.answer.fallback.model });
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+  const chatFontSize = useSettings((s) => s.editor.chatFontSize);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -291,9 +325,8 @@ export function ChatPanel() {
     <div className="flex h-full flex-col bg-white dark:bg-[#0f141b]" data-testid="chat-panel">
       <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-slate-200 bg-slate-50 px-2 dark:border-slate-800 dark:bg-[#121820]">
         <span className="panel-title whitespace-nowrap">{t("chat.title")}</span>
-        <ProviderSelect value={provider} onChange={setChatProvider} className="ml-1 h-6 text-[12px]" />
-        <span className="truncate text-[11px] text-slate-400" title={models[provider]}>
-          {models[provider]}
+        <span className="ml-1 truncate text-[11px] text-slate-400" title={models} data-testid="chat-models">
+          {models}
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-0.5">
           <SessionHistory />
@@ -303,7 +336,7 @@ export function ChatPanel() {
           <CollapseButton pane="chat" />
         </div>
       </div>
-      <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
+      <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3" style={{ fontSize: chatFontSize }}>
         {messages.length === 0 && (
           <div className="space-y-2 text-[12.5px] text-slate-500">
             <p>{t("chat.intro")}</p>
@@ -323,13 +356,17 @@ export function ChatPanel() {
         {messages.map((message) =>
           message.role === "user" ? (
             <div key={message.id} className="ml-6">
-              {message.contextLabel && <div className="mb-0.5 truncate text-right text-[10.5px] text-slate-400">{message.contextLabel}</div>}
-              <div className="rounded-lg bg-sky-50 px-2.5 py-1.5 text-[13px] whitespace-pre-wrap text-slate-800 dark:bg-sky-950/50 dark:text-slate-100">
-                {message.content}
+              <div className="flex items-start justify-end gap-1.5">
+                <div className="min-w-0 rounded-lg bg-sky-50 px-2.5 py-1.5 leading-normal whitespace-pre-wrap text-slate-800 dark:bg-sky-950/50 dark:text-slate-100">
+                  {message.content}
+                </div>
+                <span className="shrink-0 pt-1 text-[14px] leading-none" aria-hidden>
+                  👤
+                </span>
               </div>
             </div>
           ) : (
-            <div key={message.id} data-testid="chat-assistant">
+            <div key={message.id} data-testid="chat-assistant" data-route={message.route}>
               <div className="mb-0.5 text-[10.5px] text-slate-400">
                 {message.provider ? PROVIDER_LABELS[message.provider] : ""} {message.model ? `(${message.model})` : ""}
               </div>

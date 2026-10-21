@@ -1,192 +1,388 @@
 /**
- * Context-aware chat about the current paper. Every message automatically
- * carries the project, file, section, surrounding paragraphs, selection,
- * abstract and outline, so the author never has to describe where they are.
+ * Chat about the current paper.
+ *
+ * This store holds the conversation and its session summary; each question
+ * is run by the Chat Orchestrator (`./orchestrator.ts`), which decides
+ * whether to reply directly, answer, or refine the question first, and
+ * reports every step to the localhost runtime debugger in development. After
+ * a turn the Summary Module (`./session/summarizer.ts`) folds older turns
+ * into the summary, and after a turn that read the paper the Section Summary
+ * Module (`./paper/sectionSummarizer.ts`) summarizes the sections the paper
+ * report has no summary for, both in the background.
  */
 import { create } from "zustand";
-import { buildChatContext } from "../ai/context/contextBuilder";
-import { paragraphContext } from "../ai/context/paragraphs";
 import { AIError } from "../ai/errors";
-import { MAX_OUTPUT_TOKENS } from "../ai/models/modelConfig";
+import type { RunControl } from "../ai/gateway";
+import { CHAT_MODELS } from "../ai/models/modelConfig";
 import { aiService, newRequestId } from "../ai/service";
 import { lineOf, locateEdit, type ProposedEdit } from "../ai/agent/edits";
 import { deleteSession, listSessions, loadSession, newSessionId, saveSession, SESSION_VERSION, type SessionSummary } from "./chatHistory";
-import type { AIMessage, ProjectFile, ProviderId } from "../ai/types";
+import { runChatTurn, type Outcome, type Paper, type Route, type Stage, type Turn } from "./orchestrator";
+import { emptyReport, hasSummaries, loadReport, saveReport, summariesFor, unitsToSummarize, withSummaries, type PaperReport } from "./paper/report";
+import { summarizeSections } from "./paper/sectionSummarizer";
+import { paperUnits } from "./paper/sections";
+import { foldTurns, turnsToFold } from "./session/summarizer";
+import { readSummary, type ConversationSummary } from "./session/summary";
+import { turnsOf } from "./session/turns";
+import { endSpan, failSpan, startSpan, step, type Span } from "../debug/trace";
+import type { ProjectFile, ProviderId } from "../ai/types";
 import { editorSession } from "../editor/editorSession";
-import { sectionAt, sectionTrail } from "../latex/parser/documentModel";
+import { buildPaperDocument, outlineText } from "../latex/parser/documentModel";
 import { currentTexts, navigateTo, openFile } from "../project/projectActions";
 import { notify, useProject } from "../project/projectStore";
-import { useSettings } from "../settings/settingsStore";
 import { t } from "../i18n";
-
-export interface ChatAnchor {
-  path: string;
-  from: number;
-  to: number;
-  text: string;
-}
 
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   status: "done" | "streaming" | "error" | "cancelled";
+  /** The model that wrote the answer (the one running while it streams). */
   provider?: ProviderId;
   model?: string;
-  /** Text the conversation turn was about (selection or paragraph). */
-  anchor?: ChatAnchor;
-  /** Short description of the editor context sent with the message. */
-  contextLabel?: string;
   /** The user instruction an assistant message answers. */
   instruction?: string;
   /** Outcome of each proposed edit block, by its index in the answer. */
   editStates?: Record<number, EditState>;
+  /** Step of the turn running for this answer. */
+  stage?: Stage;
+  /** How the turn ended: direct reply, answer, or a question back. */
+  route?: Outcome;
+  /** The question as rewritten by the Refine Module. */
+  refined?: string;
+  /** The OpenAI model that failed when Claude wrote this answer. */
+  fallbackFrom?: string;
+  /** The answer hit the output limit. */
+  truncated?: boolean;
 }
 
 export type EditState = "applied" | "rejected" | "failed";
 
 interface ChatState {
   messages: ChatMessage[];
-  /** Provider override for the chat; null means the default provider. */
-  provider: ProviderId | null;
   runningId: string | null;
   /** Project the conversation belongs to, and the session being shown. */
   root: string | null;
   sessionId: string;
   createdAt: number;
+  /** Older turns of the shown conversation, summarized (L1). */
+  summary: ConversationSummary | null;
   /** Saved conversations of this project, most recent first. */
   sessions: SessionSummary[];
 }
 
 export const useChat = create<ChatState>()(() => ({
   messages: [],
-  provider: null,
   runningId: null,
   root: null,
   sessionId: newSessionId(),
   createdAt: Date.now(),
+  summary: null,
   sessions: [],
 }));
 
-const MAX_HISTORY_MESSAGES = 12;
-/** Characters of paper source sent to the agent (roughly 40k tokens). */
-const AGENT_FILE_BUDGET = 150_000;
+/** Characters of paper source sent to the Refine and Answer modules (roughly 40k tokens). */
+const PAPER_BUDGET = 150_000;
+
+/** The paper as it is now, with unsaved changes: its model and its `.tex` sources. */
+function paperNow() {
+  const texts = currentTexts();
+  const tex = new Map([...texts].filter(([path]) => path.endsWith(".tex")));
+  return { texts, tex, doc: buildPaperDocument({ mainFile: useProject.getState().mainFile, files: tex }) };
+}
 
 /**
- * The paper's source files for the agent: the active file first, then the
- * files included from the main file, as long as they fit the budget.
+ * The paper as this turn reads it. The whole paper is the main file and the
+ * files it includes, in reading order, as long as they fit the budget. Its
+ * section units come with the summaries the paper report has for them.
  */
-function agentFiles(activePath: string | undefined): { files: ProjectFile[]; omitted: string[] } {
-  const { doc } = useProject.getState();
-  const texts = currentTexts();
-  const paths = (doc?.files ?? []).filter((f) => f.included && !f.missing).map((f) => f.path);
-  if (activePath && texts.has(activePath)) paths.unshift(activePath);
+function paperOf(report: PaperReport): Paper {
+  const { texts, tex, doc } = paperNow();
+  const paths = doc.files.filter((f) => f.included && !f.missing).map((f) => f.path);
   const files: ProjectFile[] = [];
   const omitted: string[] = [];
   let used = 0;
   for (const path of new Set(paths)) {
     const text = texts.get(path);
     if (text === undefined) continue;
-    if (used + text.length > AGENT_FILE_BUDGET) {
+    if (used + text.length > PAPER_BUDGET) {
       omitted.push(path);
       continue;
     }
     files.push({ path, text });
     used += text.length;
   }
-  return { files, omitted };
+  const { units, macros } = paperUnits(doc, tex);
+  return { files, omitted, budget: PAPER_BUDGET, units, summaries: summariesFor(units, report), macros };
 }
 
-export function chatProvider(): ProviderId {
-  return useChat.getState().provider ?? useSettings.getState().ai.defaultProvider;
+/**
+ * The first question about a paper: summarize all its sections before the
+ * judge runs, so that the first answer, like every later one, reads only the
+ * sections it needs word for word. It runs once per paper; sections edited
+ * later are summarized after a turn. A failure leaves the summary as it was,
+ * and this turn reads the whole paper.
+ */
+async function summarizeFirst(project: string, report: PaperReport, run: { traceId: string; root: Span; control: RunControl; onStart: () => void }): Promise<PaperReport> {
+  const { tex, doc } = paperNow();
+  const { units } = paperUnits(doc, tex);
+  if (!units.length || hasSummaries(units, report)) return report;
+  // A run in the background may be writing the first summaries already.
+  if (sectioning) {
+    await sectioning.done;
+    const latest = await loadReport(project);
+    if (hasSummaries(units, latest)) return latest;
+  }
+  run.onStart();
+  try {
+    const result = await summarizeSections(unitsToSummarize(units, report), {
+      traceId: run.traceId,
+      parent: run.root,
+      control: run.control,
+      title: doc.title,
+      outline: doc.flatSections.length ? outlineText(doc, 3000) : undefined,
+    });
+    if (!result.summarized.length) return report;
+    const next = withSummaries(await loadReport(project), result.summarized, units);
+    await saveReport(project, next, units, doc.title);
+    return next;
+  } catch (err) {
+    if (run.control.stopped || (err instanceof AIError && err.kind === "cancelled")) throw err;
+    return report;
+  }
 }
 
 function updateMessage(id: string, patch: Partial<ChatMessage>) {
   useChat.setState((s) => ({ messages: s.messages.map((m) => (m.id === id ? { ...m, ...patch } : m)) }));
 }
 
+/** The turn running now, so it can be stopped. */
+let running: RunControl | null = null;
+
 export async function sendChatMessage(text: string): Promise<void> {
   const instruction = text.trim();
   if (!instruction || useChat.getState().runningId) return;
-  const provider = chatProvider();
-  const model = useSettings.getState().ai.models[provider];
-  const { doc, name } = useProject.getState();
-  const snapshot = editorSession.selection();
-
-  let anchor: ChatAnchor | undefined;
-  let contextLabel = t("chat.noFile");
-  let context = {};
-  if (snapshot) {
-    context = buildChatContext(
-      doc,
-      { projectName: name, filePath: snapshot.path, text: snapshot.docText, selectionFrom: snapshot.from, selectionTo: snapshot.to },
-      currentTexts(),
-    );
-    const range =
-      snapshot.from !== snapshot.to
-        ? { from: snapshot.from, to: snapshot.to }
-        : paragraphContext(snapshot.docText, snapshot.from, snapshot.to).currentRange;
-    if (range) anchor = { path: snapshot.path, ...range, text: snapshot.docText.slice(range.from, range.to) };
-    const line = snapshot.docText.slice(0, snapshot.from).split("\n").length;
-    const section = doc ? sectionAt(doc, snapshot.path, line) : null;
-    const where = section ? (section.order >= 0 && doc ? sectionTrail(doc, section) : section.title) : snapshot.path;
-    contextLabel = `${snapshot.path} › ${where}${snapshot.from !== snapshot.to ? ` ${t("chat.charsSelected", { count: snapshot.to - snapshot.from })}` : ""}`;
-  }
-
-  const history: AIMessage[] = useChat
-    .getState()
-    .messages.filter((m) => m.status === "done" && m.content.trim())
-    .slice(-MAX_HISTORY_MESSAGES)
-    .map((m) => ({ role: m.role, content: m.content }));
-
-  const { files, omitted } = agentFiles(snapshot?.path);
+  // Only the question goes; the editor's open file, selection and cursor
+  // often have nothing to do with what is asked.
   const requestId = newRequestId();
-  const userMessage: ChatMessage = { id: `${requestId}-u`, role: "user", content: instruction, status: "done", contextLabel };
+  const turn: Turn = {
+    id: requestId,
+    instruction,
+    turns: turnsOf(useChat.getState().messages),
+    summary: useChat.getState().summary,
+  };
+
+  const first = CHAT_MODELS.judge.primary;
+  const userMessage: ChatMessage = { id: `${requestId}-u`, role: "user", content: instruction, status: "done" };
   const assistantMessage: ChatMessage = {
     id: requestId,
     role: "assistant",
     content: "",
     status: "streaming",
-    provider,
-    model,
-    anchor,
+    provider: first.provider,
+    model: first.model,
     instruction,
+    stage: "judge",
   };
   useChat.setState((s) => ({ messages: [...s.messages, userMessage, assistantMessage], runningId: requestId }));
 
+  // One trace per question; its id is the answer's message id.
+  const root = startSpan(requestId, null, "pipeline", "sendChatMessage", () => ({ question: instruction, models: CHAT_MODELS }));
+  step(requestId, root, "user", "receiveUserInput", instruction, () => ({
+    question: instruction,
+    session_turns: turn.turns.length,
+    summary_covered_turns: turn.summary?.coveredTurns ?? 0,
+  }));
+  const control: RunControl = { stopped: false, activeRequest: null };
+  running = control;
+  let route: Route | undefined;
   try {
-    const response = await aiService.generate(
-      provider,
-      {
-        id: requestId,
-        task: "chat",
-        instruction,
-        selectedText: snapshot && snapshot.from !== snapshot.to ? snapshot.text : undefined,
-        context,
-        history,
-        projectFiles: files,
-        omittedFiles: omitted,
-        model,
-        maxOutputTokens: MAX_OUTPUT_TOKENS.chat,
+    const project = useProject.getState().root;
+    let report = project ? await loadReport(project) : emptyReport();
+    // The first question about this paper: summarize it before the judge runs.
+    if (project) report = await summarizeFirst(project, report, { traceId: requestId, root, control, onStart: () => updateMessage(requestId, { stage: "paper" }) });
+    const result = await runChatTurn(turn, {
+      root,
+      control,
+      paper: () => paperOf(report),
+      hooks: {
+        onStage: (stage) => updateMessage(requestId, { stage }),
+        onRefined: (refined) => updateMessage(requestId, { refined }),
+        onText: (full) => updateMessage(requestId, { content: full }),
+        onModel: (choice) => updateMessage(requestId, { provider: choice.provider, model: choice.model }),
       },
-      { onDelta: (_d, full) => updateMessage(requestId, { content: full }) },
-    );
-    updateMessage(requestId, {
-      content: response.text + (response.finishReason === "length" ? `\n\n${t("chat.truncated")}` : ""),
-      status: "done",
     });
+    route = result.route;
+    const content = result.content + (result.finishReason === "length" ? `\n\n${t("chat.truncated")}` : "");
+    updateMessage(requestId, {
+      content,
+      status: "done",
+      stage: undefined,
+      route: result.outcome,
+      provider: result.choice.provider,
+      model: result.choice.model,
+      fallbackFrom: result.fallbackFrom?.model,
+      ...(result.finishReason === "length" ? { truncated: true } : {}),
+    });
+    step(requestId, root, "final", "showFinalAnswer", content, () => ({
+      route: result.route,
+      outcome: result.outcome,
+      model: result.choice.model,
+      fallback_from: result.fallbackFrom?.model ?? null,
+      finishReason: result.finishReason,
+      usage: result.usage,
+      edit_blocks: splitBlocks(content).filter((b) => b.kind === "code" && b.lang === "edit").length,
+    }));
+    endSpan(root, "pipeline", { status: "done", route: result.route, outcome: result.outcome });
   } catch (err) {
     const error = err instanceof AIError ? err : new AIError("unknown", String(err));
-    if (error.kind === "cancelled") updateMessage(requestId, { status: "cancelled" });
-    else updateMessage(requestId, { status: "error", content: error.message });
+    if (error.kind === "cancelled") updateMessage(requestId, { status: "cancelled", stage: undefined });
+    else updateMessage(requestId, { status: "error", stage: undefined, content: error.message });
+    failSpan(root, "pipeline", error);
   } finally {
+    if (running === control) running = null;
     useChat.setState({ runningId: null });
+    // Stopped and failed turns count too: they are turns left unanswered.
+    scheduleSummary({ traceId: requestId, root });
+    // A turn that may have read the paper: summarize the sections edited since.
+    if (route !== "reply") scheduleSectionSummaries({ traceId: requestId, root });
   }
 }
 
 export function stopChat() {
-  const { runningId } = useChat.getState();
-  if (runningId) void aiService.cancel(runningId);
+  const control = running;
+  if (!control) return;
+  control.stopped = true;
+  if (control.activeRequest) void aiService.cancel(control.activeRequest);
+}
+
+// ---------------------------------------------------------------- session summary
+
+/** The Summary Module run in the background, for one session at a time. */
+let summarizing: { control: RunControl; again: boolean; done: Promise<void> } | null = null;
+/** The turn that ended last; a summary run shows in its trace. */
+let foldTrace: { traceId: string; root: Span } | null = null;
+
+/**
+ * Fold older turns into the session summary when four are open (see
+ * `./session/summarizer.ts`). It keeps folding while a long session catches
+ * up, and stops when the user leaves the session. A failure is tried again
+ * after the next turn; until then the modules read more turns word for word.
+ */
+export function scheduleSummary(after?: { traceId: string; root: Span }) {
+  if (after) foldTrace = after;
+  if (summarizing) {
+    summarizing.again = true;
+    return;
+  }
+  const { sessionId } = useChat.getState();
+  const control: RunControl = { stopped: false, activeRequest: null };
+  const current = () => !control.stopped && useChat.getState().sessionId === sessionId;
+  const run = async () => {
+    while (current()) {
+      const { messages, summary } = useChat.getState();
+      const fold = turnsToFold(turnsOf(messages), summary);
+      if (!fold.length) return;
+      const { doc } = useProject.getState();
+      const result = await foldTurns(summary, fold, {
+        traceId: foldTrace?.traceId ?? newRequestId(),
+        parent: foldTrace?.root ?? null,
+        control,
+        outline: doc?.flatSections.length ? outlineText(doc, 3000) : undefined,
+      }).catch(() => null);
+      if (!result || !current()) return;
+      useChat.setState({ summary: result.summary });
+    }
+  };
+  const job = { control, again: false, done: Promise.resolve() };
+  job.done = run().finally(() => {
+    if (summarizing !== job) return;
+    summarizing = null;
+    if (job.again && !control.stopped) scheduleSummary();
+  });
+  summarizing = job;
+}
+
+/** Stop folding for the session being left. */
+function stopSummary() {
+  const job = summarizing;
+  if (!job) return;
+  summarizing = null;
+  job.control.stopped = true;
+  if (job.control.activeRequest) void aiService.cancel(job.control.activeRequest);
+}
+
+/** Resolves once no summary (of the session or of sections) is being made (for tests). */
+export async function summaryIdle(): Promise<void> {
+  while (summarizing || sectioning) await (summarizing ?? sectioning)!.done;
+}
+
+// ---------------------------------------------------------------- section summaries
+
+/** The Section Summary Module run in the background, for one project at a time. */
+let sectioning: { control: RunControl; again: boolean; done: Promise<void> } | null = null;
+/** The turn that ended last; a section summary run shows in its trace. */
+let sectionTrace: { traceId: string; root: Span } | null = null;
+
+/**
+ * Summarize the sections the paper summary has no summary for (see
+ * `./paper/sectionSummarizer.ts`): sections edited since they were summarized,
+ * or all of them when the first summary failed. It runs after a turn that
+ * read the paper, and stops when another project opens.
+ */
+export function scheduleSectionSummaries(after?: { traceId: string; root: Span }) {
+  if (after) sectionTrace = after;
+  if (sectioning) {
+    sectioning.again = true;
+    return;
+  }
+  const project = useProject.getState().root;
+  const trace = sectionTrace;
+  if (!project || !trace) return;
+  const control: RunControl = { stopped: false, activeRequest: null };
+  const current = () => !control.stopped && useProject.getState().root === project;
+  const run = async () => {
+    const report = await loadReport(project);
+    const { tex, doc } = paperNow();
+    const { units } = paperUnits(doc, tex);
+    const todo = unitsToSummarize(units, report);
+    const sections = units.length;
+    step(trace.traceId, trace.root, "sections", "checkSectionSummaries", () => ({ sections }), () => ({
+      sections,
+      summarized: sections - todo.length,
+      to_summarize: todo.map((u) => u.key),
+    }));
+    if (!todo.length || !current()) return;
+    const result = await summarizeSections(todo, {
+      traceId: trace.traceId,
+      parent: trace.root,
+      control,
+      title: doc.title,
+      outline: doc.flatSections.length ? outlineText(doc, 3000) : undefined,
+    }).catch(() => null);
+    if (!result?.summarized.length || !current()) return;
+    await saveReport(project, withSummaries(await loadReport(project), result.summarized, units), units, doc.title);
+  };
+  const job = { control, again: false, done: Promise.resolve() };
+  job.done = run()
+    .catch(() => {
+      // Tried again after the next turn; until then the sections are read word for word.
+    })
+    .finally(() => {
+      if (sectioning !== job) return;
+      sectioning = null;
+      if (job.again && !control.stopped) scheduleSectionSummaries();
+    });
+  sectioning = job;
+}
+
+/** Stop summarizing sections of the project being left. */
+function stopSectionSummaries() {
+  const job = sectioning;
+  if (!job) return;
+  sectioning = null;
+  job.control.stopped = true;
+  if (job.control.activeRequest) void aiService.cancel(job.control.activeRequest);
 }
 
 // ---------------------------------------------------------------- saved sessions
@@ -194,8 +390,10 @@ export function stopChat() {
 /** Load the project's conversations and show the most recent one (or a new one). */
 export async function openChatsFor(root: string | null): Promise<void> {
   stopChat();
+  stopSummary();
+  stopSectionSummaries();
   clearTimeout(saveTimer);
-  useChat.setState({ root, messages: [], sessions: [], sessionId: newSessionId(), createdAt: Date.now() });
+  useChat.setState({ root, messages: [], summary: null, sessions: [], sessionId: newSessionId(), createdAt: Date.now() });
   if (!root) return;
   const sessions = await listSessions(root).catch(() => [] as SessionSummary[]);
   if (useChat.getState().root !== root) return;
@@ -206,20 +404,25 @@ export async function openChatsFor(root: string | null): Promise<void> {
 /** Start an empty conversation; it is saved once it has a message. */
 export function newChatSession() {
   stopChat();
+  stopSummary();
   flushSave();
-  useChat.setState({ messages: [], sessionId: newSessionId(), createdAt: Date.now() });
+  useChat.setState({ messages: [], summary: null, sessionId: newSessionId(), createdAt: Date.now() });
 }
 
 export async function switchChatSession(id: string): Promise<void> {
   const { root } = useChat.getState();
   if (!root) return;
   stopChat();
+  stopSummary();
   flushSave();
   const file = await loadSession<ChatMessage>(root, id).catch(() => null);
   if (!file || useChat.getState().root !== root) return;
   // An answer that was still streaming when the app closed is shown as stopped.
-  const messages = file.messages.map((m) => (m.status === "streaming" ? { ...m, status: "cancelled" as const } : m));
-  useChat.setState({ messages, sessionId: id, createdAt: file.createdAt });
+  const messages = file.messages.map((m) => (m.status === "streaming" ? { ...m, status: "cancelled" as const, stage: undefined } : m));
+  // A summary of more turns than the session has does not belong to it.
+  const summary = readSummary(file.summary);
+  const fits = summary && summary.coveredTurns <= turnsOf(messages).length ? summary : null;
+  useChat.setState({ messages, summary: fits, sessionId: id, createdAt: file.createdAt });
 }
 
 export async function deleteChatSession(id: string): Promise<void> {
@@ -228,8 +431,9 @@ export async function deleteChatSession(id: string): Promise<void> {
   if (id === sessionId) {
     // Leave the conversation first so nothing saves it again while it is being removed.
     stopChat();
+    stopSummary();
     clearTimeout(saveTimer);
-    useChat.setState({ messages: [], sessionId: newSessionId(), createdAt: Date.now() });
+    useChat.setState({ messages: [], summary: null, sessionId: newSessionId(), createdAt: Date.now() });
   }
   await deleteSession(root, id);
   const sessions = useChat.getState().sessions.filter((s) => s.id !== id);
@@ -248,27 +452,23 @@ function sessionTitle(messages: ChatMessage[]): string {
 /** Write the shown conversation now (when it has messages and no answer is streaming). */
 function flushSave() {
   clearTimeout(saveTimer);
-  const { root, sessionId, createdAt, messages, runningId, sessions } = useChat.getState();
+  const { root, sessionId, createdAt, messages, summary, runningId, sessions } = useChat.getState();
   if (!root || messages.length === 0 || runningId) return;
   const updatedAt = Date.now();
-  void saveSession(root, sessionId, { version: SESSION_VERSION, createdAt, updatedAt, messages }).catch(() => {
+  void saveSession(root, sessionId, { version: SESSION_VERSION, createdAt, updatedAt, messages, ...(summary ? { summary } : {}) }).catch(() => {
     // Saving is best effort; the conversation stays usable in memory.
   });
-  const summary: SessionSummary = { id: sessionId, title: sessionTitle(messages), createdAt, updatedAt, messageCount: messages.length };
-  useChat.setState({ sessions: [summary, ...sessions.filter((s) => s.id !== sessionId)] });
+  const entry: SessionSummary = { id: sessionId, title: sessionTitle(messages), createdAt, updatedAt, messageCount: messages.length };
+  useChat.setState({ sessions: [entry, ...sessions.filter((s) => s.id !== sessionId)] });
 }
 
-// Save shortly after the conversation changes (new message, finished answer, applied edit).
+// Save shortly after the conversation changes (new message, finished answer, applied edit, new summary).
 useChat.subscribe((state, prev) => {
-  if (state.messages === prev.messages && state.runningId === prev.runningId) return;
+  if (state.messages === prev.messages && state.runningId === prev.runningId && state.summary === prev.summary) return;
   if (state.sessionId !== prev.sessionId || state.root !== prev.root) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flushSave, SAVE_DELAY_MS);
 });
-
-export function setChatProvider(provider: ProviderId) {
-  useChat.setState({ provider });
-}
 
 export interface Block {
   kind: "text" | "code";

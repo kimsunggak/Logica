@@ -170,10 +170,16 @@ function editBlock(path: string, original: string, revised: string): string {
   return `\`\`\`edit ${path}\n<<<<<<< ORIGINAL\n${original}\n=======\n${revised}\n>>>>>>> REVISED\n\`\`\``;
 }
 
-/** Chat agent: edit blocks for the current paragraph, or for every file on a paper-wide request. */
-function simulateAgent(userMessage: string, instruction: string, target: string | undefined): string {
-  const files = [...userMessage.matchAll(/<file path="([^"]+)">\n([\s\S]*?)\n<\/file>/g)].map((m) => ({ path: m[1], text: m[2] }));
+/** The paper text in a prompt: whole files, or the sections sent word for word. */
+function paperTexts(prompt: string): { path: string; text: string }[] {
+  return [...prompt.matchAll(/<(?:file path|source file)="([^"]+)"[^>]*>\n([\s\S]*?)\n<\/(?:file|source)>/g)].map((m) => ({ path: m[1], text: m[2] }));
+}
+
+/** Edit request: edit blocks for a sentence quoted in the request, or for every file on a paper-wide request. */
+function simulateAgent(userMessage: string, instruction: string): string {
+  const files = paperTexts(userMessage);
   const blocks: string[] = [];
+  const quoted = /["“]([^"”]{10,})["”]/.exec(instruction)?.[1];
   if (/whole|entire|across|all|전체|모든|통일/i.test(instruction)) {
     for (const file of files) {
       const line = file.text
@@ -181,48 +187,190 @@ function simulateAgent(userMessage: string, instruction: string, target: string 
         .find((l) => l.length > 40 && !/^\s*[\\%]/.test(l) && demoRewrite(l, instruction) !== l.trim());
       if (line && blocks.length < 4) blocks.push(editBlock(file.path, line.trim(), demoRewrite(line, instruction)));
     }
-  } else if (target) {
-    const path = between(userMessage, "current_file") ?? files[0]?.path ?? "main.tex";
-    blocks.push(editBlock(path, target, demoRewrite(target, instruction)));
+  } else if (quoted) {
+    const file = files.find((f) => f.text.includes(quoted));
+    if (file) blocks.push(editBlock(file.path, quoted, demoRewrite(quoted, instruction)));
   }
-  if (blocks.length === 0) return "Place the cursor in a paragraph or select text, and I will suggest an edit for it.";
+  if (blocks.length === 0) return "Say which part to change (quote the sentence or name the section), and I will suggest an edit for it.";
   return `I tightened the wording and kept citations, labels and LaTeX commands unchanged.\n\n${blocks.join("\n\n")}`;
 }
 
+/** A demo model reply: text, or a function call. */
+type DemoReply = { text: string } | { tool: { name: string; args: Record<string, unknown> } };
+
+const EDIT_REQUEST = /rewrite|shorten|tighten|fix|improve|unify|make|change|remove|add|translate|수정|고쳐|줄여|바꿔|다듬|통일|추가|삭제|번역/i;
+const SMALL_TALK = /^\s*(hi|hello|hey|thanks|thank you|ok|okay|안녕|고마워|고맙|감사|좋아|알겠어)/i;
+const VAGUE = /핵심|요약|전체|전반|무슨 내용|어때|왜|이거|그거|summar|overall|main idea|key point|gist|why/i;
+const hangul = (text: string) => /[가-힣]/.test(text);
+
+/** Sections of the paper map whose title the question names, such as "Section 3" or "the Method". */
+function namedSections(last: string, question: string): string[] {
+  const map = /<paper_map summaries="(?!none)[^"]*">\n([\s\S]*?)\n<\/paper_map>/.exec(last)?.[1] ?? "";
+  const asked = question.toLowerCase();
+  const keys: string[] = [];
+  for (const m of map.matchAll(/^\s*\[([^\]]+)\] ([^(\n]+?) \(/gm)) {
+    if (asked.includes(m[2].toLowerCase()) || new RegExp(`\\b(section|sec\\.?|§)\\s*${m[1].replace(/\./g, "\\.")}\\b`, "i").test(question)) keys.push(m[1]);
+  }
+  return keys;
+}
+
+/** Chat Orchestrator's judge: one tool per route, with the reason for it and the sections to read. */
+function simulateJudge(last: string): DemoReply {
+  const question = between(last, "user_message") ?? "";
+  if (SMALL_TALK.test(question) && question.length < 40) {
+    return { tool: { name: "reply_directly", args: { reason: "The message is small talk, not a question about the paper." } } };
+  }
+  const sections = namedSections(last, question);
+  if (VAGUE.test(question) && !EDIT_REQUEST.test(question)) {
+    return { tool: { name: "refine_question", args: { reason: "The message is broad; refine it with the paper first.", sections } } };
+  }
+  return { tool: { name: "answer_question", args: { reason: "The message says what it is about.", sections } } };
+}
+
+/** Section Summary Module: the first sentence of each section, as plain text. */
+function simulateSectionSummaries(last: string): DemoReply {
+  const summaries = [...last.matchAll(/<section key="([^"]+)" title="([^"]*)">\n([\s\S]*?)\n<\/section>/g)].map((m) => {
+    const text = latexToPlain(m[3].replace(/\\(?:sub)*section\*?\{[^}]*\}/g, "")).replace(/\s+/g, " ").trim();
+    const first = /^.*?[.!?](\s|$)/.exec(text)?.[0]?.trim() ?? text.slice(0, 160);
+    return { key: m[1], summary: `${m[2]}: ${first || "(no text)"}` };
+  });
+  return { tool: { name: "write_section_summaries", args: { summaries } } };
+}
+
+/** Refine Module: restate the question with the paper's title, or ask back. */
+function simulateRefine(all: string, last: string): string {
+  const question = (between(last, "user_message") ?? "").trim();
+  if (/^(이거|그거|this|that)\s*\??$/i.test(question)) {
+    return JSON.stringify({ clarify: hangul(question) ? "어느 부분을 말씀하시는 건가요? 섹션이나 문장을 알려 주세요." : "Which part do you mean? Name the section or quote the sentence." });
+  }
+  const title = /\\title\{([^}]*)\}/.exec(all)?.[1]?.trim() ?? "this paper";
+  const refined = hangul(question)
+    ? `논문 "${title}" 기준: ${question} (제안한 방법의 핵심 아이디어, 푸는 문제, 기존 방법과의 차이를 중심으로)`
+    : `In the paper "${title}": ${question} (focus on the proposed method's key idea, the problem it solves, and how it differs from prior work)`;
+  return JSON.stringify({ refined_question: refined });
+}
+
+/** Answer Module: edit blocks for an edit request, otherwise a short demo answer. */
+function simulateAnswerModule(all: string, last: string): string {
+  const question = between(last, "user_message") ?? "";
+  if (EDIT_REQUEST.test(question)) {
+    return simulateAgent(all, question);
+  }
+  const refined = between(last, "refined_question");
+  const files = [...all.matchAll(/<file path="([^"]+)">/g)].map((m) => m[1]);
+  const full = [...all.matchAll(/<section key="([^"]+)" title="[^"]*" content="full">/g)].map((m) => m[1]);
+  const read = all.includes('content="summary"') ? `sections ${full.join(", ")} word for word and the others as summaries` : `the whole paper (${files.join(", ") || "no files"})`;
+  const answer = `Demo answer to "${refined ?? question}". In the desktop app, the connected model answers from ${read}.`;
+  // Ask about "markdown" or "형식" to see how answers are rendered.
+  if (!/markdown|마크다운|형식/i.test(question)) return answer;
+  return [
+    answer,
+    "",
+    "### 답변 형식 미리보기",
+    "",
+    "이 문단은 **강조**한다. **'인용'**이라는 표현과 **서론(Introduction)**에서는 처럼 한국어 조사가 붙어도 굵게 보입니다.",
+    "",
+    "1. 인라인 수식: $E = mc^2$, 그리고 \\(\\alpha + \\beta\\)",
+    "2. `\\cite{key}` 같은 인라인 코드",
+    "3. [LaTeX 문서](https://www.latex-project.org/help/documentation/) 링크",
+    "",
+    "\\[ \\int_0^1 x^2\\,dx = \\frac{1}{3} \\]",
+    "",
+    "> 인용문은 왼쪽 선과 흐린 색으로 표시됩니다.",
+    "",
+    "| 항목 | 값 |",
+    "| --- | --- |",
+    "| 정확도 | 95% |",
+    "",
+    "```latex",
+    "\\section{Introduction}",
+    "We prove that $f(x) = x^2$ is convex \\cite{boyd2004}.",
+    "```",
+  ].join("\n");
+}
+
+/** Summary Module: a goal once, a preference for "from now on" requests, and a topic line per question. */
+function simulateSummary(last: string): DemoReply {
+  const ops: Record<string, unknown>[] = [];
+  const op = (o: { op: string; kind?: string; id?: string; text: string; turn?: number }) => ops.push({ kind: "", id: "", turn: 0, ...o });
+  if (!/^Goal: /m.test(between(last, "current_summary") ?? "")) op({ op: "set_goal", text: "데모 논문을 함께 읽고 다듬는 중" });
+  for (const m of last.matchAll(/<turn number="(\d+)">\nuser: ([\s\S]*?)\nassistant: [\s\S]*?\n<\/turn>/g)) {
+    const turn = Number(m[1]);
+    const question = m[2].replace(/\s+/g, " ").trim();
+    if (/앞으로|항상|from now on|always/i.test(question)) op({ op: "add", kind: "preference", text: question.slice(0, 120), turn });
+    else if (!(SMALL_TALK.test(question) && question.length < 40)) op({ op: "add", kind: "topic", text: `${question.slice(0, 60)} 에 답함`, turn });
+  }
+  return { tool: { name: "update_summary", args: { ops } } };
+}
+
+/** Which call a request body is, from the request itself. */
+function simulateReply(body: Record<string, any>, messages: { content: string }[]): DemoReply {
+  const last = messages[messages.length - 1]?.content ?? "";
+  const all = messages.map((m) => m.content).join("\n\n");
+  const tools: string[] = Array.isArray(body.tools) ? body.tools.map((t: { name?: string }) => t.name ?? "") : [];
+  if (tools.includes("update_summary")) return simulateSummary(last);
+  if (tools.includes("write_section_summaries")) return simulateSectionSummaries(last);
+  if (tools.length) return simulateJudge(last);
+  if (last.includes("<task>\nReply to the user's message.")) {
+    const question = between(last, "user_message") ?? "";
+    return { text: hangul(question) ? "천만에요! 논문에 대해 궁금한 점을 물어보세요." : "You're welcome! Ask me anything about the paper." };
+  }
+  if (last.includes('"refined_question":"..."')) return { text: simulateRefine(all, last) };
+  if (last.includes("You are the Answer Module")) return { text: simulateAnswerModule(all, last) };
+  return { text: simulateAnswer(last) };
+}
+
+/** Inline edit: the rewritten selection, or a reviewable suggestion for the paragraph. */
 function simulateAnswer(userMessage: string): string {
-  const instruction = between(userMessage, "instruction") ?? between(userMessage, "user_message") ?? "";
+  const instruction = between(userMessage, "instruction") ?? "";
   const selected = between(userMessage, "selected_text");
   if (userMessage.includes("<instruction>") && selected !== undefined) return demoRewrite(selected, instruction);
-  if (userMessage.includes("<project_files>")) return simulateAgent(userMessage, instruction, selected ?? between(userMessage, "current_paragraph"));
   const target = selected ?? between(userMessage, "current_paragraph");
   if (!target) return "Place the cursor in a paragraph or select text, and I will suggest an edit for it.";
   return `Here is a tighter version that keeps the citations and LaTeX commands unchanged:\n\n\`\`\`latex\n${demoRewrite(target, instruction)}\n\`\`\`\n\nReview it as a diff before applying.`;
 }
 
-function openAIStream(text: string): string[] {
-  const events = [`event: response.created\ndata: ${JSON.stringify({ type: "response.created" })}\n\n`];
-  for (let i = 0; i < text.length; i += 14) {
-    events.push(`event: response.output_text.delta\ndata: ${JSON.stringify({ type: "response.output_text.delta", delta: text.slice(i, i + 14) })}\n\n`);
+const chunks = (text: string, size = 14) => Array.from({ length: Math.ceil(text.length / size) }, (_, i) => text.slice(i * size, (i + 1) * size));
+const sseEvent = (data: Record<string, unknown>) => `event: ${data.type}\ndata: ${JSON.stringify(data)}\n\n`;
+
+function openAIStream(reply: DemoReply): string[] {
+  const events = [sseEvent({ type: "response.created" })];
+  let output = 0;
+  if ("text" in reply) {
+    for (const delta of chunks(reply.text)) events.push(sseEvent({ type: "response.output_text.delta", delta }));
+    output = Math.ceil(reply.text.length / 4);
+  } else {
+    const args = JSON.stringify(reply.tool.args);
+    const item = { id: "fc_demo", type: "function_call", call_id: "call_demo", name: reply.tool.name };
+    events.push(sseEvent({ type: "response.output_item.added", output_index: 0, item: { ...item, arguments: "" } }));
+    for (const delta of chunks(args)) events.push(sseEvent({ type: "response.function_call_arguments.delta", item_id: "fc_demo", output_index: 0, delta }));
+    events.push(
+      sseEvent({ type: "response.function_call_arguments.done", item_id: "fc_demo", output_index: 0, arguments: args }),
+      sseEvent({ type: "response.output_item.done", output_index: 0, item: { ...item, arguments: args } }),
+    );
+    output = Math.ceil(args.length / 4);
   }
-  events.push(
-    `event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: { usage: { input_tokens: 900, output_tokens: Math.ceil(text.length / 4) } } })}\n\n`,
-  );
+  events.push(sseEvent({ type: "response.completed", response: { usage: { input_tokens: 900, input_tokens_details: { cached_tokens: 0 }, output_tokens: output } } }));
   return events;
 }
 
-function anthropicStream(text: string): string[] {
-  const events = [
-    `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 900 } } })}\n\n`,
-    `event: content_block_start\ndata: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })}\n\n`,
-    `event: ping\ndata: {"type": "ping"}\n\n`,
-  ];
-  for (let i = 0; i < text.length; i += 14) {
-    events.push(`event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: text.slice(i, i + 14) } })}\n\n`);
+function anthropicStream(reply: DemoReply): string[] {
+  const events = [sseEvent({ type: "message_start", message: { usage: { input_tokens: 900 } } })];
+  let output = 0;
+  if ("text" in reply) {
+    events.push(sseEvent({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }), `event: ping\ndata: {"type": "ping"}\n\n`);
+    for (const text of chunks(reply.text)) events.push(sseEvent({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text } }));
+    output = Math.ceil(reply.text.length / 4);
+  } else {
+    const args = JSON.stringify(reply.tool.args);
+    events.push(sseEvent({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_demo", name: reply.tool.name, input: {} } }));
+    for (const partial_json of chunks(args)) events.push(sseEvent({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json } }));
+    output = Math.ceil(args.length / 4);
   }
   events.push(
-    `event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n`,
-    `event: message_delta\ndata: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: Math.ceil(text.length / 4) } })}\n\n`,
-    `event: message_stop\ndata: {"type":"message_stop"}\n\n`,
+    sseEvent({ type: "content_block_stop", index: 0 }),
+    sseEvent({ type: "message_delta", delta: { stop_reason: "text" in reply ? "end_turn" : "tool_use" }, usage: { output_tokens: output } }),
+    sseEvent({ type: "message_stop" }),
   );
   return events;
 }
@@ -230,11 +378,20 @@ function anthropicStream(text: string): string[] {
 // ------------------------------------------------------------------ backend
 
 const CHATS_KEY = "logica-demo-chats";
+const PAPERS_KEY = "logica-demo-papers";
 type DemoSession = { createdAt: number; updatedAt: number; messages: { role: string; content: string }[] };
 
 function demoChats(): Record<string, Record<string, DemoSession>> {
   try {
     return JSON.parse(localStorage.getItem(CHATS_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function demoReports(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(PAPERS_KEY) ?? "{}");
   } catch {
     return {};
   }
@@ -409,6 +566,7 @@ export function createDemoBackend(): DemoBackend {
       if (provider === "openai" && auth === "chatgpt") {
         return {
           models: [
+            { slug: "gpt-6.1-sol", display_name: "GPT-6.1 Sol", visibility: "list" },
             { slug: "gpt-6-sol", display_name: "GPT-6 Sol", visibility: "list" },
             { slug: "gpt-6-luna", display_name: "GPT-6 Luna", visibility: "list" },
             { slug: "internal-preview", display_name: "Hidden", visibility: "hide" },
@@ -416,16 +574,20 @@ export function createDemoBackend(): DemoBackend {
         };
       }
       return provider === "openai"
-        ? { data: [{ id: "gpt-6-sol", created: 3 }, { id: "gpt-6-luna", created: 2 }, { id: "text-embedding-3-large", created: 1 }] }
+        ? { data: [{ id: "gpt-6.1-sol", created: 4 }, { id: "gpt-6-sol", created: 3 }, { id: "gpt-6-luna", created: 2 }, { id: "text-embedding-3-large", created: 1 }] }
         : { data: [{ id: "claude-sonnet-5-5", display_name: "Claude Sonnet 5.5" }, { id: "claude-opus-5-5", display_name: "Claude Opus 5.5" }] };
     },
     ai_stream: async ({ request, onEvent }) => {
       const channel = onEvent as Channel;
       const { requestId, provider, body, auth } = request as { requestId: string; provider: string; body: Record<string, any>; auth?: string | null };
       credentialFor(provider, auth);
+      // Tests can make every OpenAI call fail to exercise the Claude fallback.
+      if (provider === "openai" && (globalThis as { __LOGICA_DEMO_FAIL_OPENAI?: boolean }).__LOGICA_DEMO_FAIL_OPENAI) {
+        fail("http_error", "Provider returned HTTP 503", { status: 503, body: '{"error":{"type":"server_error","message":"The demo OpenAI service is unavailable"}}' });
+      }
       const messages: { content: string }[] = provider === "openai" ? body.input : body.messages;
-      const answer = simulateAnswer(messages[messages.length - 1]?.content ?? "");
-      const stream = (provider === "openai" ? openAIStream(answer) : anthropicStream(answer)).join("");
+      const reply = simulateReply(body, messages);
+      const stream = (provider === "openai" ? openAIStream(reply) : anthropicStream(reply)).join("");
       channel.onmessage({ type: "open", status: 200 });
       // Deliver in uneven chunks to exercise the SSE parser.
       for (let i = 0; i < stream.length; ) {
@@ -469,6 +631,11 @@ export function createDemoBackend(): DemoBackend {
       const all = demoChats();
       delete all[root]?.[id];
       localStorage.setItem(CHATS_KEY, JSON.stringify(all));
+    },
+    // The paper summary (YAML) of each project: localStorage stands in for the local data folder.
+    paper_load_summary: ({ root }) => demoReports()[root] ?? null,
+    paper_save_summary: ({ root, text }) => {
+      localStorage.setItem(PAPERS_KEY, JSON.stringify({ ...demoReports(), [root]: text }));
     },
     load_app_state: () => {
       try {

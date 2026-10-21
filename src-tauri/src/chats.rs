@@ -32,7 +32,7 @@ pub struct SessionSummary {
 }
 
 /// Stable id of a project folder: SHA-256 of its canonical path (32 hex chars).
-fn project_id(root: &str) -> String {
+pub(crate) fn project_id(root: &str) -> String {
     let path = std::fs::canonicalize(root).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| root.to_string());
     let digest = Sha256::digest(path.as_bytes());
     digest[..16].iter().map(|b| format!("{b:02x}")).collect()
@@ -52,7 +52,7 @@ fn chats_dir(base: &Path, root: &str) -> PathBuf {
     base.join("chats").join(project_id(root))
 }
 
-fn base_dir(app: &AppHandle) -> CmdResult<PathBuf> {
+pub(crate) fn base_dir(app: &AppHandle) -> CmdResult<PathBuf> {
     app.path().app_local_data_dir().map_err(|e| CmdError::new("io", format!("No local data directory: {e}")))
 }
 
