@@ -1,162 +1,96 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" font-family="Pretendard, 'Noto Sans KR', sans-serif">
-<defs>
-<marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#5d6678"/></marker>
-<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#3f9a7a"/></marker>
-<marker id="am" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#c9ad4f"/></marker>
-<style>
-.t{font-size:15px;font-weight:700;fill:#2b3240}
-.s{font-size:11.5px;fill:#6b7385} .sl{font-size:11.5px;fill:#4a5263}
-.h{font-size:13px;font-weight:700;fill:#5d6678}
-.ch{font-size:13px;font-weight:700;fill:#2b3240} .ct{font-size:11px;fill:#7d6cc4}
-.chip{font-size:11px;font-weight:700}
-.k{font-family:ui-monospace,'SFMono-Regular',Menlo,Consolas,'D2Coding',monospace;font-size:10.5px;fill:#3d4556}
-.la,.lg,.lm,.lp{font-size:11.5px;paint-order:stroke;stroke:#fff;stroke-width:4px}
-.la{fill:#4a5263} .lg{fill:#2f8566} .lm{fill:#a88d2f} .lp{fill:#4f7fb8}
-.f{fill:none;stroke:#5d6678;stroke-width:1.5}
-.g{fill:none;stroke:#3f9a7a;stroke-width:1.5}
-.m{fill:none;stroke:#c9ad4f;stroke-width:1.4;stroke-dasharray:6 4}
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="800" viewBox="0 0 1440 800" font-family="Pretendard, 'Noto Sans KR', sans-serif">
+<defs><style>
+.title{font-size:18px;font-weight:700;fill:#2b3240}
+.sub{font-size:12.5px;fill:#6b7385}
+.tag{font-size:12px;font-weight:700;fill:#5d6678}
+.tagk,.mono{font-family:ui-monospace,'SFMono-Regular',Menlo,Consolas,'D2Coding',monospace}
+.tagk{font-size:11px;fill:#8a93a5}
+.colh{font-size:12px;font-weight:700;fill:#8a93a5}
+.nm{font-size:18px;font-weight:700}
+.nm2{font-size:14px;font-weight:700;fill:#2b3240}
+.kr{font-size:12.5px;fill:#4a5263}
+.who{font-size:11px;font-weight:700}
+.desc{font-size:12.5px;fill:#3d4556}
+.mono{font-size:11px;fill:#3d4556}
+.foot{font-size:12px;fill:#4a5263}
 </style></defs>
-<rect width="1440" height="900" fill="#ffffff"/>
-<text x="220" y="44" class="h" text-anchor="middle">① 접기: 턴이 끝난 뒤 백그라운드</text>
-<text x="700" y="44" class="h" text-anchor="middle">② 저장: 세션 파일</text>
-<text x="1200" y="44" class="h" text-anchor="middle">③ 읽기: 다음 질문</text>
-<rect x="40" y="66" width="360" height="132" rx="14" fill="#e7f0fb" stroke="#6f9bd1" stroke-width="1.5"/>
-<text x="220" y="94" class="t" text-anchor="middle">대화 턴</text>
-<text x="220" y="112" class="s" text-anchor="middle">질문 하나와 그 결과가 1턴 (중지, 실패한 답도 턴)</text>
-<rect x="108" y="126" width="34" height="22" rx="6" fill="#fdf6e0" stroke="#c9ad4f" stroke-width="1.2"/>
-<text x="125" y="141" class="chip" text-anchor="middle" fill="#a88d2f">1</text>
-<rect x="152" y="126" width="34" height="22" rx="6" fill="#fdf6e0" stroke="#c9ad4f" stroke-width="1.2"/>
-<text x="169" y="141" class="chip" text-anchor="middle" fill="#a88d2f">2</text>
-<rect x="216" y="126" width="34" height="22" rx="6" fill="#ffffff" stroke="#6f9bd1" stroke-width="1.2"/>
-<text x="233" y="141" class="chip" text-anchor="middle" fill="#4f7fb8">3</text>
-<rect x="260" y="126" width="34" height="22" rx="6" fill="#ffffff" stroke="#6f9bd1" stroke-width="1.2"/>
-<text x="277" y="141" class="chip" text-anchor="middle" fill="#4f7fb8">4</text>
-<text x="149" y="166" class="lm" text-anchor="middle">요약으로 접음</text>
-<text x="255" y="166" class="lp" text-anchor="middle">원문으로 남김</text>
-<text x="220" y="186" class="s" text-anchor="middle">요약 안 된 턴이 4개가 되면 마지막 2턴만 남기고 접음</text>
-<path d="M220 198 V226" class="f" marker-end="url(#a)"/>
-<text x="232" y="216" class="la" text-anchor="start">접을 턴 (한 번에 최대 6턴)</text>
-<rect x="40" y="230" width="360" height="70" rx="14" fill="#f1f3f7" stroke="#8792a6" stroke-width="1.5"/>
-<text x="220" y="258" class="t" text-anchor="middle">addUnresolved (코드)</text>
-<text x="220" y="278" class="s" text-anchor="middle">중지, 실패, 길이 초과, 되물음 턴은 코드가 U#로 추가</text>
-<path d="M220 300 V328" class="f" marker-end="url(#a)"/>
-<rect x="40" y="332" width="360" height="92" rx="14" fill="#e6f4ee" stroke="#4ea37f" stroke-width="1.5"/>
-<text x="220" y="360" class="t" text-anchor="middle">Summary Module</text>
-<text x="220" y="380" class="s" text-anchor="middle">gpt-6.1-sol (low), update_summary 툴 한 번</text>
-<text x="220" y="398" class="s" text-anchor="middle">요약을 새로 쓰지 않고 바뀐 것만 돌려줌:</text>
-<text x="220" y="414" class="s" text-anchor="middle">set_goal, add, replace, close</text>
-<path d="M220 424 V452" class="f" marker-end="url(#a)"/>
-<text x="232" y="442" class="la" text-anchor="start">변경 목록 (ops)</text>
-<rect x="40" y="456" width="360" height="92" rx="14" fill="#f1f3f7" stroke="#8792a6" stroke-width="1.5"/>
-<text x="220" y="484" class="t" text-anchor="middle">applyOps, pruneSummary (코드)</text>
-<text x="220" y="504" class="s" text-anchor="middle">규칙에 맞지 않는 변경은 적용하지 않고 기록</text>
-<text x="220" y="522" class="s" text-anchor="middle">4,000자를 넘으면 오래된 항목부터 뺌</text>
-<text x="220" y="538" class="s" text-anchor="middle">coveredTurns를 접은 마지막 턴으로 올림</text>
-<rect x="480" y="66" width="440" height="520" rx="14" fill="#fdf6e0" stroke="#c9ad4f" stroke-width="1.5"/>
-<g transform="translate(500,80)" fill="none" stroke="#c9ad4f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2h13l7 7v22H7z"/><path d="M20 2v7h7"/><path d="M11 15h12M11 20h12M11 25h8"/></g>
-<text x="712" y="100" class="t" text-anchor="middle">chats/&lt;프로젝트 ID&gt;/&lt;세션 ID&gt;.json</text>
-<text x="712" y="118" class="s" text-anchor="middle">세션마다 하나, 새 대화는 빈 요약에서 시작</text>
-<rect x="496" y="132" width="408" height="376" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
-<text x="510" y="152.0" class="k">{</text>
-<text x="510" y="168.4" class="k">  "version": 2,</text>
-<text x="510" y="184.8" class="k">  "createdAt": 1761040000000,</text>
-<text x="510" y="201.2" class="k">  "updatedAt": 1761040300000,</text>
-<text x="510" y="217.6" class="k">  "messages": [ … ],</text>
-<text x="510" y="234.0" class="k">  "summary": {</text>
-<text x="510" y="250.39999999999998" class="k">    "coveredTurns": 2,</text>
-<text x="510" y="266.79999999999995" class="k">    "goal": "STRoute 논문의 실험 결과와 3.2절을 다듬는 중",</text>
-<text x="510" y="283.2" class="k">    "items": [</text>
-<text x="510" y="299.6" class="k">      { "id": "U1", "kind": "unresolved", "turn": 2,</text>
-<text x="510" y="316.0" class="k">        "status": "active",</text>
-<text x="510" y="332.4" class="k">        "text": "The user stopped the answer to …" },</text>
-<text x="510" y="348.79999999999995" class="k">      { "id": "P1", "kind": "preference", "turn": 1,</text>
-<text x="510" y="365.2" class="k">        "status": "active", "text": "답은 짧게" },</text>
-<text x="510" y="381.59999999999997" class="k">      { "id": "T1", "kind": "topic", "turn": 1,</text>
-<text x="510" y="398.0" class="k">        "status": "active",</text>
-<text x="510" y="414.4" class="k">        "text": "Table 1 결과(MPJPE) 해석" }</text>
-<text x="510" y="430.79999999999995" class="k">    ],</text>
-<text x="510" y="447.2" class="k">    "next": { "preference": 2, "topic": 2,</text>
-<text x="510" y="463.59999999999997" class="k">              "reference": 1, "unresolved": 2 }</text>
-<text x="510" y="480.0" class="k">  }</text>
-<text x="510" y="496.4" class="k">}</text>
-<text x="498" y="530" class="sl">• coveredTurns: 요약에 접힌 마지막 턴 번호</text>
-<text x="498" y="549" class="sl">• status: active, replaced (by에 새 항목), closed (note에 처리 내용)</text>
-<text x="498" y="568" class="sl">• next: 종류별 다음 번호, 한 번 쓴 id는 다시 쓰지 않음</text>
-<path d="M400 502 H476" class="g" marker-end="url(#ag)"/>
-<text x="438" y="492" class="lg" text-anchor="middle">저장</text>
-<path d="M480 378 H404" class="m" marker-end="url(#am)"/>
-<text x="442" y="368" class="lm" text-anchor="middle">지금 요약</text>
-<rect x="1000" y="66" width="400" height="344" rx="14" fill="#efebfb" stroke="#8c7ad8" stroke-width="1.5"/>
-<text x="1200" y="94" class="t" text-anchor="middle">모델이 받는 요약 (renderSummary)</text>
-<text x="1200" y="112" class="s" text-anchor="middle">같은 요약은 늘 같은 글자로 만들어 prompt cache를 지킴</text>
-<rect x="1014" y="124" width="372" height="272" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
-<text x="1026" y="143.0" class="k">&lt;session_summary&gt;</text>
-<text x="1026" y="158.2" class="k">Turns 1-2 of this conversation are folded</text>
-<text x="1026" y="173.4" class="k">into this summary; later turns follow word</text>
-<text x="1026" y="188.6" class="k">for word.</text>
-<text x="1026" y="203.8" class="k"></text>
-<text x="1026" y="219.0" class="k">Goal: STRoute 논문의 실험 결과와 3.2절을 다듬는 중</text>
-<text x="1026" y="234.2" class="k"></text>
-<text x="1026" y="249.39999999999998" class="k">Preferences (follow the active ones):</text>
-<text x="1026" y="264.6" class="k">- P1: 답은 짧게</text>
-<text x="1026" y="279.79999999999995" class="k"></text>
-<text x="1026" y="295.0" class="k">Requests not fully answered:</text>
-<text x="1026" y="310.2" class="k">- U1 (turn 2): The user stopped the answer</text>
-<text x="1026" y="325.4" class="k">  to "3.2절 첫 문단 고쳐줘".</text>
-<text x="1026" y="340.6" class="k"></text>
-<text x="1026" y="355.79999999999995" class="k">Topics covered:</text>
-<text x="1026" y="371.0" class="k">- T1 (turn 1): Table 1 결과(MPJPE) 해석</text>
-<text x="1026" y="386.2" class="k">&lt;/session_summary&gt;</text>
-<path d="M920 200 H996" class="m" marker-end="url(#am)"/>
-<text x="958" y="190" class="lm" text-anchor="middle">변환</text>
-<path d="M1200 410 V446" class="m" marker-end="url(#am)"/>
-<rect x="1000" y="450" width="400" height="136" rx="14" fill="#fdf0e6" stroke="#d88a52" stroke-width="1.5"/>
-<text x="1200" y="478" class="t" text-anchor="middle">요약을 읽는 곳</text>
-<text x="1018" y="504" class="sl">판단: 요약 + 요약 안 된 턴 원문 (최근 4턴 이상)</text>
-<text x="1018" y="524" class="sl">Reply, Refine, Answer: 요약 + 원문 (최근 2턴 이상)</text>
-<text x="1018" y="544" class="sl">Summary Module: 다음 접기 때 이 요약에 변경을 더함</text>
-<text x="1018" y="564" class="sl">요약이 늦거나 실패하면 요약 안 된 턴을 모두 원문으로</text>
-<text x="40" y="628" class="h">요약 항목</text>
-<rect x="40" y="644" width="256" height="166" rx="12" fill="#f6f7f9" stroke="#c4cad6" stroke-width="1.5"/>
-<text x="56" y="670" class="ch">Goal</text>
-<text x="56" y="688" class="ct">모델: set_goal</text>
-<line x1="56" y1="700" x2="280" y2="700" stroke="#dfe3ea"/>
-<text x="56" y="724" class="sl">논문 주제와 지금 하는 작업</text>
-<text x="56" y="746" class="sl">한두 문장, 최대 300자</text>
-<text x="56" y="768" class="sl">바뀌면 새로 씀</text>
-<rect x="316" y="644" width="256" height="166" rx="12" fill="#f6f7f9" stroke="#c4cad6" stroke-width="1.5"/>
-<text x="332" y="670" class="ch">P#  선호</text>
-<text x="332" y="688" class="ct">모델: add, replace</text>
-<line x1="332" y1="700" x2="556" y2="700" stroke="#dfe3ea"/>
-<text x="332" y="724" class="sl">답변 스타일, 계속 지킬 요구</text>
-<text x="332" y="746" class="sl">최대 300자</text>
-<text x="332" y="768" class="sl">바뀐 선호는 replaced로 표시</text>
-<rect x="592" y="644" width="256" height="166" rx="12" fill="#f6f7f9" stroke="#c4cad6" stroke-width="1.5"/>
-<text x="608" y="670" class="ch">U#  답하지 못한 요청</text>
-<text x="608" y="688" class="ct">코드가 추가, 모델은 close만</text>
-<line x1="608" y1="700" x2="832" y2="700" stroke="#dfe3ea"/>
-<text x="608" y="724" class="sl">중지, 실패, 길이 초과, 되물음</text>
-<text x="608" y="746" class="sl">최대 300자</text>
-<text x="608" y="768" class="sl">닫히면 요약에서 빠짐</text>
-<rect x="868" y="644" width="256" height="166" rx="12" fill="#f6f7f9" stroke="#c4cad6" stroke-width="1.5"/>
-<text x="884" y="670" class="ch">T#  다룬 내용</text>
-<text x="884" y="688" class="ct">모델: add</text>
-<line x1="884" y1="700" x2="1108" y2="700" stroke="#dfe3ea"/>
-<text x="884" y="724" class="sl">답한 턴마다 한 줄 (잡담 제외)</text>
-<text x="884" y="746" class="sl">최대 200자</text>
-<text x="884" y="768" class="sl">넘치면 오래된 것부터 뺌</text>
-<rect x="1144" y="644" width="256" height="166" rx="12" fill="#f6f7f9" stroke="#c4cad6" stroke-width="1.5"/>
-<text x="1160" y="670" class="ch">R#  사용자 자료</text>
-<text x="1160" y="688" class="ct">모델: add, replace</text>
-<line x1="1160" y1="700" x2="1384" y2="700" stroke="#dfe3ea"/>
-<text x="1160" y="724" class="sl">리뷰어 코멘트 등 논문 밖 자료</text>
-<text x="1160" y="746" class="sl">원문 그대로 최대 1,500자</text>
-<text x="1160" y="768" class="sl">대체되면 요약에서 빠짐</text>
-<text x="40" y="836" class="sl">4,000자를 넘으면 빼는 순서: 닫힌 U# → 대체된 P#, R# → 오래된 T# → 오래된 R#. 활성 P#와 열린 U#는 항상 남깁니다.</text>
-<path d="M40 872 H70" class="f" marker-end="url(#a)"/>
-<text x="78" y="876" class="sl">흐름</text>
-<path d="M170 872 H200" class="g" marker-end="url(#ag)"/>
-<text x="208" y="876" class="sl">요약 저장</text>
-<path d="M300 872 H330" class="m" marker-end="url(#am)"/>
-<text x="338" y="876" class="sl">요약 읽기</text>
+<rect width="1440" height="800" fill="#ffffff"/>
+<rect x="40" y="24" width="1360" height="720" rx="16" fill="#fbfcfe" stroke="#c4cad6" stroke-width="1.5"/>
+<g transform="translate(64,44)" fill="none" stroke="#5d6678" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2h13l7 7v22H7z"/><path d="M20 2v7h7"/><path d="M11 15h12M11 20h12M11 25h8"/></g>
+<text x="104" y="64" class="title">세션 요약 (session summary)</text>
+<text x="104" y="86" class="sub">대화가 길어지면 오래된 턴을 아래 항목으로 줄여, 판단과 모든 모듈에 최근 턴 원문과 함께 보냅니다.</text>
+<text x="1376" y="64" class="tag" text-anchor="end">세션 파일의 summary 필드</text>
+<text x="1376" y="84" class="tagk" text-anchor="end">chats/&lt;프로젝트 ID&gt;/&lt;세션 ID&gt;.json</text>
+<text x="76" y="124" class="colh">항목</text>
+<text x="330" y="124" class="colh">담는 것과 규칙</text>
+<text x="900" y="124" class="colh">모델이 받는 모양 (예시)</text>
+<rect x="56" y="134" width="1328" height="44" rx="10" fill="#f1f3f7" stroke="#d3d8e1" stroke-width="1.2"/>
+<text x="76" y="161" class="nm2">요약 범위</text>
+<text x="160" y="161" class="mono" fill="#6b7385">coveredTurns</text>
+<text x="330" y="161" class="desc">턴 1부터 이 번호까지는 원문 대신 요약으로 읽고, 그 뒤 턴은 원문으로 읽습니다.</text>
+<text x="900" y="161" class="mono">Turns 1-4 of this conversation are folded …</text>
+<rect x="56" y="188" width="1328" height="100" rx="12" fill="#eef4fc" stroke="#dde2ea" stroke-width="1.2"/>
+<rect x="56" y="188" width="6" height="100" rx="3" fill="#6f9bd1"/>
+<text x="76" y="222" class="nm" fill="#2b3240">Goal</text>
+<text x="76" y="244" class="kr">목표</text>
+<rect x="76" y="254" width="73" height="20" rx="10" fill="#ffffff" stroke="#6f9bd1" stroke-width="1"/>
+<text x="85" y="268" class="who" fill="#6f9bd1">모델이 씀</text>
+<text x="330" y="220" class="desc">논문의 주제와 지금 하고자 하는 작업</text>
+<text x="330" y="242" class="desc">한두 문장, 최대 300자</text>
+<text x="330" y="264" class="desc">작업이 바뀌었을 때만 새로 씁니다</text>
+<rect x="880" y="200" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
+<text x="896" y="222" class="mono">Goal: STRoute 논문의 실험 결과와 3.2절을 다듬는 중</text>
+<rect x="56" y="298" width="1328" height="100" rx="12" fill="#f3f0fc" stroke="#dde2ea" stroke-width="1.2"/>
+<rect x="56" y="298" width="6" height="100" rx="3" fill="#8c7ad8"/>
+<text x="76" y="332" class="nm" fill="#2b3240">Preference</text>
+<text x="76" y="354" class="kr">선호  P1, P2, …</text>
+<rect x="76" y="364" width="73" height="20" rx="10" fill="#ffffff" stroke="#8c7ad8" stroke-width="1"/>
+<text x="85" y="378" class="who" fill="#8c7ad8">모델이 씀</text>
+<text x="330" y="330" class="desc">사용자가 원하는 답변 스타일, 답변을 만들 때 계속 지킬 규칙</text>
+<text x="330" y="352" class="desc">사용자가 명시적으로 지정했을 때만 추가 (말투나 반응으로 추측 안 함)</text>
+<text x="330" y="374" class="desc">사용자가 바꾸면 새 항목이 대체하고, 이전 항목은 대체됨으로 남김</text>
+<rect x="880" y="310" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
+<text x="896" y="332" class="mono">Preferences (follow the active ones):</text>
+<text x="896" y="351" class="mono">- P1 (replaced by P2): 답은 짧게</text>
+<text x="896" y="370" class="mono">- P2: 답은 다섯 문장 이내로</text>
+<rect x="56" y="408" width="1328" height="100" rx="12" fill="#fdf3ea" stroke="#dde2ea" stroke-width="1.2"/>
+<rect x="56" y="408" width="6" height="100" rx="3" fill="#d88a52"/>
+<text x="76" y="442" class="nm" fill="#2b3240">Unresolved</text>
+<text x="76" y="464" class="kr">답하지 못한 요청  U1, …</text>
+<rect x="76" y="474" width="172" height="20" rx="10" fill="#ffffff" stroke="#d88a52" stroke-width="1"/>
+<text x="85" y="488" class="who" fill="#d88a52">코드가 씀, 모델은 닫기만</text>
+<text x="330" y="440" class="desc">중지, 실패, 길이 초과로 끝난 답과 LOGICA가 되물은 질문</text>
+<text x="330" y="462" class="desc">모델이 아니라 코드가 턴 상태를 보고 추가합니다</text>
+<text x="330" y="484" class="desc">나중 턴에서 처리되면 닫히고 요약에서 빠집니다</text>
+<rect x="880" y="420" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
+<text x="896" y="442" class="mono">Requests not fully answered:</text>
+<text x="896" y="461" class="mono">- U1 (turn 2): The user stopped the answer</text>
+<text x="896" y="480" class="mono">  to "3.2절 첫 문단 고쳐줘".</text>
+<rect x="56" y="518" width="1328" height="100" rx="12" fill="#ecf6f1" stroke="#dde2ea" stroke-width="1.2"/>
+<rect x="56" y="518" width="6" height="100" rx="3" fill="#4ea37f"/>
+<text x="76" y="552" class="nm" fill="#2b3240">Topic</text>
+<text x="76" y="574" class="kr">다룬 내용  T1, T2, …</text>
+<rect x="76" y="584" width="73" height="20" rx="10" fill="#ffffff" stroke="#4ea37f" stroke-width="1"/>
+<text x="85" y="598" class="who" fill="#4ea37f">모델이 씀</text>
+<text x="330" y="550" class="desc">답한 턴마다 무엇을 다뤘는지 한 줄 (섹션, 그림, 표, 질문)</text>
+<text x="330" y="572" class="desc">잡담은 넣지 않음, 항목마다 최대 200자</text>
+<text x="330" y="594" class="desc">같은 내용을 다시 묻거나 이어 갈 때 참고합니다</text>
+<rect x="880" y="530" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
+<text x="896" y="552" class="mono">Topics covered:</text>
+<text x="896" y="571" class="mono">- T1 (turn 1): Table 1 결과(MPJPE) 해석</text>
+<text x="896" y="590" class="mono">- T2 (turn 3): 3.2절 불확실성 추정 설명</text>
+<rect x="56" y="628" width="1328" height="100" rx="12" fill="#fcf7e6" stroke="#dde2ea" stroke-width="1.2"/>
+<rect x="56" y="628" width="6" height="100" rx="3" fill="#c9ad4f"/>
+<text x="76" y="662" class="nm" fill="#2b3240">Reference</text>
+<text x="76" y="684" class="kr">사용자 자료  R1, …</text>
+<rect x="76" y="694" width="73" height="20" rx="10" fill="#ffffff" stroke="#c9ad4f" stroke-width="1"/>
+<text x="85" y="708" class="who" fill="#c9ad4f">모델이 씀</text>
+<text x="330" y="660" class="desc">사용자가 대화에 준 논문 밖 자료 (리뷰어 코멘트, 다른 논문, 데이터)</text>
+<text x="330" y="682" class="desc">원문 그대로 최대 1,500자, 논문 자체의 글은 넣지 않음</text>
+<text x="330" y="704" class="desc">사용자가 바꾸면 새 항목이 대체합니다</text>
+<rect x="880" y="640" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
+<text x="896" y="662" class="mono">Material from the user:</text>
+<text x="896" y="681" class="mono">- R1 (turn 4, pasted): Reviewer 2: The</text>
+<text x="896" y="700" class="mono">  ablation in Table 2 lacks …</text>
+<text x="56" y="776" class="foot">요약 전체는 최대 4,000자입니다. 넘치면 닫힌 U#, 대체된 항목, 오래된 T#, 오래된 R# 순으로 빼고, 활성 P#와 열린 U#는 항상 남깁니다.</text>
 </svg>
