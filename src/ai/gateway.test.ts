@@ -141,10 +141,45 @@ describe("LLM Gateway", () => {
     };
     scripts.anthropic = reply("anthropic", "ok");
     const shown: string[] = [];
-    await expect(callModel("answer", request, { control: control(), onText: (t) => shown.push(t) })).rejects.toMatchObject({
+    await expect(callModel("answer", request, { control: control(), onText: (t) => { shown.push(t); return true; } })).rejects.toMatchObject({
       kind: "stream_interrupted",
     });
     expect(shown).toEqual(["Part"]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it.each(["judge", "refine", "summary", "sections"] as const)("falls back after internal %s text fails without a display callback", async (task) => {
+    const { primary, fallback } = (await import("./models/modelConfig")).CHAT_MODELS[task];
+    scripts[primary.provider] = async (_req, handlers) => {
+      handlers?.onDelta?.("internal", "internal");
+      throw new AIError("stream_interrupted", "cut off", { provider: primary.provider });
+    };
+    scripts[fallback.provider] = reply(fallback.provider, "recovered");
+    const result = await callModel(task, request, { control: control() });
+    expect(result.response.text).toBe("recovered");
+    expect(result.choice).toEqual(fallback);
+    expect(calls.map((c) => c.provider)).toEqual([primary.provider, fallback.provider]);
+  });
+
+  it("falls back when the output callback reports that text was withheld", async () => {
+    scripts.openai = async (_req, handlers) => {
+      handlers?.onDelta?.("[[need", "[[need");
+      throw new AIError("stream_interrupted", "cut off", { provider: "openai" });
+    };
+    scripts.anthropic = reply("anthropic", "recovered");
+    const result = await callModel("answer", request, { control: control(), onText: () => false });
+    expect(result.response.text).toBe("recovered");
+    expect(calls).toHaveLength(2);
+  });
+
+  it("remembers displayed output even when a later chunk is withheld", async () => {
+    scripts.openai = async (_req, handlers) => {
+      handlers?.onDelta?.("Part", "Part");
+      handlers?.onDelta?.(" two", "Part two");
+      throw new AIError("stream_interrupted", "cut off", { provider: "openai" });
+    };
+    scripts.anthropic = reply("anthropic", "recovered");
+    await expect(callModel("answer", request, { control: control(), onText: (text) => text === "Part" })).rejects.toMatchObject({ kind: "stream_interrupted" });
     expect(calls).toHaveLength(1);
   });
 

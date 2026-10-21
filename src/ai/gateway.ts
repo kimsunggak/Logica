@@ -26,8 +26,8 @@ export interface GatewayOptions {
   control: RunControl;
   /** Report the attempts under this span. */
   trace?: { traceId: string; parent: Span; input?: Record<string, unknown> };
-  /** Streamed text so far. Once text has been shown, a failure is not retried with the fallback provider. */
-  onText?: (full: string) => void;
+  /** Return true only when text reached the screen; withheld text does not block fallback. */
+  onText?: (full: string) => boolean;
   /** Called before each attempt with the model it uses. */
   onAttempt?: (choice: ModelChoice, fallback: boolean) => void;
 }
@@ -130,8 +130,8 @@ export async function callModel(task: ChatTask, request: ChatRequest, options: G
   if (options.control.stopped) throw cancelledError(primary);
   let shown = false;
   const onText = (full: string) => {
-    if (full) shown = true;
-    options.onText?.(full);
+    const displayed = options.onText?.(full) === true;
+    if (full && displayed) shown = true;
   };
   const full = (choice: ModelChoice, id: string): AIRequest => ({
     ...request,

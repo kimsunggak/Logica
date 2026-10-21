@@ -179,7 +179,7 @@ export function askedForSections(text: string): string[] | null {
  * The answer's text for the screen, held back while it may still be a request
  * for sections: such a request is never shown.
  */
-function holdBack(onText?: (full: string) => void) {
+function holdBack(onText: (full: string) => boolean) {
   let open = false;
   let last = "";
   return {
@@ -187,16 +187,21 @@ function holdBack(onText?: (full: string) => void) {
       last = full;
       if (!open) {
         const head = full.trimStart();
-        if (!head || (head.length < NEED_SECTIONS.length ? NEED_SECTIONS.startsWith(head) : head.startsWith(NEED_SECTIONS))) return;
+        if (!head || (head.length < NEED_SECTIONS.length ? NEED_SECTIONS.startsWith(head) : head.startsWith(NEED_SECTIONS))) return false;
         open = true;
       }
-      onText?.(full);
+      return onText(full);
     },
     /** Show what was held back: it was an answer after all. */
     release() {
       if (open || !last) return;
       open = true;
-      onText?.(last);
+      onText(last);
+    },
+    /** A fallback attempt starts with its own stream, without the failed attempt's buffer. */
+    reset() {
+      open = false;
+      last = "";
     },
   };
 }
@@ -213,7 +218,12 @@ function finished(result: GatewayResult) {
 export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<TurnResult> {
   const call = deps.call ?? callModel;
   const { hooks } = deps;
-  const options = (parent: Span, reads: Conversation, onText?: (full: string) => void): GatewayOptions => ({
+  const showText = (full: string): boolean => {
+    if (!full || !hooks.onText) return false;
+    hooks.onText(full);
+    return true;
+  };
+  const options = (parent: Span, reads: Conversation, onText?: GatewayOptions["onText"]): GatewayOptions => ({
     control: deps.control,
     trace: { traceId: turn.id, parent, input: reads.info },
     onAttempt: hooks.onModel,
@@ -269,7 +279,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
       "reply",
       "runReplyModule",
       () => ({ question: turn.instruction, ...moduleReads.info }),
-      (span) => call("reply", { ...ask, id: `${turn.id}-reply` }, options(span, moduleReads, hooks.onText)),
+      (span) => call("reply", { ...ask, id: `${turn.id}-reply` }, options(span, moduleReads, showText)),
       (result) => ({ text: result.response.text, finishReason: result.response.finishReason, model: result.choice.model }),
     );
     return { route: "reply", outcome: "reply", reason: judged.reason, content: replied.response.text.trim(), ...finished(replied) };
@@ -318,8 +328,14 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
     async (span) => {
       const request = { ...ask, id: turn.id, refinedQuestion: refined };
       const mayAsk = scope.kind === "sections";
-      const shown = holdBack(hooks.onText);
-      const first = await call("answer", { ...request, ...readPaper(span, "answer"), ...(mayAsk ? { mayAskForSections: true } : {}) }, options(span, moduleReads, mayAsk ? shown.onText : hooks.onText));
+      const shown = holdBack(showText);
+      const first = await call("answer", { ...request, ...readPaper(span, "answer"), ...(mayAsk ? { mayAskForSections: true } : {}) }, {
+        ...options(span, moduleReads, mayAsk ? shown.onText : showText),
+        onAttempt: (choice, fallback) => {
+          shown.reset();
+          hooks.onModel?.(choice, fallback);
+        },
+      });
       const asked = mayAsk ? askedForSections(first.response.text) : null;
       if (!asked) {
         shown.release();
@@ -329,7 +345,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
       requested = [...(requested ?? []), ...asked];
       scope = resolveScope(paper, requested);
       step(turn.id, span, "answer", "askForSections", asked, () => describeScope(scope));
-      return call("answer", { ...request, id: `${turn.id}-more`, ...readPaper(span, "answer") }, options(span, moduleReads, hooks.onText));
+      return call("answer", { ...request, id: `${turn.id}-more`, ...readPaper(span, "answer") }, options(span, moduleReads, showText));
     },
     (result) => ({ text: result.response.text, finishReason: result.response.finishReason, model: result.choice.model }),
   );
