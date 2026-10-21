@@ -17,7 +17,7 @@ import { CHAT_MODELS } from "../ai/models/modelConfig";
 import { aiService, newRequestId } from "../ai/service";
 import { lineOf, locateEdit, type ProposedEdit } from "../ai/agent/edits";
 import { deleteSession, listSessions, loadSession, newSessionId, saveSession, SESSION_VERSION, type SessionSummary } from "./chatHistory";
-import { editorLocation, runChatTurn, type Outcome, type Paper, type Route, type Stage, type Turn } from "./orchestrator";
+import { runChatTurn, type Outcome, type Paper, type Route, type Stage, type Turn } from "./orchestrator";
 import { emptyReport, loadReport, saveReport, summariesFor, unitsToSummarize, withSummaries, type PaperReport } from "./paper/report";
 import { summarizeSections } from "./paper/sectionSummarizer";
 import { FRONT, paperUnits } from "./paper/sections";
@@ -27,7 +27,7 @@ import { turnsOf } from "./session/turns";
 import { endSpan, failSpan, startSpan, step, type Span } from "../debug/trace";
 import type { ProjectFile, ProviderId } from "../ai/types";
 import { editorSession } from "../editor/editorSession";
-import { buildPaperDocument, outlineText, sectionAt, sectionTrail } from "../latex/parser/documentModel";
+import { buildPaperDocument, outlineText } from "../latex/parser/documentModel";
 import { currentTexts, navigateTo, openFile } from "../project/projectActions";
 import { notify, useProject } from "../project/projectStore";
 import { t } from "../i18n";
@@ -40,8 +40,6 @@ export interface ChatMessage {
   /** The model that wrote the answer (the one running while it streams). */
   provider?: ProviderId;
   model?: string;
-  /** Short description of the editor context sent with the message. */
-  contextLabel?: string;
   /** The user instruction an assistant message answers. */
   instruction?: string;
   /** Outcome of each proposed edit block, by its index in the answer. */
@@ -95,15 +93,12 @@ function paperNow() {
 
 /**
  * The paper as this turn reads it. The whole paper is the main file and the
- * files it includes, in reading order, as long as they fit the budget; a
- * file open in the editor that is not part of the paper goes first. Its
+ * files it includes, in reading order, as long as they fit the budget. Its
  * section units come with the summaries the paper report has for them.
  */
-function paperOf(activePath: string | undefined, report: PaperReport): Paper {
+function paperOf(report: PaperReport): Paper {
   const { texts, tex, doc } = paperNow();
   const paths = doc.files.filter((f) => f.included && !f.missing).map((f) => f.path);
-  const open = activePath && texts.has(activePath) && !paths.includes(activePath) ? { path: activePath, text: texts.get(activePath)! } : undefined;
-  if (open) paths.unshift(open.path);
   const files: ProjectFile[] = [];
   const omitted: string[] = [];
   let used = 0;
@@ -118,7 +113,7 @@ function paperOf(activePath: string | undefined, report: PaperReport): Paper {
     used += text.length;
   }
   const { units, macros } = paperUnits(doc, tex);
-  return { files, omitted, budget: PAPER_BUDGET, units, summaries: summariesFor(units, report), macros, ...(open ? { openFile: open } : {}) };
+  return { files, omitted, budget: PAPER_BUDGET, units, summaries: summariesFor(units, report), macros };
 }
 
 function updateMessage(id: string, patch: Partial<ChatMessage>) {
@@ -131,30 +126,18 @@ let running: RunControl | null = null;
 export async function sendChatMessage(text: string): Promise<void> {
   const instruction = text.trim();
   if (!instruction || useChat.getState().runningId) return;
-  const { doc } = useProject.getState();
-  // Only the open file goes with the question; the selection and the cursor
-  // position often have nothing to do with what is asked.
-  const snapshot = editorSession.selection();
-
-  let contextLabel = t("chat.noFile");
-  if (snapshot) {
-    const line = snapshot.docText.slice(0, snapshot.from).split("\n").length;
-    const section = doc ? sectionAt(doc, snapshot.path, line) : null;
-    contextLabel = section ? `${snapshot.path} › ${section.order >= 0 && doc ? sectionTrail(doc, section) : section.title}` : snapshot.path;
-  }
-
+  // Only the question goes; the editor's open file, selection and cursor
+  // often have nothing to do with what is asked.
   const requestId = newRequestId();
   const turn: Turn = {
     id: requestId,
     instruction,
-    context: snapshot ? { currentFile: snapshot.path } : {},
     turns: turnsOf(useChat.getState().messages),
     summary: useChat.getState().summary,
-    activePath: snapshot?.path,
   };
 
   const first = CHAT_MODELS.judge.primary;
-  const userMessage: ChatMessage = { id: `${requestId}-u`, role: "user", content: instruction, status: "done", contextLabel };
+  const userMessage: ChatMessage = { id: `${requestId}-u`, role: "user", content: instruction, status: "done" };
   const assistantMessage: ChatMessage = {
     id: requestId,
     role: "assistant",
@@ -171,7 +154,6 @@ export async function sendChatMessage(text: string): Promise<void> {
   const root = startSpan(requestId, null, "pipeline", "sendChatMessage", () => ({ question: instruction, models: CHAT_MODELS }));
   step(requestId, root, "user", "receiveUserInput", instruction, () => ({
     question: instruction,
-    ...editorLocation(turn),
     session_turns: turn.turns.length,
     summary_covered_turns: turn.summary?.coveredTurns ?? 0,
   }));
@@ -184,7 +166,7 @@ export async function sendChatMessage(text: string): Promise<void> {
     const result = await runChatTurn(turn, {
       root,
       control,
-      paper: () => paperOf(turn.activePath, report),
+      paper: () => paperOf(report),
       hooks: {
         onStage: (stage) => updateMessage(requestId, { stage }),
         onRefined: (refined) => updateMessage(requestId, { refined }),

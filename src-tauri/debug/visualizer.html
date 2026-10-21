@@ -591,7 +591,7 @@ function renderGraph(t) {
   const bottom = (m) => at[m][1] + at[m][2];
   const oBottom = bottom("orchestrator"), bTop = top("answer"), bBottom = bottom("answer"), fTop = top("final");
   const edges = [
-    edgeSvg(cls("user", "orchestrator"), `M${mid("user")} ${bottom("user")} V${top("orchestrator") - 2}`, "question + open file", mid("user") + 10, (bottom("user") + top("orchestrator")) / 2 + 4),
+    edgeSvg(cls("user", "orchestrator"), `M${mid("user")} ${bottom("user")} V${top("orchestrator") - 2}`, "question", mid("user") + 10, (bottom("user") + top("orchestrator")) / 2 + 4),
     edgeSvg(cls("orchestrator", "reply"), `M${mid("orchestrator") - 70} ${oBottom} C${mid("orchestrator") - 70} ${oBottom + 40}, ${mid("reply")} ${bTop - 44}, ${mid("reply")} ${bTop - 2}`, "A reply_directly", mid("reply") + 20, oBottom + 34),
     edgeSvg(cls("orchestrator", "answer"), `M${mid("orchestrator")} ${oBottom} V${bTop - 2}`, "B answer_question", mid("answer") + 10, oBottom + 44),
     edgeSvg(cls("orchestrator", "refine"), `M${mid("orchestrator") + 70} ${oBottom} C${mid("orchestrator") + 70} ${oBottom + 40}, ${mid("refine")} ${bTop - 44}, ${mid("refine")} ${bTop - 2}`, "C refine_question", mid("refine") - 70, oBottom + 34),

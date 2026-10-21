@@ -237,17 +237,16 @@ function simulateSectionSummaries(last: string): DemoReply {
   return { tool: { name: "write_section_summaries", args: { summaries } } };
 }
 
-/** Refine Module: restate the question with the paper's title and the editor location, or ask back. */
+/** Refine Module: restate the question with the paper's title, or ask back. */
 function simulateRefine(all: string, last: string): string {
   const question = (between(last, "user_message") ?? "").trim();
   if (/^(이거|그거|this|that)\s*\??$/i.test(question)) {
     return JSON.stringify({ clarify: hangul(question) ? "어느 부분을 말씀하시는 건가요? 섹션이나 문장을 알려 주세요." : "Which part do you mean? Name the section or quote the sentence." });
   }
   const title = /\\title\{([^}]*)\}/.exec(all)?.[1]?.trim() ?? "this paper";
-  const section = between(last, "current_section");
   const refined = hangul(question)
-    ? `논문 "${title}"${section ? `의 ${section}` : ""} 기준: ${question} (제안한 방법의 핵심 아이디어, 푸는 문제, 기존 방법과의 차이를 중심으로)`
-    : `In the paper "${title}"${section ? `, ${section}` : ""}: ${question} (focus on the proposed method's key idea, the problem it solves, and how it differs from prior work)`;
+    ? `논문 "${title}" 기준: ${question} (제안한 방법의 핵심 아이디어, 푸는 문제, 기존 방법과의 차이를 중심으로)`
+    : `In the paper "${title}": ${question} (focus on the proposed method's key idea, the problem it solves, and how it differs from prior work)`;
   return JSON.stringify({ refined_question: refined });
 }
 

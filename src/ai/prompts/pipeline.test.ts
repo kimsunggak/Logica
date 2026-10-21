@@ -28,12 +28,13 @@ function commonPrefix(a: string, b: string): string {
 }
 
 describe("judge prompt", () => {
-  it("sends the message, location and recent conversation, but not the paper", () => {
+  it("sends the message and recent conversation, but not the paper or the editor's state", () => {
     const prompt = buildPrompt({ ...turn, task: "judge" });
     expect(prompt.messages).toHaveLength(1);
     const user = prompt.messages[0].content;
-    expect(user).toContain("<current_file>\nsections/exp.tex\n</current_file>");
-    // The cursor often stays where the user last typed; its section and paragraph are not sent.
+    // The open file, the cursor's section and paragraph often have nothing to do with the question.
+    expect(user).not.toContain("<editor_location>");
+    expect(user).not.toContain("<current_file>");
     expect(user).not.toContain("<current_section>");
     expect(user).not.toContain("<cursor_paragraph>");
     expect(user).toContain("<recent_conversation>\nuser: Hi\nassistant: Hello\n</recent_conversation>");
@@ -45,9 +46,10 @@ describe("judge prompt", () => {
     expect(prompt.system).toContain("never write the answer yourself");
   });
 
-  it("puts what changes least first: summary, conversation, open file, message", () => {
-    const user = buildPrompt({ ...turn, task: "judge", sessionSummary: "Goal: tighten Section 4" }).messages[0].content;
-    const order = ["<session_summary>", "<recent_conversation>", "<editor_location>", "<user_message>"].map((tag) => user.indexOf(tag));
+  it("puts what changes least first: paper map, summary, conversation, message", () => {
+    const paperMap = [{ key: "1", title: "Introduction", depth: 0, words: 40, labels: [], summary: "Why." }];
+    const user = buildPrompt({ ...turn, task: "judge", paperMap, sessionSummary: "Goal: tighten Section 4" }).messages[0].content;
+    const order = ["<paper_map", "<session_summary>", "<recent_conversation>", "<user_message>"].map((tag) => user.indexOf(tag));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(user).toContain("<session_summary>\nGoal: tighten Section 4\n</session_summary>");
@@ -100,9 +102,10 @@ describe("refine and answer prompts", () => {
     expect(first.startsWith('<paper>\n<file path="main.tex">\n\\input{sections/exp}\n</file>\n<file path="sections/exp.tex">')).toBe(true);
     expect(first).toContain("<omitted_files>\nappendix.tex\n</omitted_files>\n</paper>");
     const last = refine.messages.at(-1)!.content;
+    expect(last).not.toContain("<editor_location>");
     expect(last).not.toContain("<current_section>");
     expect(last).not.toContain("<cursor_paragraph>");
-    expect(last.indexOf("<editor_location>")).toBeLessThan(last.indexOf("<user_message>"));
+    expect(last.startsWith("<user_message>")).toBe(true);
     expect(last.indexOf("<user_message>")).toBeLessThan(last.indexOf("<task>"));
     expect(last).toContain('{"refined_question":"..."} or {"clarify":"..."}');
     expect(refine.messages.map((m) => m.role)).toEqual(["user", "assistant", "user"]);

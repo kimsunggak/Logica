@@ -29,7 +29,7 @@ import { callModel, type GatewayOptions, type GatewayResult, type RunControl } f
 import type { ModelChoice } from "../ai/models/modelConfig";
 import { NEED_SECTIONS } from "../ai/prompts/answer";
 import { ANSWER_QUESTION, CHAT_TOOLS, REFINE_QUESTION, REPLY_DIRECTLY } from "../ai/tools/chatTools";
-import type { AIContext, AIMessage, AIResponse, AIUsage, FinishReason } from "../ai/types";
+import type { AIMessage, AIResponse, AIUsage, FinishReason } from "../ai/types";
 import { step, traced, type Span } from "../debug/trace";
 import { describeScope, paperMap, paperRequest, resolveScope, type Paper, type Scope } from "./paper/scope";
 import { renderSummary, type ConversationSummary } from "./session/summary";
@@ -41,16 +41,14 @@ export type Route = "reply" | "answer" | "refine";
 export type Outcome = "reply" | "answer" | "clarify";
 export type Stage = "judge" | "reply" | "refine" | "answer";
 
+/** One question to answer. The editor's state (open file, selection, cursor) is not part of it. */
 export interface Turn {
   id: string;
   instruction: string;
-  /** The open file (`currentFile`) only. */
-  context: AIContext;
   /** Every earlier turn of the session, finished or not. */
   turns: TurnRecord[];
   /** The session summary of the older turns, when there is one. */
   summary?: ConversationSummary | null;
-  activePath?: string;
 }
 
 export type { Paper } from "./paper/scope";
@@ -124,11 +122,6 @@ function routeOf(response: AIResponse): Decision {
   // an unknown tool or no reply at all as a question to refine, as when unsure.
   if (!call && response.text.trim()) return { route: "reply" };
   return { route: "refine", reason };
-}
-
-/** Where the user is, as handed to the orchestrator: the open file. */
-export function editorLocation(turn: Turn) {
-  return { file: turn.context.currentFile ?? null };
 }
 
 /** What a call reads of the conversation: the summary text and the turns word for word. */
@@ -228,14 +221,14 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
   });
   const judgeReads = conversationFor(turn, "judge");
   const moduleReads = conversationFor(turn, "module");
-  const ask = { instruction: turn.instruction, context: turn.context, sessionSummary: moduleReads.sessionSummary, history: moduleReads.history };
+  const ask = { instruction: turn.instruction, context: {}, sessionSummary: moduleReads.sessionSummary, history: moduleReads.history };
   const paper = deps.paper();
   const map = paperMap(paper);
   // The sections chosen so far (judge, then Refine Module), and what they make of the paper.
   let requested: string[] | undefined;
   let scope: Scope = resolveScope(paper, undefined);
   const readPaper = (span: Span, module: "refine" | "answer") => {
-    step(turn.id, span, module, "paperView", { sections: requested ?? null, budget_chars: paper.budget, active_file: turn.activePath ?? null }, () => paperRead(paper, scope));
+    step(turn.id, span, module, "paperView", { sections: requested ?? null, budget_chars: paper.budget }, () => paperRead(paper, scope));
     return paperRequest(paper, scope);
   };
 
@@ -248,7 +241,6 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
     "runOrchestrator",
     () => ({
       question: turn.instruction,
-      ...editorLocation(turn),
       session_turns: turn.turns.length,
       summary_covered_turns: turn.summary?.coveredTurns ?? 0,
       paper_map: map ? { sections: map.filter((e) => !e.always).length, summarized: map.filter((e) => e.summary).length } : null,
@@ -294,7 +286,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
       deps.root,
       "refine",
       "runRefineModule",
-      () => ({ question: turn.instruction, ...editorLocation(turn), ...moduleReads.info }),
+      () => ({ question: turn.instruction, ...moduleReads.info }),
       async (span): Promise<{ parsed: RefineResult; result: GatewayResult }> => {
         const result = await call("refine", { ...ask, id: `${turn.id}-refine`, ...readPaper(span, "refine") }, options(span, moduleReads));
         const parsed = parseRefine(result.response.text, turn.instruction);

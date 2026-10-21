@@ -41,9 +41,7 @@ function gateway(replies: Partial<Record<ChatTask, Reply>>) {
 const turn: Turn = {
   id: "t1",
   instruction: "이 논문 핵심이 뭐야?",
-  context: { currentFile: "main.tex" },
   turns: [{ index: 1, question: "hi", answer: "hello", status: "done" }],
-  activePath: "main.tex",
 };
 const history = [
   { role: "user", content: "hi" },

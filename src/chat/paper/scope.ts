@@ -25,8 +25,6 @@ export interface Paper {
   units?: SectionUnit[];
   summaries?: Map<string, string>;
   macros?: string;
-  /** A file open in the editor that is not part of the paper. */
-  openFile?: ProjectFile;
 }
 
 export interface Scope {
@@ -89,7 +87,7 @@ export function resolveScope(paper: Paper, requested: string[] | undefined): Sco
     for (const u of units) if (u.parentKey === key) want(u.key);
   }
   for (const u of units) if (!summaries.has(u.key)) want(u.key);
-  let chars = paper.openFile?.text.length ?? 0;
+  let chars = 0;
   const fits = new Set<string>();
   for (const key of order) {
     const size = byKey.get(key)!.chars;
@@ -124,7 +122,7 @@ export function paperRequest(paper: Paper, scope: Scope): { projectFiles: Projec
     const summary = paper.summaries?.get(u.key);
     return summary ? { ...base, content: "summary", summary } : { ...base, content: "omitted" };
   });
-  return { paperView: { sections, ...(paper.macros ? { macros: paper.macros } : {}), ...(paper.openFile ? { openFile: paper.openFile } : {}) } };
+  return { paperView: { sections, ...(paper.macros ? { macros: paper.macros } : {}) } };
 }
 
 /** What the debugger shows of a scope. */

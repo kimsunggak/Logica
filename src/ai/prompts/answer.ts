@@ -7,7 +7,7 @@
 import type { AIRequest } from "../types";
 import { tag } from "./context";
 import type { PromptPayload } from "./index";
-import { editorBlocks, paperPrompt } from "./paper";
+import { paperPrompt } from "./paper";
 
 /** How the answer asks for sections it has only as summaries. */
 export const NEED_SECTIONS = "[[need_sections:";
@@ -38,7 +38,6 @@ const ASK_RULE = `If the answer needs the text of sections you have only as summ
 export function buildAnswerPrompt(request: AIRequest): PromptPayload {
   const task = [...ANSWER_TASK, ...(request.paperView ? [SECTIONS_RULE] : []), ...(request.paperView && request.mayAskForSections ? [ASK_RULE] : [])];
   return paperPrompt(request, [
-    ...editorBlocks(request),
     tag("user_message", request.instruction),
     request.refinedQuestion ? tag("refined_question", request.refinedQuestion) : "",
     tag("task", task.join("\n")),

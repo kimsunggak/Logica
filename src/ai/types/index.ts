@@ -106,8 +106,6 @@ export interface PaperView {
   sections: ViewSection[];
   /** Macro definitions of the preamble. */
   macros?: string;
-  /** A file open in the editor that is not part of the paper. */
-  openFile?: ProjectFile;
 }
 
 /** A section handed to the Section Summary Module. */

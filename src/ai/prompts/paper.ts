@@ -4,15 +4,15 @@
  * Both requests start with the same system prompt, the paper (L0), the
  * session summary (L1) and the recent turns (L2), so the provider's prompt
  * cache can reuse that prefix for the second call (and for the next question
- * while the paper is unchanged). Only the last message differs: the editor
- * location, the question and the module's own task (L3).
+ * while the paper is unchanged). Only the last message differs: the
+ * question and the module's own task (L3).
  *
  * The paper is the whole paper file by file until the paper report has
  * summaries of it; then it is the paper section by section, the sections the
  * judge chose word for word and the others as their summaries.
  */
 import type { AIRequest, PaperView } from "../types";
-import { formatContext, tag } from "./context";
+import { tag } from "./context";
 import type { PromptPayload } from "./index";
 import { attr } from "./sectionSummary";
 import { SESSION_RULES, summaryBlock } from "./session";
@@ -26,7 +26,7 @@ const SECTIONS_RULES = [
 ].join("\n");
 
 const PAPER_RULES = [
-  "The last message holds the user's location in the editor, their message and your task. Follow <task>.",
+  "The last message holds the user's message and your task. Follow <task>.",
   SESSION_RULES,
   "Follow the user's preferences in <session_summary>.",
 ].join("\n");
@@ -40,7 +40,6 @@ function formatFiles(request: AIRequest): string {
 function formatSections(view: PaperView): string {
   const blocks: string[] = [];
   if (view.macros) blocks.push(tag("macros", view.macros));
-  if (view.openFile) blocks.push(`<file path="${view.openFile.path}">\n${view.openFile.text}\n</file>`);
   for (const s of view.sections) {
     const head = `<section key="${attr(s.key)}" title="${attr(s.title)}" content="${s.content}">`;
     if (s.content === "full") {
@@ -53,16 +52,6 @@ function formatSections(view: PaperView): string {
     }
   }
   return `<paper>\n${blocks.join("\n")}\n</paper>`;
-}
-
-/**
- * Where the user is: the open file. The selection and the cursor's paragraph
- * and section are left out, since they often stay where the user last
- * worked, unrelated to the question.
- */
-export function editorBlocks(request: AIRequest): string[] {
-  const location = formatContext(request.context, ["currentFile"]);
-  return [location ? tag("editor_location", location) : ""];
 }
 
 /** System prompt, paper and session summary, recent turns, then the module's last message. */

@@ -1,14 +1,13 @@
 /**
  * Judge prompt: the Chat Orchestrator's own model call. It picks the route
  * of a message (reply, answer, or refine first) by calling one tool, from the
- * paper map, the message, the open file, the session summary and the last
- * four turns. With the answer and refine routes it names the sections the
+ * paper map, the message, the session summary and the last four turns. With the answer and refine routes it names the sections the
  * next step reads word for word. It does not see the paper's text and writes
  * no text for the user.
  */
 import type { AIRequest } from "../types";
 import { ALL_SECTIONS, ANSWER_QUESTION, REFINE_QUESTION, REPLY_DIRECTLY } from "../tools/chatTools";
-import { formatContext, tag } from "./context";
+import { tag } from "./context";
 import type { PromptPayload } from "./index";
 import { conversationBlock, SESSION_RULES, summaryBlock } from "./session";
 
@@ -41,15 +40,8 @@ export function paperMapBlock(request: AIRequest): string {
 }
 
 export function buildJudgePrompt(request: AIRequest): PromptPayload {
-  // What changes least comes first, so a new file tab does not change the conversation's prefix.
-  const location = formatContext(request.context, ["currentFile"]);
-  const content = [
-    paperMapBlock(request),
-    summaryBlock(request),
-    conversationBlock(request),
-    location ? tag("editor_location", location) : "",
-    tag("user_message", request.instruction),
-  ]
+  // What changes least comes first.
+  const content = [paperMapBlock(request), summaryBlock(request), conversationBlock(request), tag("user_message", request.instruction)]
     .filter(Boolean)
     .join("\n\n");
   return { system: `${JUDGE_RULES}\n\n${SESSION_RULES}`, messages: [{ role: "user", content }] };

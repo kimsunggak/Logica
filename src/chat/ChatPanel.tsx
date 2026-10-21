@@ -356,7 +356,6 @@ export function ChatPanel() {
         {messages.map((message) =>
           message.role === "user" ? (
             <div key={message.id} className="ml-6">
-              {message.contextLabel && <div className="mb-0.5 truncate text-right text-[10.5px] text-slate-400">{message.contextLabel}</div>}
               <div className="flex items-start justify-end gap-1.5">
                 <div className="min-w-0 rounded-lg bg-sky-50 px-2.5 py-1.5 leading-normal whitespace-pre-wrap text-slate-800 dark:bg-sky-950/50 dark:text-slate-100">
                   {message.content}
