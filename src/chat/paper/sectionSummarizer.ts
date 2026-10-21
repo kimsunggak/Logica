@@ -1,15 +1,15 @@
 /**
  * Section Summary Module: summarizes the sections of the paper that the
- * paper report has no summary for. It runs in the background after a turn
- * that read the paper.
+ * paper summary has no summary for, from the abstract on, in reading order.
  *
- *   first paper turn   the whole paper is read; then every section is summarized
- *   later turns        only sections edited since then are summarized again
+ *   first question about a paper   every section, before the judge runs
+ *   after later turns              only sections edited since, in the background
  *
- * Sections go in batches of about 40,000 characters, one model call each; a
- * section with only a few words is its own summary. A section the model
- * leaves out, or a batch that fails, is tried again after the next turn and
- * is read word for word until then.
+ * Sections go in batches of about 40,000 characters, one model call each. A
+ * section with no text of its own yet is "아직 내용 없음", and one with only
+ * a few words is its own summary. A section the model leaves out, or a batch
+ * that fails, is tried again after the next turn and is read word for word
+ * until then.
  */
 import { AIError } from "../../ai/errors";
 import { callModel, type RunControl } from "../../ai/gateway";
@@ -23,8 +23,10 @@ import { unitText, type SectionUnit } from "./sections";
 export const SECTION_BATCH_CHARS = 40_000;
 /** Longest section text sent; a longer one keeps its start and end. */
 const SECTION_TEXT_CHARS = 20_000;
-/** A section with fewer prose words is summarized by its own text. */
+/** A section with fewer prose words after its heading is summarized by its own text. */
 const SHORT_WORDS = 12;
+/** The summary of a section with no text of its own yet. */
+export const NO_CONTENT = "아직 내용 없음";
 
 export interface SummarizedSection {
   key: string;
@@ -66,10 +68,10 @@ export function batchesOf(units: SectionUnit[]): SectionUnit[][] {
   return batches;
 }
 
-/** A short section's text without its heading, or a note that it has only its heading. */
+/** A short section's own text, without its heading, or that it has none yet. */
 function ownWords(unit: SectionUnit): string {
-  const plain = latexToPlain(unitText(unit)).replace(unit.title, "").trim();
-  return plain || "Only its heading; its text is in its subsections.";
+  if (unit.bodyWords === 0) return NO_CONTENT;
+  return latexToPlain(unitText(unit)).replace(unit.title, "").trim() || NO_CONTENT;
 }
 
 /** The summaries the model wrote for the sections of `batch`, by key. */
@@ -99,11 +101,11 @@ export async function summarizeSections(units: SectionUnit[], options: SectionSu
     () => ({ sections: units.map((u) => ({ key: u.key, title: u.title, chars: u.chars })) }),
     async (span) => {
       const summarized: SummarizedSection[] = units
-        .filter((u) => u.words < SHORT_WORDS)
+        .filter((u) => u.bodyWords < SHORT_WORDS)
         .map((u) => ({ key: u.key, hash: u.hash, title: u.title, summary: ownWords(u) }));
       const missing: string[] = [];
       let failure: unknown = null;
-      const batches = batchesOf(units.filter((u) => u.words >= SHORT_WORDS));
+      const batches = batchesOf(units.filter((u) => u.bodyWords >= SHORT_WORDS));
       for (const [i, batch] of batches.entries()) {
         try {
           const result = await call(

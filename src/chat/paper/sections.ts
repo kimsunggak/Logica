@@ -2,22 +2,22 @@
  * The paper as section units (L0): what the judge picks from and what the
  * Refine and Answer modules read, each unit word for word or as its summary.
  *
- *   front    title block and abstract, read word for word in every turn
- *   3, 3.2   each section and subsection: its own text, without its subsections
+ *   abstract  title block and abstract, read word for word in every turn
+ *   3, 3.2    each section and subsection: its own text, without its subsections
  *
  * Deeper headings stay in their subsection. A unit's hash is the key of its
- * summary in the paper report (`./report.ts`), so a summary survives
+ * summary in the paper summary (`./report.ts`), so a summary survives
  * renumbering and only an edited unit is summarized again.
  */
 import { giOf, type PaperDocument } from "../../latex/parser/documentModel";
 import { countWords, maskComments } from "../../latex/parser/text";
 import type { SourceRange } from "../../ai/types";
 
-/** The key of the front matter unit. */
-export const FRONT = "front";
+/** The key of the front matter unit: the title block and the abstract. */
+export const FRONT = "abstract";
 
 export interface SectionUnit {
-  /** Its name in this turn's prompts: the section number ("3.2"), `front`, or "u1" for an unnumbered heading. */
+  /** Its name in this turn's prompts: the section number ("3.2"), `abstract`, or "u1" for an unnumbered heading. */
   key: string;
   title: string;
   /** 0 for the front matter and top-level sections, 1 for subsections. */
@@ -30,6 +30,8 @@ export interface SectionUnit {
   hash: string;
   chars: number;
   words: number;
+  /** Prose words after its heading line: 0 when the section has no text of its own yet. */
+  bodyWords: number;
   /** `\label` keys defined in it. */
   labels: string[];
 }
@@ -138,11 +140,13 @@ export function paperUnits(doc: PaperDocument, files: Map<string, string>): Pape
     used.add(name);
     return name;
   };
+  const wordsOf = (text: string) => maskComments(text).split("\n").reduce((n, line) => n + countWords(line), 0);
   const add = (key: string, title: string, depth: number, parentKey: string | undefined, from: number, to: number) => {
     if (to < from) return;
     const sources = read(from, to);
     const text = unitText({ sources });
     if (!text.trim()) return;
+    const body = key === FRONT ? text : text.slice(text.indexOf("\n") + 1 || text.length);
     units.push({
       key: unique(key),
       title,
@@ -151,12 +155,13 @@ export function paperUnits(doc: PaperDocument, files: Map<string, string>): Pape
       sources,
       hash: textHash(text),
       chars: text.length,
-      words: maskComments(text).split("\n").reduce((n, line) => n + countWords(line), 0),
+      words: wordsOf(text),
+      bodyWords: wordsOf(body),
       labels: labelGis.filter((l) => l.gi >= from && l.gi <= to).map((l) => l.key),
     });
   };
 
-  add(FRONT, "Title and abstract", 0, undefined, begin + 1, (headings[0]?.startGi ?? last + 1) - 1);
+  add(FRONT, "Abstract", 0, undefined, begin + 1, (headings[0]?.startGi ?? last + 1) - 1);
   const keys = new Map<string, string>();
   let unnumbered = 0;
   headings.forEach((s, i) => {

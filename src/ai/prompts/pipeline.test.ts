@@ -46,10 +46,15 @@ describe("judge prompt", () => {
     expect(prompt.system).toContain("never write the answer yourself");
   });
 
-  it("puts what changes least first: paper map, summary, conversation, message", () => {
-    const paperMap = [{ key: "1", title: "Introduction", depth: 0, words: 40, labels: [], summary: "Why." }];
+  it("puts the conversation first, then the paper map, then the message", () => {
+    const paperMap = [
+      { key: "abstract", title: "Abstract", depth: 0, words: 40, labels: [], summary: "Routes joints.\nBy uncertainty.", always: true },
+      { key: "1", title: "Introduction", depth: 0, words: 40, labels: ["sec:intro"], summary: "Why it matters.\nWhat is new." },
+    ];
     const user = buildPrompt({ ...turn, task: "judge", paperMap, sessionSummary: "Goal: tighten Section 4" }).messages[0].content;
-    const order = ["<paper_map", "<session_summary>", "<recent_conversation>", "<user_message>"].map((tag) => user.indexOf(tag));
+    // One line per section, the abstract with its summary too.
+    expect(user).toContain('<paper_map summaries="1/1">\n[abstract] Abstract (40 words): Routes joints. By uncertainty. (always read word for word)\n[1] Introduction (40 words): Why it matters. What is new. | labels: sec:intro\n</paper_map>');
+    const order = ["<session_summary>", "<recent_conversation>", "<paper_map", "<user_message>"].map((tag) => user.indexOf(tag));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(user).toContain("<session_summary>\nGoal: tighten Section 4\n</session_summary>");

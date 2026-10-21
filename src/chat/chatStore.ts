@@ -18,9 +18,9 @@ import { aiService, newRequestId } from "../ai/service";
 import { lineOf, locateEdit, type ProposedEdit } from "../ai/agent/edits";
 import { deleteSession, listSessions, loadSession, newSessionId, saveSession, SESSION_VERSION, type SessionSummary } from "./chatHistory";
 import { runChatTurn, type Outcome, type Paper, type Route, type Stage, type Turn } from "./orchestrator";
-import { emptyReport, loadReport, saveReport, summariesFor, unitsToSummarize, withSummaries, type PaperReport } from "./paper/report";
+import { emptyReport, hasSummaries, loadReport, saveReport, summariesFor, unitsToSummarize, withSummaries, type PaperReport } from "./paper/report";
 import { summarizeSections } from "./paper/sectionSummarizer";
-import { FRONT, paperUnits } from "./paper/sections";
+import { paperUnits } from "./paper/sections";
 import { foldTurns, turnsToFold } from "./session/summarizer";
 import { readSummary, type ConversationSummary } from "./session/summary";
 import { turnsOf } from "./session/turns";
@@ -116,6 +116,42 @@ function paperOf(report: PaperReport): Paper {
   return { files, omitted, budget: PAPER_BUDGET, units, summaries: summariesFor(units, report), macros };
 }
 
+/**
+ * The first question about a paper: summarize all its sections before the
+ * judge runs, so that the first answer, like every later one, reads only the
+ * sections it needs word for word. It runs once per paper; sections edited
+ * later are summarized after a turn. A failure leaves the summary as it was,
+ * and this turn reads the whole paper.
+ */
+async function summarizeFirst(project: string, report: PaperReport, run: { traceId: string; root: Span; control: RunControl; onStart: () => void }): Promise<PaperReport> {
+  const { tex, doc } = paperNow();
+  const { units } = paperUnits(doc, tex);
+  if (!units.length || hasSummaries(units, report)) return report;
+  // A run in the background may be writing the first summaries already.
+  if (sectioning) {
+    await sectioning.done;
+    const latest = await loadReport(project);
+    if (hasSummaries(units, latest)) return latest;
+  }
+  run.onStart();
+  try {
+    const result = await summarizeSections(unitsToSummarize(units, report), {
+      traceId: run.traceId,
+      parent: run.root,
+      control: run.control,
+      title: doc.title,
+      outline: doc.flatSections.length ? outlineText(doc, 3000) : undefined,
+    });
+    if (!result.summarized.length) return report;
+    const next = withSummaries(await loadReport(project), result.summarized, units);
+    await saveReport(project, next, units, doc.title);
+    return next;
+  } catch (err) {
+    if (run.control.stopped || (err instanceof AIError && err.kind === "cancelled")) throw err;
+    return report;
+  }
+}
+
 function updateMessage(id: string, patch: Partial<ChatMessage>) {
   useChat.setState((s) => ({ messages: s.messages.map((m) => (m.id === id ? { ...m, ...patch } : m)) }));
 }
@@ -162,7 +198,9 @@ export async function sendChatMessage(text: string): Promise<void> {
   let route: Route | undefined;
   try {
     const project = useProject.getState().root;
-    const report = project ? await loadReport(project) : emptyReport();
+    let report = project ? await loadReport(project) : emptyReport();
+    // The first question about this paper: summarize it before the judge runs.
+    if (project) report = await summarizeFirst(project, report, { traceId: requestId, root, control, onStart: () => updateMessage(requestId, { stage: "paper" }) });
     const result = await runChatTurn(turn, {
       root,
       control,
@@ -206,7 +244,7 @@ export async function sendChatMessage(text: string): Promise<void> {
     useChat.setState({ runningId: null });
     // Stopped and failed turns count too: they are turns left unanswered.
     scheduleSummary({ traceId: requestId, root });
-    // A turn that may have read the paper: summarize the sections the report lacks.
+    // A turn that may have read the paper: summarize the sections edited since.
     if (route !== "reply") scheduleSectionSummaries({ traceId: requestId, root });
   }
 }
@@ -287,9 +325,10 @@ let sectioning: { control: RunControl; again: boolean; done: Promise<void> } | n
 let sectionTrace: { traceId: string; root: Span } | null = null;
 
 /**
- * Summarize the sections the paper report has no summary for (see
- * `./paper/sectionSummarizer.ts`) and save them in the report. It runs
- * after a turn that read the paper, and stops when another project opens.
+ * Summarize the sections the paper summary has no summary for (see
+ * `./paper/sectionSummarizer.ts`): sections edited since they were summarized,
+ * or all of them when the first summary failed. It runs after a turn that
+ * read the paper, and stops when another project opens.
  */
 export function scheduleSectionSummaries(after?: { traceId: string; root: Span }) {
   if (after) sectionTrace = after;
@@ -307,7 +346,7 @@ export function scheduleSectionSummaries(after?: { traceId: string; root: Span }
     const { tex, doc } = paperNow();
     const { units } = paperUnits(doc, tex);
     const todo = unitsToSummarize(units, report);
-    const sections = units.filter((u) => u.key !== FRONT).length;
+    const sections = units.length;
     step(trace.traceId, trace.root, "sections", "checkSectionSummaries", () => ({ sections }), () => ({
       sections,
       summarized: sections - todo.length,
@@ -322,7 +361,7 @@ export function scheduleSectionSummaries(after?: { traceId: string; root: Span }
       outline: doc.flatSections.length ? outlineText(doc, 3000) : undefined,
     }).catch(() => null);
     if (!result?.summarized.length || !current()) return;
-    await saveReport(project, withSummaries(await loadReport(project), result.summarized, units));
+    await saveReport(project, withSummaries(await loadReport(project), result.summarized, units), units, doc.title);
   };
   const job = { control, again: false, done: Promise.resolve() };
   job.done = run()

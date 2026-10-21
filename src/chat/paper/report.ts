@@ -1,96 +1,147 @@
 /**
- * The paper report: one summary per section unit, for each project, kept in
- * the app's local data folder (`<app local data>/papers/<project id>/report.json`)
- * and shared by every chat session of the project.
+ * The paper summary: one short summary per section unit, for each project,
+ * kept as a YAML document in the app's local data folder
+ * (`<app local data>/papers/<project id>/paper-summary.yaml`) and shared by
+ * every chat session of the project.
  *
- * Summaries are found by the unit's text hash, so an edited section has no
- * summary until the Section Summary Module (`./sectionSummarizer.ts`) writes
- * one; until then it is read word for word. A report with no summary for
- * the paper means the paper has not been read yet: the whole paper is sent.
+ *   title: …
+ *   sections:
+ *     - key: abstract        title block and abstract
+ *     - key: "1"             Introduction, with its subsections under it
+ *       subsections:
+ *         - key: "1.1"
+ *
+ * The document follows the paper's reading order. Summaries are found by the
+ * unit's text hash, so an edited section has no summary until the Section
+ * Summary Module (`./sectionSummarizer.ts`) writes one; until then it is read
+ * word for word. A paper with no summary at all has not been read yet: the
+ * Section Summary Module summarizes it before the first answer.
  */
+import { Document, parse } from "yaml";
 import { call } from "../../lib/backend";
-import { FRONT, type SectionUnit } from "./sections";
+import type { SectionUnit } from "./sections";
 
 export const REPORT_VERSION = 1;
-/** Summaries of sections no longer in the paper are kept for this many entries, newest first. */
-const KEEP_OLD = 200;
 
 export interface SectionSummary {
   title: string;
   summary: string;
-  updatedAt: number;
 }
 
 export interface PaperReport {
-  version: number;
   /** By the unit's text hash. */
   summaries: Record<string, SectionSummary>;
 }
 
 export function emptyReport(): PaperReport {
-  return { version: REPORT_VERSION, summaries: {} };
+  return { summaries: {} };
 }
 
-/** A report read from disk; anything unreadable starts empty. */
-export function readReport(value: unknown): PaperReport {
-  const report = emptyReport();
-  const summaries = (value as { version?: unknown; summaries?: unknown } | null)?.summaries;
-  if ((value as { version?: unknown } | null)?.version !== REPORT_VERSION || !summaries || typeof summaries !== "object") return report;
-  for (const [hash, entry] of Object.entries(summaries as Record<string, unknown>)) {
-    const e = entry as Partial<SectionSummary> | null;
-    if (typeof e?.summary === "string" && e.summary.trim()) {
-      report.summaries[hash] = { title: typeof e.title === "string" ? e.title : "", summary: e.summary, updatedAt: typeof e.updatedAt === "number" ? e.updatedAt : 0 };
-    }
-  }
-  return report;
-}
-
-/** The summary of each unit that has one, by unit key. The front matter is always read word for word. */
+/** The summary of each unit that has one, by unit key. */
 export function summariesFor(units: SectionUnit[], report: PaperReport): Map<string, string> {
   const found = new Map<string, string>();
   for (const unit of units) {
-    const entry = unit.key === FRONT ? undefined : report.summaries[unit.hash];
+    const entry = report.summaries[unit.hash];
     if (entry) found.set(unit.key, entry.summary);
   }
   return found;
 }
 
-/** The units the report has no summary for. */
-export function unitsToSummarize(units: SectionUnit[], report: PaperReport): SectionUnit[] {
-  return units.filter((unit) => unit.key !== FRONT && !report.summaries[unit.hash]);
+/** Whether any section of the paper has a summary: false until the paper is first summarized. */
+export function hasSummaries(units: SectionUnit[], report: PaperReport): boolean {
+  return units.some((unit) => report.summaries[unit.hash]);
 }
 
-/** Add new summaries; keep those of the current units and the newest of the rest. */
-export function withSummaries(report: PaperReport, added: { hash: string; title: string; summary: string }[], units: SectionUnit[], now = Date.now()): PaperReport {
-  const summaries: Record<string, SectionSummary> = { ...report.summaries };
-  for (const entry of added) summaries[entry.hash] = { title: entry.title, summary: entry.summary, updatedAt: now };
-  const current = new Set(units.map((u) => u.hash));
-  const old = Object.entries(summaries)
-    .filter(([hash]) => !current.has(hash))
-    .sort((a, b) => b[1].updatedAt - a[1].updatedAt)
-    .slice(KEEP_OLD);
-  for (const [hash] of old) delete summaries[hash];
-  return { version: REPORT_VERSION, summaries };
+/** The units the report has no summary for. */
+export function unitsToSummarize(units: SectionUnit[], report: PaperReport): SectionUnit[] {
+  return units.filter((unit) => !report.summaries[unit.hash]);
+}
+
+/** The report with new summaries added, keeping only the sections the paper has now. */
+export function withSummaries(report: PaperReport, added: { hash: string; title: string; summary: string }[], units: SectionUnit[]): PaperReport {
+  const all: Record<string, SectionSummary> = { ...report.summaries };
+  for (const entry of added) all[entry.hash] = { title: entry.title, summary: entry.summary };
+  const summaries: Record<string, SectionSummary> = {};
+  for (const unit of units) if (all[unit.hash]) summaries[unit.hash] = all[unit.hash];
+  return { summaries };
+}
+
+interface DocEntry {
+  key: string;
+  title: string;
+  hash: string;
+  /** null while the section has no summary yet. */
+  summary: string | null;
+  subsections?: DocEntry[];
+}
+
+/** The report as the YAML document saved for the paper: its sections in reading order. */
+export function reportYaml(report: PaperReport, units: SectionUnit[], title?: string, now = new Date()): string {
+  const entry = (unit: SectionUnit): DocEntry => ({ key: unit.key, title: unit.title, hash: unit.hash, summary: report.summaries[unit.hash]?.summary ?? null });
+  const sections: DocEntry[] = [];
+  const parents = new Map<string, DocEntry>();
+  for (const unit of units) {
+    const parent = unit.parentKey ? parents.get(unit.parentKey) : undefined;
+    if (parent) (parent.subsections ??= []).push(entry(unit));
+    else {
+      const made = entry(unit);
+      sections.push(made);
+      parents.set(unit.key, made);
+    }
+  }
+  const doc = new Document({ version: REPORT_VERSION, ...(title ? { title } : {}), updated: now.toISOString(), sections });
+  doc.commentBefore = [
+    " LOGICA 논문 요약: 섹션마다 3~4줄, 논문의 읽는 순서대로.",
+    " 판단이 질문에 필요한 섹션을 고를 때 읽고, 원문으로 보내지 않는 섹션 대신 보냅니다.",
+    " hash는 섹션 본문의 해시입니다. 본문을 고치면 달라지고, 그 섹션은 다시 요약됩니다.",
+  ].join("\n");
+  return doc.toString({ lineWidth: 0, blockQuote: "literal" });
+}
+
+/** A saved document read back; anything unreadable starts empty. */
+export function readReportYaml(text: string | null | undefined): PaperReport {
+  const report = emptyReport();
+  if (!text) return report;
+  let value: unknown;
+  try {
+    value = parse(text);
+  } catch {
+    return report;
+  }
+  const doc = value as { version?: unknown; sections?: unknown } | null;
+  if (doc?.version !== REPORT_VERSION || !Array.isArray(doc.sections)) return report;
+  const walk = (entries: unknown[]) => {
+    for (const item of entries) {
+      const e = item as Partial<DocEntry> | null;
+      if (typeof e?.hash === "string" && typeof e.summary === "string" && e.summary.trim()) {
+        report.summaries[e.hash] = { title: typeof e.title === "string" ? e.title : "", summary: e.summary.trim() };
+      }
+      if (Array.isArray(e?.subsections)) walk(e.subsections);
+    }
+  };
+  walk(doc.sections);
+  return report;
 }
 
 // ---------------------------------------------------------------- storage
 
 const loaded = new Map<string, PaperReport>();
 
-/** The project's report, read from disk once per app run. */
+/** The project's paper summary, read from disk once per app run. */
 export async function loadReport(root: string): Promise<PaperReport> {
   const known = loaded.get(root);
   if (known) return known;
-  const report = readReport(await call<unknown>("paper_load_report", { root }).catch(() => null));
+  const report = readReportYaml(await call<string | null>("paper_load_summary", { root }).catch(() => null));
   // A save may have landed while the file was read.
   const now = loaded.get(root) ?? report;
   loaded.set(root, now);
   return now;
 }
 
-export async function saveReport(root: string, report: PaperReport): Promise<void> {
+/** Keep the report and write it as the paper's YAML document. */
+export async function saveReport(root: string, report: PaperReport, units: SectionUnit[], title?: string): Promise<void> {
   loaded.set(root, report);
-  await call<void>("paper_save_report", { root, report }).catch(() => {
+  await call<void>("paper_save_summary", { root, text: reportYaml(report, units, title) }).catch(() => {
     // Saving is best effort; the summaries stay usable in memory.
   });
 }

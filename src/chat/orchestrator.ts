@@ -39,7 +39,8 @@ import { JUDGE_MESSAGE_CHARS, JUDGE_TURNS, MODULE_MESSAGE_CHARS, MODULE_TURNS, s
 export type Route = "reply" | "answer" | "refine";
 /** How the turn ended: a direct reply, an answer, or a question back to the user. */
 export type Outcome = "reply" | "answer" | "clarify";
-export type Stage = "judge" | "reply" | "refine" | "answer";
+/** The step running for the answer on screen; `paper` summarizes the paper before the first answer. */
+export type Stage = "paper" | "judge" | "reply" | "refine" | "answer";
 
 /** One question to answer. The editor's state (open file, selection, cursor) is not part of it. */
 export interface Turn {

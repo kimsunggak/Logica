@@ -7,8 +7,8 @@ import type { ChatTask } from "../../ai/types";
 import { buildPaperDocument } from "../../latex/parser/documentModel";
 import { samplePaper } from "../../test/samplePaper";
 import { unitsToSummarize, emptyReport } from "./report";
-import { batchesOf, SECTION_BATCH_CHARS, summarizeSections } from "./sectionSummarizer";
-import { paperUnits, type SectionUnit } from "./sections";
+import { batchesOf, NO_CONTENT, SECTION_BATCH_CHARS, summarizeSections } from "./sectionSummarizer";
+import { FRONT, paperUnits, type SectionUnit } from "./sections";
 
 const files = samplePaper();
 const { units } = paperUnits(buildPaperDocument({ files }), files);
@@ -48,10 +48,13 @@ describe("summarizeSections", () => {
     const sent = log[0].request.sectionsToSummarize!.map((s) => s.key);
     // "3 Method" holds only its heading and label: no model call for it.
     expect(sent).not.toContain("3");
+    expect(sent.slice(0, 2)).toEqual([FRONT, "1.1"]);
     expect(sent).toContain("3.2");
     expect(result.missing).toEqual([]);
     expect(result.summarized.map((s) => s.key).sort()).toEqual(sections.map((u) => u.key).sort());
-    expect(result.summarized.find((s) => s.key === "3")!.summary).toBe("Only its heading; its text is in its subsections.");
+    // A section with no text of its own yet, and one with only a few words.
+    expect(result.summarized.find((s) => s.key === "3")!.summary).toBe(NO_CONTENT);
+    expect(result.summarized.find((s) => s.key === "4.1")!.summary).toBe("We evaluate on a video pose benchmark with annotated occlusion labels.");
     expect(result.summarized.find((s) => s.key === "3.2")).toMatchObject({ summary: "About Uncertainty Estimation.", hash: units.find((u) => u.key === "3.2")!.hash });
 
     const prompt = buildPrompt({ ...log[0].request, task: "sections", model: "m" });
@@ -69,7 +72,7 @@ describe("summarizeSections", () => {
 
   it("keeps what other batches wrote when one fails, and fails when nothing was written", async () => {
     // Two sections per batch.
-    const long = sections.filter((u) => u.words >= 12).map((u) => ({ ...u, chars: 15_000 }));
+    const long = sections.filter((u) => u.bodyWords >= 12).map((u) => ({ ...u, chars: 15_000 }));
     const { call, log } = gateway({ fail: (r) => r.id === "p3-sections-1" });
     const result = await summarizeSections(long, { traceId: "p3", control: control(), call });
     expect(log).toHaveLength(Math.ceil(long.length / 2));

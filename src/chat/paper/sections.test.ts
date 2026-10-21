@@ -13,8 +13,10 @@ describe("paperUnits", () => {
   const { units, macros } = unitsOf(samplePaper());
   const unit = (key: string) => units.find((u) => u.key === key)!;
 
-  it("splits the sample paper into the front matter, sections and subsections, in reading order", () => {
+  it("splits the sample paper into the abstract, sections and subsections, in reading order", () => {
+    expect(FRONT).toBe("abstract");
     expect(units.map((u) => u.key)).toEqual([FRONT, "1", "1.1", "1.2", "1.3", "2", "2.1", "2.2", "3", "3.1", "3.2", "3.3", "4", "4.1", "4.2", "4.3", "5"]);
+    expect(unit(FRONT).title).toBe("Abstract");
     expect(unit("3.2")).toMatchObject({ title: "Uncertainty Estimation", depth: 1, parentKey: "3" });
     expect(unit("3")).toMatchObject({ title: "Method", depth: 0 });
     expect(unit("3").parentKey).toBeUndefined();
@@ -30,8 +32,11 @@ describe("paperUnits", () => {
     expect(routing.labels).toEqual(["sec:uncertainty", "eq:nll"]);
     expect(routing.chars).toBe(unitText(routing).length);
     expect(routing.words).toBeGreaterThan(10);
-    // A section's own text stops at its first subsection.
+    // A section's own text stops at its first subsection; its heading is not part of its body.
     expect(unitText(unit("3"))).toBe("\\section{Method}\n\\label{sec:method}\n");
+    expect(unit("3").bodyWords).toBe(0);
+    expect(routing.bodyWords).toBe(routing.words - 2);
+    expect(unit(FRONT).bodyWords).toBe(unit(FRONT).words);
   });
 
   it("starts the front matter after \\begin{document} and keeps only the preamble's macros", () => {
@@ -61,7 +66,7 @@ describe("paperUnits", () => {
   it("gives unnumbered headings their own keys", () => {
     const files = new Map([["main.tex", "\\documentclass{article}\n\\begin{document}\nIntro text.\n\\section*{Acknowledgments}\nThanks.\n\\section{Method}\nWe route.\n\\end{document}\n"]]);
     expect(unitsOf(files).units.map((u) => [u.key, u.title])).toEqual([
-      [FRONT, "Title and abstract"],
+      [FRONT, "Abstract"],
       ["u1", "Acknowledgments"],
       ["1", "Method"],
     ]);

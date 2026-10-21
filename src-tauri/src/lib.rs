@@ -10,7 +10,7 @@
 //! * `ai`: forwarding AI requests to fixed provider endpoints, attaching the
 //!   stored credential so that secrets never reach the webview.
 //! * `app_state`: persisting non-secret UI state and settings.
-//! * `chats`, `papers`: chat history and the paper report, in the app's local
+//! * `chats`, `papers`: chat history and the paper summary, in the app's local
 //!   data folder.
 //! * `debug_trace`: runtime trace events and the localhost visual debugger
 //!   (debug builds only).
@@ -67,8 +67,8 @@ pub fn run() {
             chats::chat_load_session,
             chats::chat_save_session,
             chats::chat_delete_session,
-            papers::paper_load_report,
-            papers::paper_save_report,
+            papers::paper_load_summary,
+            papers::paper_save_summary,
             app_state::load_app_state,
             app_state::save_app_state,
             debug_trace::debug_trace,

@@ -1,39 +1,53 @@
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 import { buildPaperDocument } from "../../latex/parser/documentModel";
 import { samplePaper } from "../../test/samplePaper";
-import { emptyReport, readReport, REPORT_VERSION, summariesFor, unitsToSummarize, withSummaries } from "./report";
+import { emptyReport, hasSummaries, readReportYaml, reportYaml, summariesFor, unitsToSummarize, withSummaries } from "./report";
 import { FRONT, paperUnits } from "./sections";
 
 const files = samplePaper();
 const { units } = paperUnits(buildPaperDocument({ files }), files);
 const unit = (key: string) => units.find((u) => u.key === key)!;
+const summarized = (keys: string[]) =>
+  withSummaries(emptyReport(), keys.map((k) => ({ hash: unit(k).hash, title: unit(k).title, summary: `${unit(k).title} 요약 1줄.\n2줄.` })), units);
 
-describe("paper report", () => {
-  it("finds summaries by the unit's hash and never summarizes the front matter", () => {
-    expect(unitsToSummarize(units, emptyReport()).map((u) => u.key)).not.toContain(FRONT);
-    expect(unitsToSummarize(units, emptyReport())).toHaveLength(units.length - 1);
-    const report = withSummaries(emptyReport(), [{ hash: unit("3.2").hash, title: "Uncertainty Estimation", summary: "Predicts a variance per joint." }], units, 5);
-    expect(summariesFor(units, report)).toEqual(new Map([["3.2", "Predicts a variance per joint."]]));
+describe("paper summary", () => {
+  it("finds summaries by the unit's hash, the abstract included", () => {
+    expect(hasSummaries(units, emptyReport())).toBe(false);
+    expect(unitsToSummarize(units, emptyReport())).toHaveLength(units.length);
+    const report = summarized([FRONT, "3.2"]);
+    expect(hasSummaries(units, report)).toBe(true);
+    expect([...summariesFor(units, report).keys()]).toEqual([FRONT, "3.2"]);
     expect(unitsToSummarize(units, report).map((u) => u.key)).not.toContain("3.2");
-    expect(report.summaries[unit("3.2").hash]).toEqual({ title: "Uncertainty Estimation", summary: "Predicts a variance per joint.", updatedAt: 5 });
   });
 
-  it("keeps the summaries of the current units and only the newest of the others", () => {
-    const old = Array.from({ length: 205 }, (_, i) => ({ hash: `old${i}`, title: "Gone", summary: `old ${i}` }));
-    let report = emptyReport();
-    old.forEach((entry, i) => (report = withSummaries(report, [entry], units, i)));
-    report = withSummaries(report, [{ hash: unit("1").hash, title: "Introduction", summary: "Why." }], units, 1000);
-    expect(Object.keys(report.summaries)).toHaveLength(201);
-    expect(report.summaries.old0).toBeUndefined();
-    expect(report.summaries.old204).toBeDefined();
-    expect(report.summaries[unit("1").hash].summary).toBe("Why.");
+  it("keeps only the summaries of the sections the paper has now", () => {
+    const report = withSummaries(summarized(["1"]), [{ hash: "gone", title: "Old", summary: "Removed section." }], units);
+    expect(Object.keys(report.summaries)).toEqual([unit("1").hash]);
   });
 
-  it("reads a saved report and starts empty from anything else", () => {
-    const saved = { version: REPORT_VERSION, summaries: { a1: { title: "Method", summary: "Routes joints.", updatedAt: 3 }, bad: { summary: "  " } } };
-    expect(readReport(saved)).toEqual({ version: REPORT_VERSION, summaries: { a1: { title: "Method", summary: "Routes joints.", updatedAt: 3 } } });
-    expect(readReport({ version: 99, summaries: saved.summaries })).toEqual(emptyReport());
-    expect(readReport(null)).toEqual(emptyReport());
-    expect(readReport("x")).toEqual(emptyReport());
+  it("writes a YAML document in reading order, with subsections under their section", () => {
+    const text = reportYaml(summarized([FRONT, "1", "1.1"]), units, "STRoute", new Date("2026-10-21T00:00:00Z"));
+    expect(text.startsWith("# LOGICA 논문 요약")).toBe(true);
+    const doc = parse(text);
+    expect(doc).toMatchObject({ version: 1, title: "STRoute", updated: "2026-10-21T00:00:00.000Z" });
+    expect(doc.sections.map((s: { key: string }) => s.key)).toEqual([FRONT, "1", "2", "3", "4", "5"]);
+    const intro = doc.sections[1];
+    expect(intro).toMatchObject({ key: "1", title: "Introduction", hash: unit("1").hash, summary: "Introduction 요약 1줄.\n2줄." });
+    expect(intro.subsections.map((s: { key: string }) => s.key)).toEqual(["1.1", "1.2", "1.3"]);
+    // A section without a summary yet is listed with none.
+    expect(intro.subsections[1]).toMatchObject({ key: "1.2", summary: null });
+    // A summary of several lines is a literal block.
+    expect(text).toContain("    summary: |-\n      Introduction 요약 1줄.\n      2줄.");
+    // Section numbers stay strings.
+    expect(text).toContain('key: "1"');
+  });
+
+  it("reads its own document back, and starts empty from anything else", () => {
+    const report = summarized([FRONT, "1", "3.2"]);
+    expect(readReportYaml(reportYaml(report, units))).toEqual(report);
+    expect(readReportYaml("version: 2\nsections: []")).toEqual(emptyReport());
+    expect(readReportYaml("sections: [unclosed")).toEqual(emptyReport());
+    expect(readReportYaml(null)).toEqual(emptyReport());
   });
 });

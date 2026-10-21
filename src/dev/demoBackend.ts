@@ -389,7 +389,7 @@ function demoChats(): Record<string, Record<string, DemoSession>> {
   }
 }
 
-function demoReports(): Record<string, unknown> {
+function demoReports(): Record<string, string> {
   try {
     return JSON.parse(localStorage.getItem(PAPERS_KEY) ?? "{}");
   } catch {
@@ -632,10 +632,10 @@ export function createDemoBackend(): DemoBackend {
       delete all[root]?.[id];
       localStorage.setItem(CHATS_KEY, JSON.stringify(all));
     },
-    // The paper report of each project: localStorage stands in for the local data folder.
-    paper_load_report: ({ root }) => demoReports()[root] ?? null,
-    paper_save_report: ({ root, report }) => {
-      localStorage.setItem(PAPERS_KEY, JSON.stringify({ ...demoReports(), [root]: report }));
+    // The paper summary (YAML) of each project: localStorage stands in for the local data folder.
+    paper_load_summary: ({ root }) => demoReports()[root] ?? null,
+    paper_save_summary: ({ root, text }) => {
+      localStorage.setItem(PAPERS_KEY, JSON.stringify({ ...demoReports(), [root]: text }));
     },
     load_app_state: () => {
       try {

@@ -153,9 +153,9 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   const streaming = message.status === "streaming";
   return (
     <div className="space-y-2">
-      {(message.stage === "judge" || message.stage === "refine") && (
+      {(message.stage === "paper" || message.stage === "judge" || message.stage === "refine") && (
         <div className="text-[11.5px] text-slate-500" data-testid="chat-stage">
-          {t(message.stage === "judge" ? "chat.stageJudge" : "chat.stageRefine")}
+          {t(message.stage === "paper" ? "chat.stagePaper" : message.stage === "judge" ? "chat.stageJudge" : "chat.stageRefine")}
         </div>
       )}
       <RefinedLine message={message} />

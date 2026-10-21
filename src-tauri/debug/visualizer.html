@@ -439,14 +439,14 @@ function nodeLines(t, module) {
     }
     lines.unshift(...head);
   }
-  // What the module reads of the paper: the whole paper, or sections word for word (the front matter
+  // What the module reads of the paper: the whole paper, or sections word for word (the abstract
   // always) and the rest as summaries; and the sections an answer asked for before answering.
   const views = (module === "refine" || module === "answer") ? fns.filter((s) => s.fn === "paperView" && s.output) : [];
   const asked = fns.find((s) => s.fn === "askForSections");
   if (asked) lines.unshift({ status: "route", text: `추가 요청 ${keyList(asked.input || [])} → 재호출` });
   if (views.length) {
     const v = views[views.length - 1].output;
-    const full = (v.full || []).filter((k) => k !== "front");
+    const full = (v.full || []).filter((k) => k !== "abstract");
     lines.unshift({ status: "route", text: v.kind === "full" ? `논문: 원문 전체 (${v.why === "all" ? "전체 요청" : "섹션 요약 없음"})` : `논문: 원문 ${full.length ? keyList(full) : "초록만"} + 요약 ${v.summarized}개` });
   }
   // What the judge sees of the paper (its map) and the sections it chose.
@@ -569,6 +569,10 @@ function renderGraph(t) {
   const W = 240, COL = { reply: 20, answer: 300, refine: 580 };
   const Y = { user: 10, orchestrator: 126, branch: 300, final: 486 };
   const H = { user: 84, orchestrator: 116, branch: 130, final: 76, summary: 104 };
+  // The first question about a paper summarizes it before the judge runs; later ones after the turn.
+  const sectionsRun = t && mainSpan(t, "sections");
+  const orchestratorRun = t && mainSpan(t, "orchestrator");
+  const sectionsFirst = Boolean(sectionsRun && (!orchestratorRun || sectionsRun.start <= orchestratorRun.start));
   const at = {
     user: [COL.answer, Y.user, H.user],
     orchestrator: [COL.answer, Y.orchestrator, H.orchestrator],
@@ -577,7 +581,7 @@ function renderGraph(t) {
     refine: [COL.refine, Y.branch, H.branch],
     final: [COL.answer, Y.final, H.final],
     summary: [COL.refine, Y.final, H.summary],
-    sections: [COL.reply, Y.final, H.summary],
+    sections: [COL.reply, sectionsFirst ? Y.user : Y.final, H.summary],
   };
   const r = routeOf(t);
   // An edge is on the turn's path when the route goes straight from one module to the other.
@@ -608,10 +612,23 @@ function renderGraph(t) {
   edges.push(
     edgeSvg(t && spansOf(t, "summary").length ? edgeClass(t, "final", "summary") : "skip", `M${COL.answer + W} ${sy} H${COL.refine - 2}`),
     `<text class="elabel" x="${COL.answer + W + 20}" y="${sy - 9}" text-anchor="middle">이후</text>`,
-    edgeSvg(t && spansOf(t, "sections").length ? edgeClass(t, "final", "sections") : "skip", `M${COL.answer} ${sy} H${COL.reply + W + 2}`),
-    `<text class="elabel" x="${COL.answer - 20}" y="${sy - 9}" text-anchor="middle">이후</text>`,
   );
-  const rowBottom = Math.max(bottom("final"), bottom("summary"), bottom("sections"));
+  if (sectionsFirst) {
+    // Before the judge: the question starts it, and the judge reads the map it wrote.
+    const uy = top("user") + H.user / 2;
+    edges.push(
+      edgeSvg(edgeClass(t, "user", "sections"), `M${COL.answer} ${uy} H${COL.reply + W + 2}`),
+      `<text class="elabel" x="${COL.answer - 20}" y="${uy - 22}" text-anchor="middle">첫</text>`,
+      `<text class="elabel" x="${COL.answer - 20}" y="${uy - 9}" text-anchor="middle">질문</text>`,
+      edgeSvg(edgeClass(t, "sections", "orchestrator"), `M${mid("sections")} ${bottom("sections")} C${mid("sections")} ${bottom("sections") + 50}, ${COL.answer - 60} ${top("orchestrator") + H.orchestrator / 2}, ${COL.answer - 2} ${top("orchestrator") + H.orchestrator / 2}`, "논문 지도", mid("sections") + 10, bottom("sections") + 40),
+    );
+  } else {
+    edges.push(
+      edgeSvg(t && spansOf(t, "sections").length ? edgeClass(t, "final", "sections") : "skip", `M${COL.answer} ${sy} H${COL.reply + W + 2}`),
+      `<text class="elabel" x="${COL.answer - 20}" y="${sy - 9}" text-anchor="middle">이후</text>`,
+    );
+  }
+  const rowBottom = Math.max(bottom("final"), bottom("summary"), sectionsFirst ? 0 : bottom("sections"));
   const bar = gatewaySvg(t, 20, rowBottom + 24, 800);
   graphSize(840, rowBottom + 24 + bar.h + 8);
   $("graph").innerHTML = [

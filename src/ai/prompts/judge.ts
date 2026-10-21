@@ -1,9 +1,10 @@
 /**
  * Judge prompt: the Chat Orchestrator's own model call. It picks the route
  * of a message (reply, answer, or refine first) by calling one tool, from the
- * paper map, the message, the session summary and the last four turns. With the answer and refine routes it names the sections the
- * next step reads word for word. It does not see the paper's text and writes
- * no text for the user.
+ * session summary, the last four turns, the paper map and the message. With
+ * the answer and refine routes it names the sections the next step reads
+ * word for word. It does not see the paper's text and writes no text for the
+ * user.
  */
 import type { AIRequest } from "../types";
 import { ALL_SECTIONS, ANSWER_QUESTION, REFINE_QUESTION, REPLY_DIRECTLY } from "../tools/chatTools";
@@ -32,16 +33,18 @@ export function paperMapBlock(request: AIRequest): string {
   const lines = map.map((e) => {
     const head = `${"  ".repeat(e.depth)}[${e.key}] ${e.title} (${e.words} ${e.words === 1 ? "word" : "words"})`;
     const labels = e.labels.length ? ` | labels: ${e.labels.join(", ")}` : "";
-    if (e.always) return `${head}: always read word for word${labels}`;
+    // A summary has one sentence per line; the map keeps one line per section.
+    const summary = e.summary?.replace(/\s*\n\s*/g, " ");
+    if (e.always) return `${head}: ${summary ? `${summary} (always read word for word)` : "always read word for word"}${labels}`;
     if (!summarized) return `${head}${labels}`;
-    return `${head}: ${e.summary ?? "no summary yet, read word for word"}${labels}`;
+    return `${head}: ${summary ?? "no summary yet, read word for word"}${labels}`;
   });
   return `<paper_map summaries="${summarized ? `${summarized}/${listed.length}` : "none"}">\n${lines.join("\n")}\n</paper_map>`;
 }
 
 export function buildJudgePrompt(request: AIRequest): PromptPayload {
-  // What changes least comes first.
-  const content = [paperMapBlock(request), summaryBlock(request), conversationBlock(request), tag("user_message", request.instruction)]
+  // The conversation so far, then the paper, then the message to route.
+  const content = [summaryBlock(request), conversationBlock(request), paperMapBlock(request), tag("user_message", request.instruction)]
     .filter(Boolean)
     .join("\n\n");
   return { system: `${JUDGE_RULES}\n\n${SESSION_RULES}`, messages: [{ role: "user", content }] };

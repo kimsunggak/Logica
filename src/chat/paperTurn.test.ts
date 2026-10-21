@@ -6,6 +6,7 @@ import { useSettings } from "../settings/settingsStore";
 import { samplePaper, sampleSources } from "../test/samplePaper";
 import { sendChatMessage, summaryIdle, useChat } from "./chatStore";
 import { loadReport } from "./paper/report";
+import { NO_CONTENT } from "./paper/sectionSummarizer";
 
 // The sample paper as the open project's files.
 let files = samplePaper();
@@ -23,38 +24,41 @@ beforeAll(async () => {
 });
 
 describe("reading the paper by sections, through the demo backend", () => {
-  it("reads the whole paper first, summarizes its sections, then reads only the sections a question needs", async () => {
+  it("summarizes the paper before the first answer, then reads only the sections a question needs", async () => {
     const generate = vi.spyOn(aiService, "generate");
+    const tasks = () => generate.mock.calls.map(([, r]) => r.task);
     try {
+      // The first question: the paper is summarized before the judge runs.
       await sendChatMessage("What does Table 1 report?");
-      const first = generate.mock.calls.find(([, r]) => r.task === "answer")![1];
-      expect(first.projectFiles?.map((f) => f.path)).toContain("sections/method.tex");
-      expect(first.paperView).toBeUndefined();
-
-      // After the turn, the Section Summary Module writes the report.
-      await summaryIdle();
+      expect(tasks()).toEqual(["sections", "judge", "answer"]);
       const report = await loadReport(ROOT);
-      expect(Object.keys(report.summaries).length).toBe(16);
-      expect(generate.mock.calls.filter(([, r]) => r.task === "sections")).toHaveLength(1);
+      expect(Object.keys(report.summaries)).toHaveLength(17);
+      const first = generate.mock.calls.find(([, r]) => r.task === "answer")![1];
+      expect(first.projectFiles).toBeUndefined();
+      expect(Object.fromEntries(first.paperView!.sections.map((s) => [s.key, s.content]))).toMatchObject({ abstract: "full", "4.3": "summary" });
+      const judge = generate.mock.calls.find(([, r]) => r.task === "judge")![1];
+      expect(judge.paperMap?.find((e) => e.key === "3")?.summary).toBe(NO_CONTENT);
+      // Nothing is left to summarize after the turn.
+      await summaryIdle();
+      expect(tasks().filter((t) => t === "sections")).toHaveLength(1);
 
       generate.mockClear();
       await sendChatMessage("Explain the Uncertainty Estimation section");
-      const judge = generate.mock.calls.find(([, r]) => r.task === "judge")![1];
-      expect(judge.paperMap?.find((e) => e.key === "3.2")?.summary).toContain("Uncertainty Estimation");
+      expect(tasks()).toEqual(["judge", "answer"]);
       const answer = generate.mock.calls.find(([, r]) => r.task === "answer")![1];
-      expect(answer.projectFiles).toBeUndefined();
       const read = Object.fromEntries(answer.paperView!.sections.map((s) => [s.key, s.content]));
-      expect(read).toMatchObject({ front: "full", "3.2": "full", "3.3": "summary", "1": "summary" });
-      expect(useChat.getState().messages.at(-1)!.content).toContain("sections front, 3.2 word for word");
-      // Nothing changed in the paper: no section is summarized again.
+      expect(read).toMatchObject({ abstract: "full", "3.2": "full", "3.3": "summary", "1": "summary" });
+      expect(useChat.getState().messages.at(-1)!.content).toContain("sections abstract, 3.2 word for word");
       await summaryIdle();
-      expect(generate.mock.calls.filter(([, r]) => r.task === "sections")).toHaveLength(0);
+      expect(tasks()).not.toContain("sections");
 
-      // An edited section is read word for word until it is summarized again.
+      // An edited section is read word for word, and summarized again after the turn.
       files = samplePaper();
       files.set("sections/method.tex", sampleSources.methodTex.replace("keeps the cost low", "keeps the cost very low"));
       generate.mockClear();
       await sendChatMessage("What does Table 1 report?");
+      // The edited section is summarized after the turn, in the background.
+      expect(tasks().filter((t) => t !== "sections")).toEqual(["judge", "answer"]);
       const edited = generate.mock.calls.find(([, r]) => r.task === "answer")![1];
       expect(Object.fromEntries(edited.paperView!.sections.map((s) => [s.key, s.content]))).toMatchObject({ "3.3": "full", "3.2": "summary" });
       await summaryIdle();
