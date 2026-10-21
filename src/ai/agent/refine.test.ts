@@ -9,6 +9,11 @@ describe("parseRefine", () => {
     });
   });
 
+  it("reads the sections the answer should read word for word", () => {
+    expect(parseRefine('{"refined_question":"Explain Eq. 1","sections":["3.2", 4]}', "q")).toEqual({ kind: "refined", text: "Explain Eq. 1", sections: ["3.2"] });
+    expect(parseRefine('{"refined_question":"Summarize","sections":[]}', "q")).toEqual({ kind: "refined", text: "Summarize", sections: [] });
+  });
+
   it("reads a question to ask the user back", () => {
     expect(parseRefine('{"clarify":"Which table do you mean?"}', "q")).toEqual({ kind: "clarify", text: "Which table do you mean?" });
   });

@@ -40,6 +40,8 @@ export const MAX_OUTPUT_TOKENS = {
   answer: 16384,
   // One tool call with the changes to the session summary.
   summary: 4096,
+  // One tool call with a few sentences per section of a batch.
+  sections: 8192,
 } as const;
 
 export interface ModelChoice {
@@ -64,6 +66,8 @@ export const CHAT_MODELS: Record<ChatTask, { primary: ModelChoice; fallback: Mod
   answer: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
   // Runs in the background every two turns.
   summary: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
+  // Runs in the background after a turn that read the paper, for sections without a summary.
+  sections: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
 };
 
 /**

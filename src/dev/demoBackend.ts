@@ -170,9 +170,14 @@ function editBlock(path: string, original: string, revised: string): string {
   return `\`\`\`edit ${path}\n<<<<<<< ORIGINAL\n${original}\n=======\n${revised}\n>>>>>>> REVISED\n\`\`\``;
 }
 
+/** The paper text in a prompt: whole files, or the sections sent word for word. */
+function paperTexts(prompt: string): { path: string; text: string }[] {
+  return [...prompt.matchAll(/<(?:file path|source file)="([^"]+)"[^>]*>\n([\s\S]*?)\n<\/(?:file|source)>/g)].map((m) => ({ path: m[1], text: m[2] }));
+}
+
 /** Edit request: edit blocks for a sentence quoted in the request, or for every file on a paper-wide request. */
 function simulateAgent(userMessage: string, instruction: string): string {
-  const files = [...userMessage.matchAll(/<file path="([^"]+)">\n([\s\S]*?)\n<\/file>/g)].map((m) => ({ path: m[1], text: m[2] }));
+  const files = paperTexts(userMessage);
   const blocks: string[] = [];
   const quoted = /["“]([^"”]{10,})["”]/.exec(instruction)?.[1];
   if (/whole|entire|across|all|전체|모든|통일/i.test(instruction)) {
@@ -198,16 +203,38 @@ const SMALL_TALK = /^\s*(hi|hello|hey|thanks|thank you|ok|okay|안녕|고마워|
 const VAGUE = /핵심|요약|전체|전반|무슨 내용|어때|왜|이거|그거|summar|overall|main idea|key point|gist|why/i;
 const hangul = (text: string) => /[가-힣]/.test(text);
 
-/** Chat Orchestrator's judge: one tool per route, with the reason for it. */
+/** Sections of the paper map whose title the question names, such as "Section 3" or "the Method". */
+function namedSections(last: string, question: string): string[] {
+  const map = /<paper_map summaries="(?!none)[^"]*">\n([\s\S]*?)\n<\/paper_map>/.exec(last)?.[1] ?? "";
+  const asked = question.toLowerCase();
+  const keys: string[] = [];
+  for (const m of map.matchAll(/^\s*\[([^\]]+)\] ([^(\n]+?) \(/gm)) {
+    if (asked.includes(m[2].toLowerCase()) || new RegExp(`\\b(section|sec\\.?|§)\\s*${m[1].replace(/\./g, "\\.")}\\b`, "i").test(question)) keys.push(m[1]);
+  }
+  return keys;
+}
+
+/** Chat Orchestrator's judge: one tool per route, with the reason for it and the sections to read. */
 function simulateJudge(last: string): DemoReply {
   const question = between(last, "user_message") ?? "";
   if (SMALL_TALK.test(question) && question.length < 40) {
     return { tool: { name: "reply_directly", args: { reason: "The message is small talk, not a question about the paper." } } };
   }
+  const sections = namedSections(last, question);
   if (VAGUE.test(question) && !EDIT_REQUEST.test(question)) {
-    return { tool: { name: "refine_question", args: { reason: "The message is broad; refine it with the paper first." } } };
+    return { tool: { name: "refine_question", args: { reason: "The message is broad; refine it with the paper first.", sections } } };
   }
-  return { tool: { name: "answer_question", args: { reason: "The message says what it is about." } } };
+  return { tool: { name: "answer_question", args: { reason: "The message says what it is about.", sections } } };
+}
+
+/** Section Summary Module: the first sentence of each section, as plain text. */
+function simulateSectionSummaries(last: string): DemoReply {
+  const summaries = [...last.matchAll(/<section key="([^"]+)" title="([^"]*)">\n([\s\S]*?)\n<\/section>/g)].map((m) => {
+    const text = latexToPlain(m[3].replace(/\\(?:sub)*section\*?\{[^}]*\}/g, "")).replace(/\s+/g, " ").trim();
+    const first = /^.*?[.!?](\s|$)/.exec(text)?.[0]?.trim() ?? text.slice(0, 160);
+    return { key: m[1], summary: `${m[2]}: ${first || "(no text)"}` };
+  });
+  return { tool: { name: "write_section_summaries", args: { summaries } } };
 }
 
 /** Refine Module: restate the question with the paper's title and the editor location, or ask back. */
@@ -232,7 +259,9 @@ function simulateAnswerModule(all: string, last: string): string {
   }
   const refined = between(last, "refined_question");
   const files = [...all.matchAll(/<file path="([^"]+)">/g)].map((m) => m[1]);
-  const answer = `Demo answer to "${refined ?? question}". In the desktop app, the connected model answers from the whole paper (${files.join(", ") || "no files"}).`;
+  const full = [...all.matchAll(/<section key="([^"]+)" title="[^"]*" content="full">/g)].map((m) => m[1]);
+  const read = all.includes('content="summary"') ? `sections ${full.join(", ")} word for word and the others as summaries` : `the whole paper (${files.join(", ") || "no files"})`;
+  const answer = `Demo answer to "${refined ?? question}". In the desktop app, the connected model answers from ${read}.`;
   // Ask about "markdown" or "형식" to see how answers are rendered.
   if (!/markdown|마크다운|형식/i.test(question)) return answer;
   return [
@@ -281,12 +310,13 @@ function simulateReply(body: Record<string, any>, messages: { content: string }[
   const all = messages.map((m) => m.content).join("\n\n");
   const tools: string[] = Array.isArray(body.tools) ? body.tools.map((t: { name?: string }) => t.name ?? "") : [];
   if (tools.includes("update_summary")) return simulateSummary(last);
+  if (tools.includes("write_section_summaries")) return simulateSectionSummaries(last);
   if (tools.length) return simulateJudge(last);
   if (last.includes("<task>\nReply to the user's message.")) {
     const question = between(last, "user_message") ?? "";
     return { text: hangul(question) ? "천만에요! 논문에 대해 궁금한 점을 물어보세요." : "You're welcome! Ask me anything about the paper." };
   }
-  if (last.includes('{"refined_question":"..."}')) return { text: simulateRefine(all, last) };
+  if (last.includes('"refined_question":"..."')) return { text: simulateRefine(all, last) };
   if (last.includes("You are the Answer Module")) return { text: simulateAnswerModule(all, last) };
   return { text: simulateAnswer(last) };
 }
@@ -349,11 +379,20 @@ function anthropicStream(reply: DemoReply): string[] {
 // ------------------------------------------------------------------ backend
 
 const CHATS_KEY = "logica-demo-chats";
+const PAPERS_KEY = "logica-demo-papers";
 type DemoSession = { createdAt: number; updatedAt: number; messages: { role: string; content: string }[] };
 
 function demoChats(): Record<string, Record<string, DemoSession>> {
   try {
     return JSON.parse(localStorage.getItem(CHATS_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function demoReports(): Record<string, unknown> {
+  try {
+    return JSON.parse(localStorage.getItem(PAPERS_KEY) ?? "{}");
   } catch {
     return {};
   }
@@ -593,6 +632,11 @@ export function createDemoBackend(): DemoBackend {
       const all = demoChats();
       delete all[root]?.[id];
       localStorage.setItem(CHATS_KEY, JSON.stringify(all));
+    },
+    // The paper report of each project: localStorage stands in for the local data folder.
+    paper_load_report: ({ root }) => demoReports()[root] ?? null,
+    paper_save_report: ({ root, report }) => {
+      localStorage.setItem(PAPERS_KEY, JSON.stringify({ ...demoReports(), [root]: report }));
     },
     load_app_state: () => {
       try {

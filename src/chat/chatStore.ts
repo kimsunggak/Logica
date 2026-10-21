@@ -6,7 +6,9 @@
  * whether to reply directly, answer, or refine the question first, and
  * reports every step to the localhost runtime debugger in development. After
  * a turn the Summary Module (`./session/summarizer.ts`) folds older turns
- * into the summary in the background.
+ * into the summary, and after a turn that read the paper the Section Summary
+ * Module (`./paper/sectionSummarizer.ts`) summarizes the sections the paper
+ * report has no summary for, both in the background.
  */
 import { create } from "zustand";
 import { AIError } from "../ai/errors";
@@ -15,14 +17,17 @@ import { CHAT_MODELS } from "../ai/models/modelConfig";
 import { aiService, newRequestId } from "../ai/service";
 import { lineOf, locateEdit, type ProposedEdit } from "../ai/agent/edits";
 import { deleteSession, listSessions, loadSession, newSessionId, saveSession, SESSION_VERSION, type SessionSummary } from "./chatHistory";
-import { editorLocation, runChatTurn, type Outcome, type Paper, type Stage, type Turn } from "./orchestrator";
+import { editorLocation, runChatTurn, type Outcome, type Paper, type Route, type Stage, type Turn } from "./orchestrator";
+import { emptyReport, loadReport, saveReport, summariesFor, unitsToSummarize, withSummaries, type PaperReport } from "./paper/report";
+import { summarizeSections } from "./paper/sectionSummarizer";
+import { FRONT, paperUnits } from "./paper/sections";
 import { foldTurns, turnsToFold } from "./session/summarizer";
 import { readSummary, type ConversationSummary } from "./session/summary";
 import { turnsOf } from "./session/turns";
 import { endSpan, failSpan, startSpan, step, type Span } from "../debug/trace";
 import type { ProjectFile, ProviderId } from "../ai/types";
 import { editorSession } from "../editor/editorSession";
-import { outlineText, sectionAt, sectionTrail } from "../latex/parser/documentModel";
+import { buildPaperDocument, outlineText, sectionAt, sectionTrail } from "../latex/parser/documentModel";
 import { currentTexts, navigateTo, openFile } from "../project/projectActions";
 import { notify, useProject } from "../project/projectStore";
 import { t } from "../i18n";
@@ -81,16 +86,24 @@ export const useChat = create<ChatState>()(() => ({
 /** Characters of paper source sent to the Refine and Answer modules (roughly 40k tokens). */
 const PAPER_BUDGET = 150_000;
 
-/**
- * The whole paper: the main file and the files it includes, in reading
- * order, as long as they fit the budget. A file open in the editor that is
- * not part of the paper goes first.
- */
-function paperFiles(activePath: string | undefined): Paper {
-  const { doc } = useProject.getState();
+/** The paper as it is now, with unsaved changes: its model and its `.tex` sources. */
+function paperNow() {
   const texts = currentTexts();
-  const paths = (doc?.files ?? []).filter((f) => f.included && !f.missing).map((f) => f.path);
-  if (activePath && texts.has(activePath) && !paths.includes(activePath)) paths.unshift(activePath);
+  const tex = new Map([...texts].filter(([path]) => path.endsWith(".tex")));
+  return { texts, tex, doc: buildPaperDocument({ mainFile: useProject.getState().mainFile, files: tex }) };
+}
+
+/**
+ * The paper as this turn reads it. The whole paper is the main file and the
+ * files it includes, in reading order, as long as they fit the budget; a
+ * file open in the editor that is not part of the paper goes first. Its
+ * section units come with the summaries the paper report has for them.
+ */
+function paperOf(activePath: string | undefined, report: PaperReport): Paper {
+  const { texts, tex, doc } = paperNow();
+  const paths = doc.files.filter((f) => f.included && !f.missing).map((f) => f.path);
+  const open = activePath && texts.has(activePath) && !paths.includes(activePath) ? { path: activePath, text: texts.get(activePath)! } : undefined;
+  if (open) paths.unshift(open.path);
   const files: ProjectFile[] = [];
   const omitted: string[] = [];
   let used = 0;
@@ -104,7 +117,8 @@ function paperFiles(activePath: string | undefined): Paper {
     files.push({ path, text });
     used += text.length;
   }
-  return { files, omitted, budget: PAPER_BUDGET };
+  const { units, macros } = paperUnits(doc, tex);
+  return { files, omitted, budget: PAPER_BUDGET, units, summaries: summariesFor(units, report), macros, ...(open ? { openFile: open } : {}) };
 }
 
 function updateMessage(id: string, patch: Partial<ChatMessage>) {
@@ -163,11 +177,14 @@ export async function sendChatMessage(text: string): Promise<void> {
   }));
   const control: RunControl = { stopped: false, activeRequest: null };
   running = control;
+  let route: Route | undefined;
   try {
+    const project = useProject.getState().root;
+    const report = project ? await loadReport(project) : emptyReport();
     const result = await runChatTurn(turn, {
       root,
       control,
-      paper: () => paperFiles(turn.activePath),
+      paper: () => paperOf(turn.activePath, report),
       hooks: {
         onStage: (stage) => updateMessage(requestId, { stage }),
         onRefined: (refined) => updateMessage(requestId, { refined }),
@@ -175,6 +192,7 @@ export async function sendChatMessage(text: string): Promise<void> {
         onModel: (choice) => updateMessage(requestId, { provider: choice.provider, model: choice.model }),
       },
     });
+    route = result.route;
     const content = result.content + (result.finishReason === "length" ? `\n\n${t("chat.truncated")}` : "");
     updateMessage(requestId, {
       content,
@@ -206,6 +224,8 @@ export async function sendChatMessage(text: string): Promise<void> {
     useChat.setState({ runningId: null });
     // Stopped and failed turns count too: they are turns left unanswered.
     scheduleSummary({ traceId: requestId, root });
+    // A turn that may have read the paper: summarize the sections the report lacks.
+    if (route !== "reply") scheduleSectionSummaries({ traceId: requestId, root });
   }
 }
 
@@ -272,9 +292,76 @@ function stopSummary() {
   if (job.control.activeRequest) void aiService.cancel(job.control.activeRequest);
 }
 
-/** Resolves once no summary is being made (for tests). */
+/** Resolves once no summary (of the session or of sections) is being made (for tests). */
 export async function summaryIdle(): Promise<void> {
-  while (summarizing) await summarizing.done;
+  while (summarizing || sectioning) await (summarizing ?? sectioning)!.done;
+}
+
+// ---------------------------------------------------------------- section summaries
+
+/** The Section Summary Module run in the background, for one project at a time. */
+let sectioning: { control: RunControl; again: boolean; done: Promise<void> } | null = null;
+/** The turn that ended last; a section summary run shows in its trace. */
+let sectionTrace: { traceId: string; root: Span } | null = null;
+
+/**
+ * Summarize the sections the paper report has no summary for (see
+ * `./paper/sectionSummarizer.ts`) and save them in the report. It runs
+ * after a turn that read the paper, and stops when another project opens.
+ */
+export function scheduleSectionSummaries(after?: { traceId: string; root: Span }) {
+  if (after) sectionTrace = after;
+  if (sectioning) {
+    sectioning.again = true;
+    return;
+  }
+  const project = useProject.getState().root;
+  const trace = sectionTrace;
+  if (!project || !trace) return;
+  const control: RunControl = { stopped: false, activeRequest: null };
+  const current = () => !control.stopped && useProject.getState().root === project;
+  const run = async () => {
+    const report = await loadReport(project);
+    const { tex, doc } = paperNow();
+    const { units } = paperUnits(doc, tex);
+    const todo = unitsToSummarize(units, report);
+    const sections = units.filter((u) => u.key !== FRONT).length;
+    step(trace.traceId, trace.root, "sections", "checkSectionSummaries", () => ({ sections }), () => ({
+      sections,
+      summarized: sections - todo.length,
+      to_summarize: todo.map((u) => u.key),
+    }));
+    if (!todo.length || !current()) return;
+    const result = await summarizeSections(todo, {
+      traceId: trace.traceId,
+      parent: trace.root,
+      control,
+      title: doc.title,
+      outline: doc.flatSections.length ? outlineText(doc, 3000) : undefined,
+    }).catch(() => null);
+    if (!result?.summarized.length || !current()) return;
+    await saveReport(project, withSummaries(await loadReport(project), result.summarized, units));
+  };
+  const job = { control, again: false, done: Promise.resolve() };
+  job.done = run()
+    .catch(() => {
+      // Tried again after the next turn; until then the sections are read word for word.
+    })
+    .finally(() => {
+      if (sectioning !== job) return;
+      sectioning = null;
+      if (job.again && !control.stopped) scheduleSectionSummaries();
+    });
+  sectioning = job;
+}
+
+/** Stop summarizing sections of the project being left. */
+function stopSectionSummaries() {
+  const job = sectioning;
+  if (!job) return;
+  sectioning = null;
+  job.control.stopped = true;
+  if (job.control.activeRequest) void aiService.cancel(job.control.activeRequest);
 }
 
 // ---------------------------------------------------------------- saved sessions
@@ -283,6 +370,7 @@ export async function summaryIdle(): Promise<void> {
 export async function openChatsFor(root: string | null): Promise<void> {
   stopChat();
   stopSummary();
+  stopSectionSummaries();
   clearTimeout(saveTimer);
   useChat.setState({ root, messages: [], summary: null, sessions: [], sessionId: newSessionId(), createdAt: Date.now() });
   if (!root) return;

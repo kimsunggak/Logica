@@ -13,6 +13,13 @@
  * fallback). In development each step is reported to the runtime debugger
  * (see `src/debug/trace.ts`).
  *
+ * The judge reads the paper map (L0, see `./paper/`) and, for the answer and
+ * refine routes, names the sections to read word for word; the Refine Module
+ * may correct that choice. The Refine and Answer modules then read those
+ * sections word for word and the rest as summaries, or the whole paper while
+ * the paper report has no summaries. An answer that still needs a section it
+ * has only as a summary asks for it once, and is written again with it.
+ *
  * Every call reads the session summary (L1) and recent turns word for word
  * (L2): at least four turns for the judge, two for the other modules,
  * including every turn the summary does not cover yet (see `./session/`).
@@ -20,9 +27,11 @@
 import { parseRefine, type RefineResult } from "../ai/agent/refine";
 import { callModel, type GatewayOptions, type GatewayResult, type RunControl } from "../ai/gateway";
 import type { ModelChoice } from "../ai/models/modelConfig";
+import { NEED_SECTIONS } from "../ai/prompts/answer";
 import { ANSWER_QUESTION, CHAT_TOOLS, REFINE_QUESTION, REPLY_DIRECTLY } from "../ai/tools/chatTools";
-import type { AIContext, AIMessage, AIResponse, AIUsage, FinishReason, ProjectFile } from "../ai/types";
+import type { AIContext, AIMessage, AIResponse, AIUsage, FinishReason } from "../ai/types";
 import { step, traced, type Span } from "../debug/trace";
+import { describeScope, paperMap, paperRequest, resolveScope, type Paper, type Scope } from "./paper/scope";
 import { renderSummary, type ConversationSummary } from "./session/summary";
 import { JUDGE_MESSAGE_CHARS, JUDGE_TURNS, MODULE_MESSAGE_CHARS, MODULE_TURNS, selectHistory, type Clipped, type TurnRecord } from "./session/turns";
 
@@ -44,11 +53,7 @@ export interface Turn {
   activePath?: string;
 }
 
-export interface Paper {
-  files: ProjectFile[];
-  omitted: string[];
-  budget: number;
-}
+export type { Paper } from "./paper/scope";
 
 export interface TurnHooks {
   onStage?: (stage: Stage) => void;
@@ -79,7 +84,7 @@ export interface OrchestratorDeps {
   root: Span;
   control: RunControl;
   hooks: TurnHooks;
-  /** The paper for the Refine and Answer modules; read once per turn. */
+  /** The paper, read once at the start of the turn: the judge reads its map. */
   paper: () => Paper;
   /** Model calls; the LLM Gateway unless a test replaces it. */
   call?: typeof callModel;
@@ -88,23 +93,33 @@ export interface OrchestratorDeps {
 /** Why a tool call came without a usable reason (it only goes to the debugger). */
 export type ReasonIssue = "arguments_unreadable" | "reason_missing";
 
+/** The judge's choice: the route, why, and for the paper routes the sections to read word for word. */
+export interface Decision {
+  route: Route;
+  reason?: string;
+  sections?: string[];
+  reasonIssue?: ReasonIssue;
+}
+
 /**
  * The judge's choice: the tool it called, and why. The route comes from the
  * tool's name, so a broken argument never changes it; it is only reported.
  */
-export function chooseRoute(response: AIResponse): { route: Route; reason?: string; reasonIssue?: ReasonIssue } {
+export function chooseRoute(response: AIResponse): Decision {
   const decision = routeOf(response);
   const call = response.toolCalls?.[0];
   if (!call || decision.reason) return decision;
   return { ...decision, reasonIssue: call.argumentsError ? "arguments_unreadable" : "reason_missing" };
 }
 
-function routeOf(response: AIResponse): { route: Route; reason?: string } {
+function routeOf(response: AIResponse): Decision {
   const call = response.toolCalls?.[0];
   const reason = typeof call?.arguments.reason === "string" ? call.arguments.reason.trim() || undefined : undefined;
+  const listed = call?.arguments.sections;
+  const sections = Array.isArray(listed) ? { sections: listed.filter((s): s is string => typeof s === "string") } : {};
   if (call?.name === REPLY_DIRECTLY) return { route: "reply", reason };
-  if (call?.name === ANSWER_QUESTION) return { route: "answer", reason };
-  if (call?.name === REFINE_QUESTION) return { route: "refine", reason };
+  if (call?.name === ANSWER_QUESTION) return { route: "answer", reason, ...sections };
+  if (call?.name === REFINE_QUESTION) return { route: "refine", reason, ...sections };
   // The judge must call a tool. Text without one is read as small talk;
   // an unknown tool or no reply at all as a question to refine, as when unsure.
   if (!call && response.text.trim()) return { route: "reply" };
@@ -147,12 +162,49 @@ export function conversationFor(turn: Turn, reader: "judge" | "module"): Convers
   };
 }
 
-function paperSummary(paper: Paper) {
+/** What the debugger shows of the paper a module reads. */
+function paperRead(paper: Paper, scope: Scope) {
+  if (scope.kind === "sections") return describeScope(scope);
   return {
+    ...describeScope(scope),
     files: paper.files.map((f) => ({ path: f.path, chars: f.text.length })),
-    omitted: paper.omitted,
-    total_chars: paper.files.reduce((n, f) => n + f.text.length, 0),
+    omitted_files: paper.omitted,
     text: paper.files.map((f) => `% ---- ${f.path}\n${f.text}`).join("\n"),
+  };
+}
+
+/** The sections an answer asked for instead of answering, or null when it answered. */
+export function askedForSections(text: string): string[] | null {
+  const head = text.trimStart();
+  if (!head.startsWith(NEED_SECTIONS)) return null;
+  const end = head.indexOf("]]");
+  const list = head.slice(NEED_SECTIONS.length, end < 0 ? undefined : end);
+  return list.split(",").map((k) => k.trim()).filter(Boolean);
+}
+
+/**
+ * The answer's text for the screen, held back while it may still be a request
+ * for sections: such a request is never shown.
+ */
+function holdBack(onText?: (full: string) => void) {
+  let open = false;
+  let last = "";
+  return {
+    onText(full: string) {
+      last = full;
+      if (!open) {
+        const head = full.trimStart();
+        if (!head || (head.length < NEED_SECTIONS.length ? NEED_SECTIONS.startsWith(head) : head.startsWith(NEED_SECTIONS))) return;
+        open = true;
+      }
+      onText?.(full);
+    },
+    /** Show what was held back: it was an answer after all. */
+    release() {
+      if (open || !last) return;
+      open = true;
+      onText?.(last);
+    },
   };
 }
 
@@ -177,15 +229,17 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
   const judgeReads = conversationFor(turn, "judge");
   const moduleReads = conversationFor(turn, "module");
   const ask = { instruction: turn.instruction, context: turn.context, sessionSummary: moduleReads.sessionSummary, history: moduleReads.history };
-  let paper: Paper | null = null;
-  const readPaper = (span: Span, module: "refine" | "answer"): Paper => {
-    paper ??= deps.paper();
-    const read = paper;
-    step(turn.id, span, module, "paperFiles", { budget_chars: read.budget, active_file: turn.activePath ?? null }, () => paperSummary(read));
-    return read;
+  const paper = deps.paper();
+  const map = paperMap(paper);
+  // The sections chosen so far (judge, then Refine Module), and what they make of the paper.
+  let requested: string[] | undefined;
+  let scope: Scope = resolveScope(paper, undefined);
+  const readPaper = (span: Span, module: "refine" | "answer") => {
+    step(turn.id, span, module, "paperView", { sections: requested ?? null, budget_chars: paper.budget, active_file: turn.activePath ?? null }, () => paperRead(paper, scope));
+    return paperRequest(paper, scope);
   };
 
-  // 1. The judge decides what happens with the message.
+  // 1. The judge decides what happens with the message, and which sections to read.
   hooks.onStage?.("judge");
   const judged = await traced(
     turn.id,
@@ -197,15 +251,21 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
       ...editorLocation(turn),
       session_turns: turn.turns.length,
       summary_covered_turns: turn.summary?.coveredTurns ?? 0,
+      paper_map: map ? { sections: map.filter((e) => !e.always).length, summarized: map.filter((e) => e.summary).length } : null,
       tools: CHAT_TOOLS.map((tool) => tool.name),
     }),
     async (span) => {
-      const result = await call("judge", { ...ask, history: judgeReads.history, id: `${turn.id}-judge`, tools: CHAT_TOOLS }, options(span, judgeReads));
+      const result = await call("judge", { ...ask, history: judgeReads.history, ...(map ? { paperMap: map } : {}), id: `${turn.id}-judge`, tools: CHAT_TOOLS }, options(span, judgeReads));
       const decision = chooseRoute(result.response);
       step(turn.id, span, "orchestrator", "chooseRoute", () => ({ text: result.response.text, tool_calls: result.response.toolCalls ?? [] }), decision);
       return { ...decision, result };
     },
-    (judged) => ({ route: judged.route, reason: judged.reason ?? null, ...(judged.reasonIssue ? { reason_issue: judged.reasonIssue } : {}) }),
+    (judged) => ({
+      route: judged.route,
+      reason: judged.reason ?? null,
+      ...(judged.route !== "reply" ? { sections: judged.sections ?? [] } : {}),
+      ...(judged.reasonIssue ? { reason_issue: judged.reasonIssue } : {}),
+    }),
   );
 
   // 2a. Small talk: the Reply Module answers without the paper.
@@ -222,6 +282,8 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
     );
     return { route: "reply", outcome: "reply", reason: judged.reason, content: replied.response.text.trim(), ...finished(replied) };
   }
+  requested = judged.sections;
+  scope = resolveScope(paper, requested);
 
   // 2b. Refine an abstract question first, or ask the user back.
   let refined: string | undefined;
@@ -234,12 +296,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
       "runRefineModule",
       () => ({ question: turn.instruction, ...editorLocation(turn), ...moduleReads.info }),
       async (span): Promise<{ parsed: RefineResult; result: GatewayResult }> => {
-        const read = readPaper(span, "refine");
-        const result = await call(
-          "refine",
-          { ...ask, id: `${turn.id}-refine`, projectFiles: read.files, omittedFiles: read.omitted },
-          options(span, moduleReads),
-        );
+        const result = await call("refine", { ...ask, id: `${turn.id}-refine`, ...readPaper(span, "refine") }, options(span, moduleReads));
         const parsed = parseRefine(result.response.text, turn.instruction);
         step(turn.id, span, "refine", "parseRefine", result.response.text, parsed);
         return { parsed, result };
@@ -251,9 +308,14 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
     }
     refined = parsed.text;
     hooks.onRefined?.(refined);
+    // With the question settled, the Refine Module's choice of sections replaces the judge's.
+    if (scope.kind === "sections" && parsed.sections) {
+      requested = parsed.sections;
+      scope = resolveScope(paper, requested);
+    }
   }
 
-  // 3. Answer from the whole paper; the answer streams to the screen.
+  // 3. Answer from the paper; the answer streams to the screen.
   hooks.onStage?.("answer");
   const answered = await traced(
     turn.id,
@@ -262,12 +324,20 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
     "runAnswerModule",
     () => ({ question: turn.instruction, refined_question: refined ?? null, ...moduleReads.info }),
     async (span) => {
-      const read = readPaper(span, "answer");
-      return call(
-        "answer",
-        { ...ask, id: turn.id, projectFiles: read.files, omittedFiles: read.omitted, refinedQuestion: refined },
-        options(span, moduleReads, hooks.onText),
-      );
+      const request = { ...ask, id: turn.id, refinedQuestion: refined };
+      const mayAsk = scope.kind === "sections";
+      const shown = holdBack(hooks.onText);
+      const first = await call("answer", { ...request, ...readPaper(span, "answer"), ...(mayAsk ? { mayAskForSections: true } : {}) }, options(span, moduleReads, mayAsk ? shown.onText : hooks.onText));
+      const asked = mayAsk ? askedForSections(first.response.text) : null;
+      if (!asked) {
+        shown.release();
+        return first;
+      }
+      // Once: the second answer gets those sections word for word and must answer.
+      requested = [...(requested ?? []), ...asked];
+      scope = resolveScope(paper, requested);
+      step(turn.id, span, "answer", "askForSections", asked, () => describeScope(scope));
+      return call("answer", { ...request, id: `${turn.id}-more`, ...readPaper(span, "answer") }, options(span, moduleReads, hooks.onText));
     },
     (result) => ({ text: result.response.text, finishReason: result.response.finishReason, model: result.choice.model }),
   );

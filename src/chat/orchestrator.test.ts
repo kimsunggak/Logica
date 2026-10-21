@@ -3,8 +3,12 @@ import { AIError } from "../ai/errors";
 import type { ChatRequest, GatewayOptions, GatewayResult } from "../ai/gateway";
 import { CHAT_MODELS } from "../ai/models/modelConfig";
 import type { AIResponse, ChatTask, ToolCall } from "../ai/types";
+import { buildPrompt } from "../ai/prompts";
 import { startSpan } from "../debug/trace";
-import { chooseRoute, conversationFor, runChatTurn, type Stage, type Turn } from "./orchestrator";
+import { buildPaperDocument } from "../latex/parser/documentModel";
+import { samplePaper } from "../test/samplePaper";
+import { askedForSections, chooseRoute, conversationFor, runChatTurn, type Paper, type Stage, type Turn } from "./orchestrator";
+import { FRONT, paperUnits } from "./paper/sections";
 import { addUnresolved, emptySummary } from "./session/summary";
 import type { TurnRecord } from "./session/turns";
 
@@ -45,9 +49,9 @@ const history = [
   { role: "user", content: "hi" },
   { role: "assistant", content: "hello" },
 ];
-const paper = { files: [{ path: "main.tex", text: "\\section{Method} We route tokens." }], omitted: [], budget: 1000 };
+const paper: Paper = { files: [{ path: "main.tex", text: "\\section{Method} We route tokens." }], omitted: [], budget: 1000 };
 
-function run(replies: Partial<Record<ChatTask, Reply>>, inputTurn: Turn = turn) {
+function run(replies: Partial<Record<ChatTask, Reply>>, inputTurn: Turn = turn, inputPaper: Paper = paper) {
   const { call, log } = gateway(replies);
   const stages: Stage[] = [];
   const refined: string[] = [];
@@ -58,7 +62,7 @@ function run(replies: Partial<Record<ChatTask, Reply>>, inputTurn: Turn = turn) 
     control: { stopped: false, activeRequest: null },
     paper: () => {
       paperReads++;
-      return paper;
+      return inputPaper;
     },
     call: call as never,
     hooks: { onStage: (s) => stages.push(s), onRefined: (q) => refined.push(q), onText: (t) => text.push(t) },
@@ -158,8 +162,10 @@ describe("Chat Orchestrator", () => {
     expect(reply.instruction).toBe(turn.instruction);
     expect(reply.history).toEqual(history);
     expect(reply.projectFiles).toBeUndefined();
+    expect(reply.paperView).toBeUndefined();
     expect(reply.tools).toBeUndefined();
-    expect(r.reads()).toBe(0);
+    // Read once, for the judge's paper map.
+    expect(r.reads()).toBe(1);
     expect(r.text).toEqual(["천만에요!"]);
     expect(r.stages).toEqual(["judge", "reply"]);
   });
@@ -169,7 +175,7 @@ describe("Chat Orchestrator", () => {
     await r.result;
     const judge = r.log[0].request;
     expect(judge.tools?.map((t) => t.name)).toEqual(["reply_directly", "answer_question", "refine_question"]);
-    for (const t of judge.tools ?? []) expect(t.parameters).toMatchObject({ required: ["reason"] });
+    expect(judge.tools?.map((t) => (t.parameters as { required: string[] }).required)).toEqual([["reason"], ["reason", "sections"], ["reason", "sections"]]);
     expect(judge.instruction).toBe(turn.instruction);
     expect(judge.history).toEqual(history);
     expect(judge.projectFiles).toBeUndefined();
@@ -252,5 +258,119 @@ describe("Chat Orchestrator", () => {
           : { response: response("from Claude"), choice: claude, fallbackFrom: { choice: CHAT_MODELS.answer.primary, error: new AIError("unavailable", "down") } }) as never,
     });
     expect(await r).toMatchObject({ content: "from Claude", choice: claude, fallbackFrom: CHAT_MODELS.answer.primary });
+  });
+});
+
+describe("askedForSections", () => {
+  it("reads the sections an answer asked for instead of answering", () => {
+    expect(askedForSections("[[need_sections: 3.2, 4]]")).toEqual(["3.2", "4"]);
+    expect(askedForSections("\n [[need_sections:]]")).toEqual([]);
+    expect(askedForSections("Table 2 shows [[need_sections: 4]]")).toBeNull();
+  });
+});
+
+describe("reading the paper by sections", () => {
+  const files = samplePaper();
+  const { units, macros } = paperUnits(buildPaperDocument({ files }), files);
+  const summaries = new Map(units.filter((u) => u.key !== FRONT).map((u) => [u.key, `Summary of ${u.title}.`]));
+  const sectioned = (known = summaries): Paper => ({ files: [...files].map(([path, text]) => ({ path, text })), omitted: [], budget: 150_000, units, summaries: known, macros });
+  const pick = (name: string, sections: string[]): ToolCall[] => [{ id: "c1", name, arguments: { reason: "because", sections } }];
+  const contents = (request: ChatRequest) => Object.fromEntries((request.paperView?.sections ?? []).map((s) => [s.key, s.content]));
+
+  it("reads the judge's sections from its tool call", () => {
+    expect(chooseRoute(response("", [{ id: "c1", name: "answer_question", arguments: { reason: "r", sections: ["3.2", 7] } }]))).toEqual({ route: "answer", reason: "r", sections: ["3.2"] });
+    expect(chooseRoute(response("", pick("reply_directly", ["1"]))).sections).toBeUndefined();
+  });
+
+  it("gives the judge the paper map, and reads the whole paper while the report has no summaries", async () => {
+    const r = run({ judge: () => response("", pick("answer_question", ["3.2"])), answer: () => response("ok") }, turn, sectioned(new Map()));
+    await r.result;
+    const [judge, answer] = r.log.map((c) => c.request);
+    expect(judge.paperMap?.map((e) => e.key)).toEqual(units.map((u) => u.key));
+    expect(judge.paperMap?.find((e) => e.key === FRONT)?.always).toBe(true);
+    const prompt = buildPrompt({ ...judge, task: "judge", model: "m" }).messages[0].content;
+    expect(prompt).toContain('<paper_map summaries="none">');
+    expect(prompt).toContain("  [3.2] Uncertainty Estimation (");
+    expect(answer.projectFiles?.map((f) => f.path)).toEqual([...files.keys()]);
+    expect(answer.paperView).toBeUndefined();
+    expect(answer.mayAskForSections).toBeUndefined();
+  });
+
+  it("reads the sections the judge chose word for word, with their subsections, and the rest as summaries", async () => {
+    const r = run({ judge: () => response("", pick("answer_question", ["3"])), answer: () => response("ok") }, turn, sectioned());
+    await r.result;
+    const [judge, answer] = r.log.map((c) => c.request);
+    expect(buildPrompt({ ...judge, task: "judge", model: "m" }).messages[0].content).toContain("[3.2] Uncertainty Estimation (");
+    expect(answer.projectFiles).toBeUndefined();
+    expect(contents(answer)).toMatchObject({ [FRONT]: "full", "3": "full", "3.1": "full", "3.2": "full", "3.3": "full", "1": "summary", "4.3": "summary" });
+    expect(answer.paperView?.macros).toBe(macros);
+    expect(answer.mayAskForSections).toBe(true);
+    const sent = buildPrompt({ ...answer, task: "answer", model: "m" });
+    expect(sent.messages[0].content).toContain('<section key="1" title="Introduction" content="summary">\nSummary of Introduction.\n</section>');
+    expect(sent.messages[0].content).toContain('<section key="3.2" title="Uncertainty Estimation" content="full">\n<source file="sections/method.tex" lines="9-');
+    expect(sent.messages.at(-1)!.content).toContain("[[need_sections: key, key]]");
+  });
+
+  it("reads a section without a summary word for word, and the whole paper when the judge asks for all", async () => {
+    const partial = new Map(summaries);
+    partial.delete("4.2");
+    const r = run({ judge: () => response("", pick("answer_question", [])), answer: () => response("ok") }, turn, sectioned(partial));
+    await r.result;
+    expect(contents(r.log[1].request)).toMatchObject({ [FRONT]: "full", "4.2": "full", "4.1": "summary" });
+
+    const all = run({ judge: () => response("", pick("answer_question", ["all"])), answer: () => response("ok") }, turn, sectioned());
+    await all.result;
+    expect(all.log[1].request.projectFiles).toHaveLength(files.size);
+    expect(all.log[1].request.paperView).toBeUndefined();
+  });
+
+  it("lets the Refine Module correct the judge's sections", async () => {
+    const r = run({
+      judge: () => response("", pick("refine_question", ["1"])),
+      refine: () => response('{"refined_question":"What does Table 1 report?","sections":["4.3"]}'),
+      answer: () => response("ok"),
+    }, turn, sectioned());
+    await r.result;
+    const [, refine, answer] = r.log.map((c) => c.request);
+    expect(contents(refine)).toMatchObject({ "1": "full", "4.3": "summary" });
+    expect(buildPrompt({ ...refine, task: "refine", model: "m" }).messages.at(-1)!.content).toContain('"sections":["..."]');
+    expect(contents(answer)).toMatchObject({ "1": "summary", "4.3": "full" });
+  });
+
+  it("asks once for sections the answer has only as summaries, without showing the request", async () => {
+    let answers = 0;
+    const r = run({
+      judge: () => response("", pick("answer_question", [])),
+      answer: (_req, options) => {
+        if (answers++ === 0) {
+          options.onText?.("[[need");
+          options.onText?.("[[need_sections: 4.3]]");
+          return response("[[need_sections: 4.3]]");
+        }
+        options.onText?.("Table 1 shows MPJPE.");
+        return response("Table 1 shows MPJPE.");
+      },
+    }, turn, sectioned());
+    const result = await r.result;
+    expect(result.content).toBe("Table 1 shows MPJPE.");
+    expect(r.text).toEqual(["Table 1 shows MPJPE."]);
+    expect(r.log.map((c) => c.task)).toEqual(["judge", "answer", "answer"]);
+    const second = r.log[2].request;
+    expect(contents(second)).toMatchObject({ "4.3": "full", "4.2": "summary" });
+    expect(second.mayAskForSections).toBeUndefined();
+    expect(buildPrompt({ ...second, task: "answer", model: "m" }).messages.at(-1)!.content).not.toContain("[[need_sections:");
+  });
+
+  it("shows an answer that only began like a request for sections", async () => {
+    const r = run({
+      judge: () => response("", pick("answer_question", [])),
+      answer: (_req, options) => {
+        options.onText?.("[[");
+        return response("[[");
+      },
+    }, turn, sectioned());
+    expect((await r.result).content).toBe("[[");
+    expect(r.text).toEqual(["[["]);
+    expect(r.log.map((c) => c.task)).toEqual(["judge", "answer"]);
   });
 });
