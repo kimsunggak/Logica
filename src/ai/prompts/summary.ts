@@ -15,7 +15,7 @@ const SUMMARY_RULES = [
   "<current_summary> holds the summary so far, with item ids. <turns_to_fold> holds the turns to fold into it now, oldest first; the turns after them stay in the conversation word for word.",
   `Call ${UPDATE_SUMMARY} once with the changes these turns bring. List only changes; never restate items that stay as they are.`,
   "- set_goal: the paper's topic and what the user is working on now, in one or two sentences. Only when it is missing or changed.",
-  "- add preference: something the user wants from every later answer: style, length, language, tone, terms, formatting, or a standing requirement. Not a one-off request about a single answer.",
+  "- add preference: only what the user explicitly asks for in every later answer (such as \"from now on\", \"always\" or a rule they state): style, length, language, tone, terms, formatting, or a standing requirement. Never infer one from how the user writes or reacts, and not a one-off request about a single answer.",
   "- replace: the user changed an earlier preference or reference; give its id and the new text.",
   "- add topic: one line per answered turn saying what it dealt with (the section, figure, table, problem or question). Skip small talk.",
   "- add reference: material from outside the paper the user gave in a turn (reviewer comments, text of another paper, data), copied word for word, up to 1500 characters. Not the paper's own text.",
