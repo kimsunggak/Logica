@@ -125,7 +125,7 @@ LOGICA는 특정 provider에 묶이지 않도록 공통 `AIProvider` 인터페�
 | 설정, 최근 작업, 창 배치 | `%APPDATA%\app.logica.desktop\state.json` |
 | API key, ChatGPT 로그인 토큰 | Windows 자격 증명 관리자 (macOS 키체인, Linux Secret Service) |
 
-채팅 세션 파일 형식은 `{ version, createdAt, updatedAt, messages }`입니다. 채팅창의 기록 버튼에서 이전 대화를 불러오거나 삭제하고, 새 대화 버튼으로 새 세션을 시작합니다. 논문 요약 리포트는 세션과 따로 프로젝트마다 하나이며, 형식은 아래 [논문 요약 리포트](#논문-요약-리포트)에 있습니다. 질문할 때 보내는 내용(원고 또는 섹션 요약, 질문)과 섹션 요약을 만들 때 보내는 섹션 원문은 OpenAI로 전송되고, OpenAI 호출이 실패하면 Anthropic API key가 연결된 경우 같은 내용이 Anthropic으로 전송됩니다.
+채팅 세션 파일 형식은 `{ version, createdAt, updatedAt, messages, summary }`이며, `summary`의 구조는 아래 [세션 요약](#세션-요약)에 있습니다. 채팅창의 기록 버튼에서 이전 대화를 불러오거나 삭제하고, 새 대화 버튼으로 새 세션을 시작합니다. 논문 요약 리포트(섹션별 요약)는 세션과 따로 프로젝트마다 하나입니다. 질문할 때 보내는 내용(원고 또는 섹션 요약, 질문)과 섹션 요약을 만들 때 보내는 섹션 원문은 OpenAI로 전송되고, OpenAI 호출이 실패하면 Anthropic API key가 연결된 경우 같은 내용이 Anthropic으로 전송됩니다.
 
 ## 보안 설계
 
@@ -140,7 +140,7 @@ LOGICA는 특정 provider에 묶이지 않도록 공통 `AIProvider` 인터페�
 
 ## AI context 구성
 
-인라인 편집은 선택 텍스트만 보내지 않고, 같은 문서 모델(`PaperDocument`)에서 필요한 부분만 골라 공통 semantic context를 만듭니다. 채팅은 논문을 처음 읽을 때만 원고 전체를 보내고, 그 뒤에는 질문에 필요한 섹션만 원문으로, 나머지 섹션은 [논문 요약 리포트](#논문-요약-리포트)의 요약으로 보냅니다.
+인라인 편집은 선택 텍스트만 보내지 않고, 같은 문서 모델(`PaperDocument`)에서 필요한 부분만 골라 공통 semantic context를 만듭니다. 채팅은 논문을 처음 읽을 때만 원고 전체를 보내고, 그 뒤에는 질문에 필요한 섹션만 원문으로, 나머지 섹션은 논문 요약 리포트에 저장한 섹션 요약으로 보냅니다.
 
 ![AI 채팅 에이전트 구조: Chat Orchestrator가 판단 LLM으로 Reply, Answer, Refine 중 갈래를 고르고, 모든 LLM 호출은 LLM Gateway와 Rust를 거쳐 OpenAI나 Anthropic으로 갑니다](docs/images/chat-agent-architecture.png)
 
@@ -155,7 +155,7 @@ AI 채팅 에이전트 구조 (원본: [`docs/images/chat-agent-architecture.svg
   - 편집기의 선택 텍스트, 커서 문단, 커서 section은 보내지 않습니다. 커서와 선택은 마지막으로 작업한 자리에 남아 있어 질문과 관계없는 경우가 많기 때문입니다. 특정 부분을 물으려면 질문에 section 이름이나 문장을 적습니다.
   - 대화 상태는 네 층으로 보냅니다(`src/chat/paper/`, `src/chat/session/`).
     - L0: 규칙과 툴, 그리고 논문. 판단은 논문 지도를, 정제와 답변은 섹션 원문과 요약(또는 원고 전체)을 받습니다. 가장 덜 바뀌므로 맨 앞에 둡니다.
-    - L1 세션 요약: 목표, 선호 P#(답변 스타일과 계속 지킬 요구), 답하지 못한 요청 U#, 다룬 내용 T#(응답마다 한 줄), 사용자가 준 논문 밖 자료 R#. 요약에 안 들어간 턴이 4개가 되면 마지막 2턴을 남기고 나머지를 접습니다(4턴 끝, 6턴 끝, 8턴 끝처럼 2턴마다). 요약 모듈(`gpt-6.1-sol` low)은 요약을 새로 쓰지 않고 `update_summary` 툴로 바뀐 항목(add, replace, close, set_goal)만 돌려주며, 코드가 검사해 적용합니다. U#는 코드가 턴 상태(중지, 실패, 길이 초과로 잘림, 되물음)로 만들고 모델은 닫기만 합니다. 렌더링 결과는 최대 4,000자이고, 넘치면 닫힌 요청, 대체된 선호, 오래된 다룬 내용 순으로 뺍니다. 요약은 세션 파일에 함께 저장됩니다.
+    - L1 세션 요약: 오래된 턴을 접은 대화 요약입니다(목표, 선호 P#, 답하지 못한 요청 U#, 다룬 내용 T#, 사용자가 준 논문 밖 자료 R#). 요약에 안 들어간 턴이 4개가 되면 마지막 2턴을 남기고 나머지를 접습니다. 저장 형태, 항목 규칙, 모델에 들어가는 텍스트는 아래 [세션 요약](#세션-요약)에 있습니다.
     - L2 최근 턴 원문: 공통 선택 함수가 판단은 최근 4턴(메시지당 10,000자), 나머지 모듈은 최근 2턴(메시지당 4,000자)을 선택합니다. 요약이 지연되거나 실패하면 모든 미요약 턴까지 범위를 넓혀 대화 누락을 막습니다. 메시지 길이 상한을 넘으면 앞 70%와 뒤 30%를 남기고 가운데를 생략 표시합니다.
     - L3: 열린 파일 이름, 지금 질문, 모듈의 작업 지시. 지금 질문은 자르지 않습니다.
   - 1턴은 질문 하나와 그 결과입니다. 중지되거나 실패하거나 길이 초과로 잘린 답도 턴으로 남기고 `[answer stopped by the user]` 같은 표시를 붙여, 다음 질문에서 모델이 답하지 못한 요청을 알 수 있게 합니다(오류 문구 자체는 보내지 않습니다). 지금 보내는 질문은 아직 턴이 아니므로, 첫 질문에서 디버거의 `session_turns`는 0입니다. Orchestrator 입력에는 `session_turns`, `summary_covered_turns`, 논문 지도의 요약 수(`paper_map`)를, 출력에는 고른 `sections`를, 각 LLM 호출에는 실제 읽는 원문 번호 `turn_numbers`와 잘린 메시지를 표시합니다. 정제와 답변의 `paperView` 단계에는 원문으로 보낸 섹션, 요약으로 보낸 섹션 수, 요약이 없어 원문으로 보낸 섹션이 나옵니다. 세션 요약과 섹션 요약 실행은 그 실행을 일으킨 턴의 그래프에 Summary Module(오른쪽)과 Section Summary Module(왼쪽)로 나타나고, 실행할 조건이 아니면 비활성으로 표시됩니다.
@@ -163,67 +163,70 @@ AI 채팅 에이전트 구조 (원본: [`docs/images/chat-agent-architecture.svg
 
 문단은 빈 줄로 나누며, `\section`, `\begin`/`\end`, `\label`, 주석 줄 같은 구조 줄과 `\title`, `\author`, `\date` 같은 앞부분 명령(여러 줄에 걸치면 닫는 중괄호까지), 그리고 `\begin{document}` 앞의 preamble 전체는 문단에 넣지 않습니다. 그래서 "이 문단 고쳐줘"가 section 제목이나 논문 제목을 바꾸지 않습니다.
 
-### 논문 요약 리포트
+### 세션 요약
 
-![논문 요약 리포트 구조: 논문을 섹션 단위로 나누고, 턴이 끝난 뒤 Section Summary Module이 요약 없는 섹션을 요약해 report.json에 본문 해시를 키로 저장합니다. 다음 질문에서 판단은 요약으로 된 논문 지도를 보고 섹션을 고르고, Refine과 Answer는 고른 섹션만 원문으로 읽습니다](docs/images/paper-report.png)
+![세션 요약 구조: 턴이 끝난 뒤 요약 안 된 턴이 4개가 되면 Summary Module이 오래된 턴을 접어 바뀐 항목만 돌려주고, 코드가 검사해 세션 파일의 summary 필드에 저장합니다. 다음 질문에서는 renderSummary가 만든 텍스트가 session_summary 블록으로 판단과 각 모듈에 들어갑니다](docs/images/session-summary.png)
 
-논문 요약 리포트 구조 (원본: [`docs/images/paper-report.svg`](docs/images/paper-report.svg)). 논문 전체를 매 질문마다 보내지 않기 위해, 섹션마다 짧은 요약을 만들어 두고 질문에 필요한 섹션만 원문으로 읽습니다(`src/chat/paper/`).
+세션 요약 구조 (원본: [`docs/images/session-summary.svg`](docs/images/session-summary.svg)). 오래된 턴을 원문 대신 짧게 줄여 보내기 위한 대화 메모리입니다(`src/chat/session/`). 따로 파일을 만들지 않고 세션 파일(`chats/<프로젝트 ID>/<세션 ID>.json`)의 `summary` 필드에 저장하며, 모델에는 `renderSummary`가 만든 텍스트가 `<session_summary>` 블록으로 들어갑니다. 세션마다 하나이고, 새 대화는 빈 요약에서 시작합니다.
 
-**섹션 단위** (`sections.ts`): 문서 모델에서 `\begin{document}`부터 `\end{document}`까지를 나눕니다.
+**접는 시점** (`summarizer.ts`)
 
-| 단위 | 범위 | 키 |
-| --- | --- | --- |
-| front | `\begin{document}` 다음부터 첫 섹션 전까지(제목 블록, 초록) | `front` (항상 원문으로 보내고 요약하지 않음) |
-| 섹션 | `\section` 줄부터 첫 하위 절 전까지(자기 본문만) | 섹션 번호 (`3`) |
-| 하위 절 | `\subsection` 줄부터 다음 섹션이나 하위 절 전까지 | 섹션 번호 (`3.2`) |
+- 턴이 끝날 때마다 백그라운드에서 확인합니다. 요약에 안 들어간 턴이 4개가 되면 마지막 2턴을 남기고 나머지를 접습니다(4턴 끝, 6턴 끝, 8턴 끝처럼 2턴마다). 오래 쌓인 세션은 한 번에 최대 6턴씩 따라잡습니다.
+- 먼저 코드가 접을 턴 가운데 중지, 실패, 길이 초과, 되물음으로 끝난 턴을 U# 항목으로 추가합니다(`addUnresolved`). 그다음 Summary Module(`gpt-6.1-sol` low)이 지금 요약과 접을 턴을 보고, 요약을 새로 쓰지 않고 `update_summary` 툴로 바뀐 것(`set_goal`, `add`, `replace`, `close`)만 돌려줍니다. 코드는 규칙에 맞는 변경만 적용하고(`applyOps`), 4,000자를 넘으면 오래된 항목부터 뺍니다(`pruneSummary`).
+- 실패하면 다음 턴이 끝난 뒤 다시 시도합니다. 그동안 판단과 모듈은 요약 안 된 턴을 모두 원문으로 읽으므로 대화가 빠지지 않습니다.
 
-- `\subsubsection` 이하는 하위 절 안에 포함합니다. 번호 없는 제목(`\section*`)은 `u1`, `u2`처럼 이름을 붙입니다. 장(`\chapter`)이 있는 논문은 장과 섹션이 단위가 됩니다.
-- 단위마다 본문, 파일과 줄 범위(`\input`을 지나면 파일마다 하나씩), 단어 수, 그 안의 `\label`, 본문 해시를 가집니다. preamble에서는 `\newcommand`, `\def` 같은 매크로 정의만 따로 모아 섹션 단위 논문과 함께 보냅니다.
-
-**리포트 파일** (`report.ts`, `src-tauri/src/papers.rs`): 프로젝트마다 하나이고, 그 프로젝트의 모든 채팅 세션이 같이 씁니다.
+**저장 형태** (세션 파일의 `summary`)
 
 ```json
 {
-  "version": 1,
-  "summaries": {
-    "4be19c27a0d3e1": {
-      "title": "Uncertainty Estimation",
-      "summary": "Predicts a mean and variance for each joint and trains with the Gaussian negative log-likelihood (eq:nll). …",
-      "updatedAt": 1761040000000
-    }
-  }
+  "coveredTurns": 2,
+  "goal": "STRoute 논문의 실험 결과와 3.2절을 다듬는 중",
+  "items": [
+    { "id": "U1", "kind": "unresolved", "turn": 2, "status": "active", "text": "The user stopped the answer to \"3.2절 첫 문단 고쳐줘\"." },
+    { "id": "P1", "kind": "preference", "turn": 1, "status": "active", "text": "답은 짧게" },
+    { "id": "T1", "kind": "topic", "turn": 1, "status": "active", "text": "Table 1 결과(MPJPE) 해석" }
+  ],
+  "next": { "preference": 2, "topic": 2, "reference": 1, "unresolved": 2 }
 }
 ```
 
-- 키는 섹션 번호가 아니라 섹션 본문의 해시입니다. 앞에 섹션이 끼어들어 번호가 바뀌어도 내용이 같으면 요약을 그대로 쓰고, 본문을 한 글자라도 고치면 키가 바뀌어 그 섹션은 요약이 없는 상태가 됩니다.
-- 지금 논문에 없는 섹션의 요약은 최근 것 200개까지만 남깁니다. 저장은 임시 파일에 쓴 뒤 바꾸는 방식이고, 4MB를 넘으면 저장하지 않습니다.
-
-**만들기** (`sectionSummarizer.ts`, Section Summary Module): 논문을 읽은 턴(잡담이 아닌 턴)이 끝나면 백그라운드에서 리포트에 해시가 없는 섹션만 골라 요약합니다.
-
-- 약 40,000자씩 묶어 한 번씩 호출하고(`gpt-6.1-sol` low, 실패하면 `claude-sonnet-5-5`), 모델은 `write_section_summaries` 툴로 섹션마다 논문의 언어로 2~4문장(주장, 방법과 정의, 데이터셋, 그림과 표와 수식의 label, 핵심 수치)을 돌려줍니다. 한 섹션은 최대 20,000자(앞 70%와 뒤 30%)까지 보냅니다.
-- 단어가 12개보다 적은 섹션(제목과 label만 있는 상위 섹션 등)은 모델을 부르지 않고 본문을 그대로 요약으로 씁니다.
-- 모델이 빠뜨린 섹션이나 실패한 묶음은 다음 턴이 끝난 뒤 다시 시도하고, 그동안 그 섹션은 원문으로 보냅니다. 다른 프로젝트를 열면 진행 중인 요약을 멈춥니다.
-
-**읽기** (`scope.ts`): 판단이 보는 논문 지도는 이런 모양입니다.
-
-```
-<paper_map summaries="16/16">
-[front] Title and abstract (43 words): always read word for word
-[3] Method (1 word): Only its heading; its text is in its subsections. | labels: sec:method
-  [3.1] Overview (25 words): Two stages: a per-frame pose network that predicts uncertainty, and a routing module …
-  [3.2] Uncertainty Estimation (30 words): Predicts a mean and variance for each joint … | labels: sec:uncertainty, eq:nll
-</paper_map>
-```
-
-| 상황 | 정제와 답변이 받는 논문 |
+| 필드 | 뜻 |
 | --- | --- |
-| 리포트에 이 논문의 요약이 하나도 없음 (이 논문으로 하는 첫 대화) | 원고 전체를 파일 단위로 (최대 150,000자) |
-| 요약이 있음 | front와 고른 섹션은 원문(파일, 줄 번호와 함께), 나머지는 요약. 섹션을 고르면 그 하위 절도 원문 |
-| 요약이 없거나 수정된 섹션이 있음 | 그 섹션은 고르지 않아도 원문 |
-| `sections: ["all"]` | 원고 전체를 파일 단위로 |
+| `coveredTurns` | 요약에 접힌 마지막 턴 번호. 1번부터 이 번호까지의 턴은 원문 대신 요약으로 읽습니다 |
+| `goal` | 논문 주제와 지금 하는 작업 |
+| `items` | 항목 목록. `id`(P1, U1, T1, R1), `kind`, `text`, `turn`(나온 턴), `status`(`active`, `replaced`, `closed`), `by`(대체한 항목), `note`(닫힌 요청을 처리한 내용), `source`(R#의 출처) |
+| `next` | 종류별 다음 번호. 한 번 쓴 id는 다시 쓰지 않습니다 |
 
-- 원문은 front, 고른 섹션, 요약 없는 섹션 순으로 150,000자까지 넣고, 넘치는 섹션은 요약으로 보내거나(요약이 없으면) 생략 표시만 남깁니다.
-- 요약만 받은 섹션에는 edit 블록을 쓰지 않도록 지시하며, 수정 제안은 적용할 때 원문에서 ORIGINAL을 찾지 못하면 적용되지 않습니다.
+**항목 종류**
+
+| 항목 | 만드는 쪽 | 바꾸는 방법 | 최대 길이 | 모델에 보이는 것 |
+| --- | --- | --- | --- | --- |
+| Goal | 모델 (`set_goal`) | 다시 `set_goal` | 300자 | 항상 |
+| P# 선호 (답변 스타일, 계속 지킬 요구) | 모델 (`add`) | `replace` (이전 항목은 `replaced`) | 300자 | `active`와 `replaced` (`replaced by P2` 표시, 되돌리기 요청에 대비) |
+| U# 답하지 못한 요청 | 코드 (턴 상태) | 모델이 `close` (`note`에 처리 내용) | 300자 | `active`만 |
+| T# 다룬 내용 (답한 턴마다 한 줄, 잡담 제외) | 모델 (`add`) | 없음 | 200자 | 전부 |
+| R# 사용자 자료 (리뷰어 코멘트 등 논문 밖 자료 원문) | 모델 (`add`) | `replace` | 1,500자 | `active`만 |
+
+**모델이 받는 텍스트** (`renderSummary`, 위 저장 형태를 그대로 바꾼 결과)
+
+```
+Turns 1-2 of this conversation are folded into this summary; later turns follow word for word.
+
+Goal: STRoute 논문의 실험 결과와 3.2절을 다듬는 중
+
+Preferences (follow the active ones):
+- P1: 답은 짧게
+
+Requests not fully answered:
+- U1 (turn 2): The user stopped the answer to "3.2절 첫 문단 고쳐줘".
+
+Topics covered:
+- T1 (turn 1): Table 1 결과(MPJPE) 해석
+```
+
+- 요약이 바뀌지 않으면 텍스트도 글자 하나 바뀌지 않으므로 prompt cache가 유지됩니다. 판단, Reply, Refine, Answer가 이 텍스트와 요약 안 된 턴의 원문(판단은 최근 4턴 이상, 나머지는 최근 2턴 이상)을 함께 읽고, Summary Module도 다음 접기 때 이 텍스트(항목 id 포함)를 보고 변경을 만듭니다.
+- 4,000자를 넘으면 닫힌 U#, 대체된 항목, 오래된 T#, 오래된 R# 순으로 뺍니다. 활성 P#와 열린 U#는 항상 남깁니다.
+- 세션을 다시 열면 저장된 요약을 함께 불러옵니다. 요약이 그 세션의 턴 수보다 많은 턴을 덮고 있으면 맞지 않는 요약으로 보고 버립니다.
 
 prompt는 provider와 무관하게 `src/ai/prompts/`에서 만들고(LaTeX 규칙: 명령어, citation key, `\label`, 수식, 기호, custom macro, `%` 주석 보존, 인라인 편집은 선택 영역 밖 반환 금지), 각 adapter는 이를 자기 메시지 형식으로만 바꿉니다.
 
