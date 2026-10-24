@@ -52,7 +52,7 @@ npm run tauri build      # 배포용 빌드 (src-tauri/target/release/bundle)
 
 ### 브라우저 미리보기 모드 (개발용)
 
-`npm run dev` 후 브라우저에서 `http://localhost:1420`을 열면 메모리 내 가짜 backend로 UI 전체 흐름을 확인할 수 있습니다. 파일, 컴파일, AI 응답이 모두 시뮬레이션되며(AI 응답도 실제 OpenAI/Claude streaming 형식으로 흉내 내므로 provider adapter 코드가 그대로 실행됩니다) 이 코드는 배포 빌드에 포함되지 않습니다.
+`npm run dev` 후 브라우저에서 `http://localhost:1420`을 열면 메모리 내 가짜 backend로 UI 전체 흐름을 확인할 수 있습니다. 파일, 컴파일, AI 응답이 모두 시뮬레이션되며(AI 응답도 실제 OpenAI/Claude streaming 형식으로 흉내 내므로 provider adapter 코드가 그대로 실행됩니다) 이 코드는 배포 빌드에 포함되지 않습니다. `npm run tauri dev` 중에는 같은 주소가 런타임 디버거로 넘어갑니다.
 
 ## 사용 방법
 
@@ -283,7 +283,7 @@ cd src-tauri && cargo test -- --ignored   # 실제 Anthropic API에 잘못된 ke
 
 ### 런타임 디버거 (개발용)
 
-`npm run tauri dev`로 앱을 띄우면 터미널에 `LOGICA debug visualizer: http://127.0.0.1:1430`이 함께 출력됩니다. 이 주소를 브라우저에서 열면 앱에서 보낸 채팅 질문이 User Input, Chat Orchestrator, Refine Module, Answer Module, Final Answer 중 어느 갈래로 처리되는지(건너뛴 모듈은 흐리게), Section Summary Module과 Summary Module이 실행됐는지 실시간으로 볼 수 있습니다. Chat Orchestrator 노드에는 논문 지도의 요약 수와 고른 섹션이, Refine과 Answer 노드에는 원문으로 읽은 섹션과 요약으로 읽은 섹션 수가 표시됩니다. LLM Gateway 노드에는 호출마다 모델, 실패와 Claude fallback이 표시됩니다. 실행 중인 단계 강조, 함수 호출 순서(caller와 callee), 단계별 입력과 출력, 모델에 보낸 프롬프트와 응답, Rust의 AI 요청 처리까지 질문 하나를 trace 하나로 묶어 보여 주며, 같은 이벤트가 터미널에도 한 줄씩 찍힙니다.
+`npm run tauri dev`로 앱을 띄운 뒤 브라우저에서 `http://localhost:1420`을 열면 런타임 디버거(`http://127.0.0.1:1430`, 터미널에도 `LOGICA debug visualizer`로 출력)로 넘어갑니다. 앱은 Tauri 창에서 그대로 실행되고, 앱 빌드가 끝나기 전에 열면 디버거가 뜰 때까지 기다렸다가 넘어갑니다. 디버거에서는 앱에서 보낸 채팅 질문이 User Input, Chat Orchestrator, Refine Module, Answer Module, Final Answer 중 어느 갈래로 처리되는지(건너뛴 모듈은 흐리게), Section Summary Module과 Summary Module이 실행됐는지 실시간으로 볼 수 있습니다. Chat Orchestrator 노드에는 논문 지도의 요약 수와 고른 섹션이, Refine과 Answer 노드에는 원문으로 읽은 섹션과 요약으로 읽은 섹션 수가 표시됩니다. LLM Gateway 노드에는 호출마다 모델, 실패와 Claude fallback이 표시됩니다. 실행 중인 단계 강조, 함수 호출 순서(caller와 callee), 단계별 입력과 출력, 모델에 보낸 프롬프트와 응답, Rust의 AI 요청 처리까지 질문 하나를 trace 하나로 묶어 보여 주며, 같은 이벤트가 터미널에도 한 줄씩 찍힙니다.
 
 - 이벤트는 웹뷰(`src/debug/trace.ts`)와 Rust(`src-tauri/src/ai.rs`)의 실제 실행에서 만들어지고, `src-tauri/src/debug_trace.rs`가 Server-Sent Events로 페이지에 보냅니다.
 - 키, 토큰, `Bearer` 값은 이벤트를 만드는 단계와 backend에서 두 번 가립니다. 서버는 `127.0.0.1`에만 열리고 다른 Host 이름의 요청은 거부합니다.
