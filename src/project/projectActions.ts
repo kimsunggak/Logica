@@ -14,6 +14,7 @@ import { useSettings } from "../settings/settingsStore";
 import { useWorkspace } from "../storage/workspaceStore";
 import { createStarterProject, exportPdfFile, listProjectFiles, pathExists, readTextFile, statFiles, writeTextFile } from "./projectApi";
 import { initialProjectState, notify, openFileMeta, updateOpenFile, useProject, type CompileTrigger } from "./projectStore";
+import type { PaperTemplateId } from "./templates";
 import { t } from "../i18n";
 
 /** Last known disk content of every .tex/.bib file of the project. */
@@ -132,12 +133,12 @@ export async function closeProject(): Promise<boolean> {
 }
 
 /**
- * Start a paper from the one-page template. On first launch (`reuse`) the
- * existing "My Paper" is reopened instead of creating another one.
+ * Start a paper from a template. With `reuse` the template's existing first
+ * folder ("My Paper", "CVPR Paper") is reopened instead of creating another one.
  */
-export async function newPaper(reuse = false): Promise<void> {
+export async function newPaper(template: PaperTemplateId, reuse = false): Promise<void> {
   try {
-    await openProject(await createStarterProject(reuse));
+    await openProject(await createStarterProject(template, reuse));
   } catch (err) {
     notify("error", t("project.newError", { error: errorMessage(err) }));
   }

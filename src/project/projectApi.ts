@@ -1,5 +1,6 @@
 /** Typed wrappers for the project file commands of the backend. */
 import { call } from "../lib/backend";
+import type { PaperTemplateId } from "./templates";
 
 export interface ProjectEntry {
   path: string;
@@ -50,9 +51,9 @@ export function readBinaryFile(root: string, path: string): Promise<ArrayBuffer>
   return call<ArrayBuffer>("read_binary_file", { root, path });
 }
 
-/** Create a one-page starter paper (Documents/LOGICA/My Paper…) and return its folder. */
-export function createStarterProject(reuse: boolean): Promise<string> {
-  return call<string>("create_starter_project", { reuse });
+/** Create a paper from a template (Documents/LOGICA/My Paper…, CVPR Paper…) and return its folder. */
+export function createStarterProject(template: PaperTemplateId, reuse: boolean): Promise<string> {
+  return call<string>("create_starter_project", { template, reuse });
 }
 
 /** Native save dialog plus copy; resolves to the saved path, or null if cancelled. */

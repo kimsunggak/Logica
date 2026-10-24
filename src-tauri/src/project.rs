@@ -292,36 +292,85 @@ pub async fn path_exists(root: String, path: String) -> CmdResult<bool> {
     Ok(resolve(&root_path, &path).map(|p| p.exists()).unwrap_or(false))
 }
 
-const STARTER_MAIN: &str = include_str!("../templates/main.tex");
+/// A paper template: the folder name for new papers and the files to write.
+struct PaperTemplate {
+    folder: &'static str,
+    files: &'static [(&'static str, &'static str)],
+}
 
-/// Create a one-page starter paper under Documents/LOGICA and return its
-/// folder. With `reuse`, an existing "My Paper" with a main.tex is returned
-/// as is; otherwise the next free "My Paper N" folder is created.
+const BLANK_TEMPLATE: PaperTemplate = PaperTemplate {
+    folder: "My Paper",
+    files: &[("main.tex", include_str!("../templates/blank/main.tex"))],
+};
+
+/// Official CVPR author kit (see licenses/cvpr-author-kit-NOTICE.txt). cvpr.sty
+/// is not on CTAN, so it has to live in the project folder.
+const CVPR_TEMPLATE: PaperTemplate = PaperTemplate {
+    folder: "CVPR Paper",
+    files: &[
+        ("main.tex", include_str!("../templates/cvpr/main.tex")),
+        ("preamble.tex", include_str!("../templates/cvpr/preamble.tex")),
+        ("cvpr.sty", include_str!("../templates/cvpr/cvpr.sty")),
+        ("ieeenat_fullname.bst", include_str!("../templates/cvpr/ieeenat_fullname.bst")),
+        ("main.bib", include_str!("../templates/cvpr/main.bib")),
+        ("sec/0_abstract.tex", include_str!("../templates/cvpr/sec/0_abstract.tex")),
+        ("sec/1_intro.tex", include_str!("../templates/cvpr/sec/1_intro.tex")),
+        ("sec/2_related.tex", include_str!("../templates/cvpr/sec/2_related.tex")),
+        ("sec/3_method.tex", include_str!("../templates/cvpr/sec/3_method.tex")),
+        ("sec/4_experiments.tex", include_str!("../templates/cvpr/sec/4_experiments.tex")),
+        ("sec/5_conclusion.tex", include_str!("../templates/cvpr/sec/5_conclusion.tex")),
+    ],
+};
+
+fn paper_template(id: &str) -> CmdResult<&'static PaperTemplate> {
+    match id {
+        "blank" => Ok(&BLANK_TEMPLATE),
+        "cvpr" => Ok(&CVPR_TEMPLATE),
+        _ => Err(CmdError::new("invalid_template", format!("unknown paper template: {id}"))),
+    }
+}
+
+/// Create a starter paper from `template` under Documents/LOGICA and return
+/// its folder. With `reuse`, an existing folder of that template with a
+/// main.tex is returned as is; otherwise the next free "<name> N" folder is
+/// created.
 #[tauri::command]
-pub async fn create_starter_project(app: tauri::AppHandle, reuse: bool) -> CmdResult<String> {
+pub async fn create_starter_project(app: tauri::AppHandle, template: String, reuse: bool) -> CmdResult<String> {
     use tauri::Manager;
 
+    let template = paper_template(&template)?;
     let paths = app.path();
     let base = paths
         .document_dir()
         .or_else(|_| paths.home_dir())
         .map_err(|e| CmdError::new("io", e.to_string()))?
         .join("LOGICA");
-    let folder = starter_folder(&base, reuse);
-    std::fs::create_dir_all(&folder)?;
-    let main = folder.join("main.tex");
-    if !main.exists() {
-        std::fs::write(&main, STARTER_MAIN)?;
-    }
+    let folder = starter_folder(&base, template.folder, reuse);
+    write_template(&folder, template)?;
     Ok(folder.to_string_lossy().into_owned())
 }
 
-fn starter_folder(base: &Path, reuse: bool) -> PathBuf {
-    let first = base.join("My Paper");
+/// Write the template files that are not in `folder` yet.
+fn write_template(folder: &Path, template: &PaperTemplate) -> CmdResult<()> {
+    for (path, content) in template.files {
+        let file = folder.join(path);
+        if file.exists() {
+            continue;
+        }
+        if let Some(parent) = file.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&file, content)?;
+    }
+    Ok(())
+}
+
+fn starter_folder(base: &Path, name: &str, reuse: bool) -> PathBuf {
+    let first = base.join(name);
     if (reuse && first.join("main.tex").is_file()) || !first.exists() {
         return first;
     }
-    (2..).map(|n| base.join(format!("My Paper {n}"))).find(|p| !p.exists()).expect("unbounded range")
+    (2..).map(|n| base.join(format!("{name} {n}"))).find(|p| !p.exists()).expect("unbounded range")
 }
 
 /// Save a copy of the compiled PDF where the user chooses. The destination
@@ -379,14 +428,31 @@ mod tests {
     fn starter_folders_are_reused_or_numbered() {
         let base = std::env::temp_dir().join(format!("logica-starter-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
-        assert_eq!(starter_folder(&base, true), base.join("My Paper"));
-        std::fs::create_dir_all(base.join("My Paper")).unwrap();
-        std::fs::write(base.join("My Paper/main.tex"), STARTER_MAIN).unwrap();
-        assert_eq!(starter_folder(&base, true), base.join("My Paper"));
-        assert_eq!(starter_folder(&base, false), base.join("My Paper 2"));
+        assert_eq!(starter_folder(&base, "My Paper", true), base.join("My Paper"));
+        write_template(&base.join("My Paper"), &BLANK_TEMPLATE).unwrap();
+        assert_eq!(starter_folder(&base, "My Paper", true), base.join("My Paper"));
+        assert_eq!(starter_folder(&base, "My Paper", false), base.join("My Paper 2"));
         std::fs::create_dir_all(base.join("My Paper 2")).unwrap();
-        assert_eq!(starter_folder(&base, false), base.join("My Paper 3"));
+        assert_eq!(starter_folder(&base, "My Paper", false), base.join("My Paper 3"));
+        assert_eq!(starter_folder(&base, "CVPR Paper", false), base.join("CVPR Paper"));
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn cvpr_template_writes_the_author_kit() {
+        let dir = std::env::temp_dir().join(format!("logica-cvpr-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        write_template(&dir, paper_template("cvpr").unwrap()).unwrap();
+        let main = std::fs::read_to_string(dir.join("main.tex")).unwrap();
+        assert!(main.contains("\\usepackage[review]{cvpr}"));
+        for (path, _) in CVPR_TEMPLATE.files {
+            assert!(dir.join(path).is_file(), "{path} missing");
+            if let Some(input) = path.strip_suffix(".tex").filter(|p| p.starts_with("sec/")) {
+                assert!(main.contains(&format!("\\input{{{input}}}")), "{path} not included");
+            }
+        }
+        assert!(paper_template("nope").is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

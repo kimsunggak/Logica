@@ -16,10 +16,11 @@ import relatedTex from "../../examples/sample-paper/sections/related_work.tex?ra
 import methodTex from "../../examples/sample-paper/sections/method.tex?raw";
 import experimentsTex from "../../examples/sample-paper/sections/experiments.tex?raw";
 import referencesBib from "../../examples/sample-paper/references.bib?raw";
-import starterMain from "../../src-tauri/templates/main.tex?raw";
+import type { PaperTemplateId } from "../project/templates";
 
 const DEMO_ROOT = "/demo/sample-paper";
-const STARTER_BASE = "/demo/My Paper";
+/** First folder of each paper template, as in create_starter_project. */
+const STARTER_BASES: Record<PaperTemplateId, string> = { blank: "/demo/My Paper", cvpr: "/demo/CVPR Paper" };
 const STATE_KEY = "logica-demo-state";
 
 interface DemoFile {
@@ -33,6 +34,17 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function fail(kind: string, message: string, extra: Record<string, unknown> = {}): never {
   throw { kind, message, ...extra };
+}
+
+// The same template files the desktop app embeds (src-tauri/templates/<id>/...).
+const TEMPLATE_SOURCES = import.meta.glob<string>("../../src-tauri/templates/**/*", { query: "?raw", import: "default", eager: true });
+
+/** `[path in the project, content]` of every file of a paper template. */
+function templateFiles(template: PaperTemplateId): [string, string][] {
+  const prefix = `../../src-tauri/templates/${template}/`;
+  return Object.entries(TEMPLATE_SOURCES)
+    .filter(([source]) => source.startsWith(prefix))
+    .map(([source, content]) => [source.slice(prefix.length), content]);
 }
 
 // ------------------------------------------------------------------ PDF
@@ -402,8 +414,11 @@ export function createDemoBackend(): DemoBackend {
   const projects = new Map<string, Map<string, DemoFile>>();
   let files = new Map<string, DemoFile>();
   projects.set(DEMO_ROOT, files);
-  const starter = (root: string) => {
-    if (!projects.has(root)) projects.set(root, new Map([["main.tex", { content: starterMain, mtime: Date.now() }]]));
+  const starter = (root: string, template: PaperTemplateId) => {
+    if (!projects.has(root)) {
+      const mtime = Date.now();
+      projects.set(root, new Map(templateFiles(template).map(([path, content]) => [path, { content, mtime }])));
+    }
     return root;
   };
   const now = Date.now();
@@ -485,11 +500,13 @@ export function createDemoBackend(): DemoBackend {
       return file.content.slice().buffer;
     },
     path_exists: ({ path }) => files.has(path),
-    create_starter_project: ({ reuse }) => {
-      if (reuse || !projects.has(STARTER_BASE)) return starter(STARTER_BASE);
+    create_starter_project: ({ template, reuse }) => {
+      if (!(template in STARTER_BASES)) fail("invalid_template", `unknown paper template: ${template}`);
+      const base = STARTER_BASES[template as PaperTemplateId];
+      if (reuse || !projects.has(base)) return starter(base, template);
       let n = 2;
-      while (projects.has(`${STARTER_BASE} ${n}`)) n++;
-      return starter(`${STARTER_BASE} ${n}`);
+      while (projects.has(`${base} ${n}`)) n++;
+      return starter(`${base} ${n}`, template);
     },
     export_pdf: ({ path }) => {
       // The browser has no save dialog API here; download the file instead.
@@ -657,7 +674,8 @@ export function createDemoBackend(): DemoBackend {
       const root = args.root ?? (args.request as { root?: unknown } | undefined)?.root;
       if (typeof root === "string") {
         // Starter papers live in memory only; recreate one remembered from an earlier page load.
-        if (!projects.has(root) && root.startsWith(STARTER_BASE)) starter(root);
+        const template = (Object.keys(STARTER_BASES) as PaperTemplateId[]).find((id) => root.startsWith(STARTER_BASES[id]));
+        if (!projects.has(root) && template) starter(root, template);
         if (!projects.has(root)) fail("not_found", `No such folder: ${root}`);
         files = projects.get(root)!;
       }

@@ -6,7 +6,7 @@ const en = {
   // top bar
   "top.openProject": "Open Project",
   "top.newPaper": "New Paper",
-  "top.newPaperTitle": "Create a one-page starter paper in Documents/LOGICA",
+  "top.newPaperTitle": "Create a paper from a template in Documents/LOGICA",
   "top.openProjectTitle": "Open project folder ({mod}O)",
   "top.save": "Save",
   "top.saveTitle": "Save all ({mod}Shift+S)",
@@ -32,7 +32,11 @@ const en = {
 
   // welcome
   "home.new": "New paper",
-  "home.newHint": "Start from a one-page template",
+  "home.newHint": "Choose a template: CVPR or blank",
+  "template.cvpr": "CVPR template",
+  "template.cvprHint": "Official CVPR author kit (two columns, review mode)",
+  "template.blank": "Blank template",
+  "template.blankHint": "One-page basic structure",
   "home.open": "Open folder",
   "home.openHint": "Continue an existing LaTeX project",
   "home.recent": "Recent work",
@@ -359,7 +363,7 @@ export type MessageKey = keyof typeof en;
 const ko: Record<MessageKey, string> = {
   "top.openProject": "프로젝트 열기",
   "top.newPaper": "새 논문",
-  "top.newPaperTitle": "문서/LOGICA 폴더에 한 페이지짜리 기본 논문을 만듭니다",
+  "top.newPaperTitle": "문서/LOGICA 폴더에 템플릿으로 새 논문을 만듭니다",
   "top.openProjectTitle": "프로젝트 폴더 열기 ({mod}O)",
   "top.save": "저장",
   "top.saveTitle": "모두 저장 ({mod}Shift+S)",
@@ -384,7 +388,11 @@ const ko: Record<MessageKey, string> = {
   "top.language": "언어",
 
   "home.new": "새 논문",
-  "home.newHint": "한 페이지짜리 기본 구조로 시작",
+  "home.newHint": "CVPR 또는 빈 템플릿을 골라 시작",
+  "template.cvpr": "CVPR 템플릿",
+  "template.cvprHint": "CVPR 공식 양식 (2단, 리뷰 모드)",
+  "template.blank": "빈 템플릿",
+  "template.blankHint": "한 페이지짜리 기본 구조",
   "home.open": "폴더 열기",
   "home.openHint": "기존 LaTeX 프로젝트 이어서 작업",
   "home.recent": "최근 작업",
