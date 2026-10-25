@@ -72,6 +72,7 @@ pub fn run() {
             app_state::load_app_state,
             app_state::save_app_state,
             debug_trace::debug_trace,
+            debug_trace::debug_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running LOGICA");

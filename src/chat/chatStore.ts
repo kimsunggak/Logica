@@ -24,7 +24,7 @@ import { paperUnits } from "./paper/sections";
 import { foldTurns, turnsToFold } from "./session/summarizer";
 import { readSummary, type ConversationSummary } from "./session/summary";
 import { turnsOf } from "./session/turns";
-import { endSpan, failSpan, startSpan, step, type Span } from "../debug/trace";
+import { endSpan, failSpan, setDebugProject, startSpan, step, type Span } from "../debug/trace";
 import type { ProjectFile, ProviderId } from "../ai/types";
 import { editorSession } from "../editor/editorSession";
 import { buildPaperDocument, outlineText } from "../latex/parser/documentModel";
@@ -394,6 +394,7 @@ export async function openChatsFor(root: string | null): Promise<void> {
   stopSectionSummaries();
   clearTimeout(saveTimer);
   useChat.setState({ root, messages: [], summary: null, sessions: [], sessionId: newSessionId(), createdAt: Date.now() });
+  setDebugProject(root);
   if (!root) return;
   const sessions = await listSessions(root).catch(() => [] as SessionSummary[]);
   if (useChat.getState().root !== root) return;

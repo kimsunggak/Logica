@@ -171,6 +171,9 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
 .viewer-head { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .viewer-head b { flex: 1; font: 600 13px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .viewer pre { flex: 1; margin: 0; padding: 14px; overflow: auto; font: 12.5px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.summary-meta { padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--ink-2); overflow-wrap: anywhere; }
+.summary-meta p { margin: 2px 0; }
+.btn:disabled { opacity: .5; cursor: default; }
 .legend { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; color: var(--ink-2); font-size: 11.5px; padding: 0 12px 8px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; border: 2px solid; }
 </style>
@@ -183,6 +186,7 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
   <span id="conn" class="pill off">연결 대기</span>
   <div class="ctl">
     <label><input type="checkbox" id="follow" checked> 최신 실행 따라가기</label>
+    <button class="btn" id="paperSummary" type="button">논문 요약 파일</button>
     <button class="btn" id="resetLayout" type="button" title="패널 크기와 그래프 배율을 기본값으로 되돌립니다">레이아웃 초기화</button>
     <button class="btn" id="clear" type="button">지우기</button>
   </div>
@@ -242,6 +246,23 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
   <div class="viewer-box">
     <div class="viewer-head"><b id="viewerTitle"></b><button class="btn" type="button" id="viewerCopy">복사</button><button class="btn" type="button" id="viewerClose">닫기 (Esc)</button></div>
     <pre id="viewerBody"></pre>
+  </div>
+</div>
+<div class="viewer" id="paperSummaryViewer" hidden role="dialog" aria-modal="true" aria-labelledby="paperSummaryTitle">
+  <div class="viewer-box">
+    <div class="viewer-head">
+      <b id="paperSummaryTitle">논문 요약 파일 · paper-summary.yaml</b>
+      <button class="btn" type="button" id="paperSummaryRefresh">새로고침</button>
+      <button class="btn" type="button" id="paperSummaryCopy" disabled>복사</button>
+      <button class="btn" type="button" id="paperSummaryClose">닫기 (Esc)</button>
+    </div>
+    <div class="summary-meta" aria-live="polite">
+      <p id="paperSummaryStatus"></p>
+      <p id="paperSummaryProject"></p>
+      <p id="paperSummaryPath"></p>
+      <p>현재 열린 프로젝트의 저장 파일을 1초마다 확인합니다. 이 창은 요약을 생성하거나 파일을 변경하지 않습니다.</p>
+    </div>
+    <pre id="paperSummaryBody" tabindex="0"></pre>
   </div>
 </div>
 <script>
@@ -976,6 +997,70 @@ $("resetLayout").addEventListener("click", () => {
 
 // ------------------------------------------------------------ value viewer
 
+let paperSummaryTimer, paperSummaryRequest = null, paperSummaryFile = null;
+
+function showPaperSummary(file) {
+  paperSummaryFile = file;
+  const statuses = { no_project: "프로젝트가 열려 있지 않습니다.", missing: "파일 없음 (none)", ready: "저장된 파일", error: "파일을 읽을 수 없습니다." };
+  const updated = file.modified_at ? ` · 수정: ${new Date(file.modified_at).toLocaleString()}` : "";
+  $("paperSummaryStatus").textContent = `${statuses[file.status] || "파일을 확인할 수 없습니다."}${updated}`;
+  $("paperSummaryProject").textContent = file.project ? `프로젝트: ${file.project}` : "";
+  $("paperSummaryPath").textContent = file.path ? `저장 경로: ${file.path}` : "";
+  const text = file.status === "ready" ? (file.text || "(파일이 비어 있습니다.)")
+    : file.status === "missing" ? "none\n\npaper-summary.yaml 파일이 아직 없습니다.\n첫 질문에서 논문 요약이 성공적으로 저장되면 여기에 표시됩니다."
+    : file.status === "no_project" ? "앱에서 논문 프로젝트를 열어 주세요."
+    : file.error || "앱과 디버거의 연결을 확인해 주세요.";
+  // Keep scroll and text selection stable while polling an unchanged file.
+  if ($("paperSummaryBody").textContent !== text) $("paperSummaryBody").textContent = text;
+  $("paperSummaryCopy").disabled = file.status !== "ready";
+  $("paperSummaryCopy").textContent = "복사";
+}
+
+async function refreshPaperSummary() {
+  clearTimeout(paperSummaryTimer);
+  if (paperSummaryRequest) paperSummaryRequest.abort();
+  const request = new AbortController();
+  paperSummaryRequest = request;
+  try {
+    const response = await fetch("/paper-summary", { cache: "no-store", signal: request.signal });
+    if (!response.ok) throw new Error(`파일 확인 실패 (HTTP ${response.status}). 앱을 최신 빌드로 재시작해 주세요.`);
+    const file = await response.json();
+    if (paperSummaryRequest === request && !$("paperSummaryViewer").hidden) showPaperSummary(file);
+  } catch (err) {
+    if (err.name !== "AbortError" && paperSummaryRequest === request && !$("paperSummaryViewer").hidden) showPaperSummary({ status: "error", error: err.message });
+  } finally {
+    if (paperSummaryRequest === request) {
+      paperSummaryRequest = null;
+      if (!$("paperSummaryViewer").hidden) paperSummaryTimer = setTimeout(refreshPaperSummary, 1000);
+    }
+  }
+}
+
+function closePaperSummary() {
+  $("paperSummaryViewer").hidden = true;
+  clearTimeout(paperSummaryTimer);
+  if (paperSummaryRequest) paperSummaryRequest.abort();
+  paperSummaryRequest = null;
+  $("paperSummary").focus();
+}
+
+$("paperSummary").addEventListener("click", () => {
+  $("paperSummaryViewer").hidden = false;
+  showPaperSummary({ status: "loading" });
+  $("paperSummaryStatus").textContent = "저장 파일 확인 중…";
+  $("paperSummaryBody").textContent = "";
+  $("paperSummaryClose").focus();
+  void refreshPaperSummary();
+});
+$("paperSummaryRefresh").addEventListener("click", refreshPaperSummary);
+$("paperSummaryClose").addEventListener("click", closePaperSummary);
+$("paperSummaryViewer").addEventListener("click", (e) => { if (e.target === $("paperSummaryViewer")) closePaperSummary(); });
+$("paperSummaryCopy").addEventListener("click", async () => {
+  if (paperSummaryFile?.status !== "ready") return;
+  try { await navigator.clipboard.writeText(paperSummaryFile.text); $("paperSummaryCopy").textContent = "복사됨"; }
+  catch { const r = document.createRange(); r.selectNodeContents($("paperSummaryBody")); getSelection().removeAllRanges(); getSelection().addRange(r); $("paperSummaryCopy").textContent = "선택됨, Ctrl+C"; }
+});
+
 let viewing = null;
 function openViewer(key) {
   const v = shown.get(key);
@@ -1028,6 +1113,16 @@ document.addEventListener("click", (e) => {
   if (row) { selModule = row.dataset.module; selSpan = row.dataset.span; schedule(); }
 });
 document.addEventListener("keydown", (e) => {
+  if (!$("paperSummaryViewer").hidden) {
+    if (e.key === "Escape") { e.preventDefault(); closePaperSummary(); }
+    if (e.key === "Tab") {
+      const focusable = [...$("paperSummaryViewer").querySelectorAll("button:not(:disabled), [tabindex='0']")];
+      const first = focusable[0], last = focusable.at(-1);
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+    return;
+  }
   if (e.key === "Escape") {
     if (!$("viewer").hidden) { closeViewer(); return; }
     if (layout.max) { toggleMax(layout.max); return; }

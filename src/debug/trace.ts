@@ -37,6 +37,13 @@ export function tracing(): boolean {
   return ENABLED;
 }
 
+/** Keep the debugger on the active project even before it has a conversation. */
+export function setDebugProject(root: string | null): void {
+  if (ENABLED) void call("debug_project", { root }).catch(() => {
+    // Debugger inspection must never prevent opening a project.
+  });
+}
+
 const SECRET_KEY = /(token$|secret|password|api[-_]?key|credential|cookie|^authorization$)/i;
 const SECRET_TEXT = /\b(sk-[A-Za-z0-9_\-.]{8,}|Bearer\s+[A-Za-z0-9_\-.]{8,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_\-.]+)/g;
 

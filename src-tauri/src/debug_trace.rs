@@ -27,6 +27,8 @@ struct HubState {
     links: HashMap<String, (String, String)>,
     /// Trace id -> start time, for the relative times in the terminal log.
     started: HashMap<String, u64>,
+    /// Active project and its fixed application-managed summary path.
+    paper: Option<(String, std::path::PathBuf)>,
 }
 
 struct Inner {
@@ -60,12 +62,32 @@ impl DebugHub {
                 history: VecDeque::new(),
                 links: HashMap::new(),
                 started: HashMap::new(),
+                paper: None,
             }),
         }))
     }
 
     pub fn enabled(&self) -> bool {
         self.0.enabled
+    }
+
+    fn set_paper(&self, paper: Option<(String, std::path::PathBuf)>) {
+        if self.enabled() {
+            if let Ok(mut state) = self.0.state.lock() {
+                state.paper = paper;
+            }
+        }
+    }
+
+    fn paper_summary(&self) -> Value {
+        let paper = match self.0.state.lock() {
+            Ok(state) => state.paper.clone(),
+            Err(_) => return json!({ "status": "error", "error": "Could not read the active project" }),
+        };
+        match paper {
+            Some((root, path)) => crate::papers::inspect_summary(&path, &root),
+            None => json!({ "status": "no_project", "project": null, "path": null, "text": null }),
+        }
     }
 
     /// Redact, number, log and broadcast one event.
@@ -261,6 +283,23 @@ pub fn debug_trace(hub: State<'_, DebugHub>, event: Value) {
 
 // ---------------------------------------------------------------- server
 
+/// Track the open project before its first question, and clear it on returning home.
+#[tauri::command]
+pub fn debug_project(app: tauri::AppHandle, hub: State<'_, DebugHub>, root: Option<String>) -> crate::error::CmdResult<()> {
+    if !hub.enabled() {
+        return Ok(());
+    }
+    let paper = match root {
+        Some(root) => {
+            let path = crate::papers::summary_path(&crate::chats::base_dir(&app)?, &root);
+            Some((root, path))
+        }
+        None => None,
+    };
+    hub.set_paper(paper);
+    Ok(())
+}
+
 #[cfg(debug_assertions)]
 pub use server::start;
 
@@ -371,6 +410,7 @@ mod server {
         match head.path.as_str() {
             "/" => respond(&mut stream, "200 OK", "text/html; charset=utf-8", PAGE).await,
             "/health" => respond(&mut stream, "200 OK", "text/plain", "ok").await,
+            "/paper-summary" => respond(&mut stream, "200 OK", "application/json; charset=utf-8", &hub.paper_summary().to_string()).await,
             "/events" => events(stream, hub).await,
             _ => respond(&mut stream, "404 Not Found", "text/plain", "").await,
         }
@@ -511,5 +551,44 @@ mod tests {
         assert!(!allowed_host(Some("evil.example:1430"), 1430));
         assert!(!allowed_host(Some("127.0.0.1:9999"), 1430));
         assert!(!allowed_host(None, 1430));
+    }
+
+    #[cfg(debug_assertions)]
+    #[tokio::test]
+    async fn inspects_the_active_projects_file_before_and_after_it_is_saved() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::{TcpListener, TcpStream};
+
+        let base = std::env::temp_dir().join(format!("logica-debug-paper-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let path = crate::papers::summary_path(&base, "/paper-a");
+        let hub = DebugHub::new(true);
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(super::server::serve(listener, hub.clone(), port));
+        let get = || async {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            stream.write_all(format!("GET /paper-summary HTTP/1.1\r\nHost: localhost:{port}\r\n\r\n").as_bytes()).await.unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).await.unwrap();
+            assert!(response.starts_with("HTTP/1.1 200 OK"));
+            serde_json::from_str::<Value>(response.split_once("\r\n\r\n").unwrap().1).unwrap()
+        };
+        assert_eq!(get().await["status"], "no_project");
+        hub.set_paper(Some(("/paper-a".into(), path.clone())));
+        assert_eq!(get().await["status"], "missing");
+        assert!(!base.exists());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "sections:\n  - summary: 첫 요약\n").unwrap();
+        assert_eq!(get().await["text"], "sections:\n  - summary: 첫 요약\n");
+        std::fs::write(&path, "sections:\n  - summary: 수정한 요약\n").unwrap();
+        assert_eq!(get().await["text"], "sections:\n  - summary: 수정한 요약\n");
+        hub.set_paper(Some(("/paper-b".into(), crate::papers::summary_path(&base, "/paper-b"))));
+        let next = get().await;
+        assert_eq!(next["status"], "missing");
+        assert_eq!(next["project"], "/paper-b");
+        hub.set_paper(None);
+        assert_eq!(get().await["status"], "no_project");
+        std::fs::remove_dir_all(base).unwrap();
     }
 }
