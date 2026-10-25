@@ -21,7 +21,7 @@ import { runChatTurn, type Outcome, type Paper, type Route, type Stage, type Tur
 import { emptyReport, hasSummaries, loadReport, saveReport, summariesFor, unitsToSummarize, withSummaries, type PaperReport } from "./paper/report";
 import { summarizeSections } from "./paper/sectionSummarizer";
 import { paperUnits } from "./paper/sections";
-import { foldTurns, turnsToFold } from "./session/summarizer";
+import { foldTurns, moduleChars, turnsToFold, unsummarized } from "./session/summarizer";
 import { readSummary, type ConversationSummary } from "./session/summary";
 import { turnsOf } from "./session/turns";
 import { endSpan, failSpan, setDebugProject, startSpan, step, type Span } from "../debug/trace";
@@ -192,6 +192,8 @@ export async function sendChatMessage(text: string): Promise<void> {
     question: instruction,
     session_turns: turn.turns.length,
     summary_covered_turns: turn.summary?.coveredTurns ?? 0,
+    // How close the earlier turns are to the Summary Module's length limit.
+    unsummarized_chars: moduleChars(unsummarized(turn.turns, turn.summary ?? null)),
   }));
   const control: RunControl = { stopped: false, activeRequest: null };
   running = control;
@@ -264,10 +266,11 @@ let summarizing: { control: RunControl; again: boolean; done: Promise<void> } | 
 let foldTrace: { traceId: string; root: Span } | null = null;
 
 /**
- * Fold older turns into the session summary when four are open (see
- * `./session/summarizer.ts`). It keeps folding while a long session catches
- * up, and stops when the user leaves the session. A failure is tried again
- * after the next turn; until then the modules read more turns word for word.
+ * Fold older turns into the session summary once ten are open or they run
+ * long (see `./session/summarizer.ts`). It keeps folding while a long
+ * session catches up, and stops when the user leaves the session. A failure
+ * is tried again after the next turn; until then the modules read more turns
+ * word for word.
  */
 export function scheduleSummary(after?: { traceId: string; root: Span }) {
   if (after) foldTrace = after;

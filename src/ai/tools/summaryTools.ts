@@ -20,10 +20,10 @@ export const SUMMARY_TOOLS: ToolDefinition[] = [
           items: {
             type: "object",
             properties: {
-              op: { type: "string", enum: ["set_goal", "add", "replace", "close"] },
-              kind: { type: "string", enum: ["preference", "topic", "reference", ""], description: 'For add: what the item is. Otherwise "".' },
+              op: { type: "string", enum: ["set_topic", "set_goal", "add", "replace", "close"] },
+              kind: { type: "string", enum: ["preference", "history", "reference", ""], description: 'For add: what the item is. Otherwise "".' },
               id: { type: "string", description: 'For replace and close: the item id, such as P2 or U1. Otherwise "".' },
-              text: { type: "string", description: "The goal, the item's text, or for close how the request was settled." },
+              text: { type: "string", description: "The topic, the goal, the item's text, or for close how the request was settled." },
               turn: { type: "integer", description: "For add and replace: the turn the item comes from. Otherwise 0." },
             },
             required: ["op", "kind", "id", "text", "turn"],

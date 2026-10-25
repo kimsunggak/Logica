@@ -301,16 +301,18 @@ function simulateAnswerModule(all: string, last: string): string {
   ].join("\n");
 }
 
-/** Summary Module: a goal once, a preference for "from now on" requests, and a topic line per question. */
+/** Summary Module: a topic and a goal once, a preference for "from now on" requests, and a history line per question. */
 function simulateSummary(last: string): DemoReply {
   const ops: Record<string, unknown>[] = [];
   const op = (o: { op: string; kind?: string; id?: string; text: string; turn?: number }) => ops.push({ kind: "", id: "", turn: 0, ...o });
-  if (!/^Goal: /m.test(between(last, "current_summary") ?? "")) op({ op: "set_goal", text: "데모 논문을 함께 읽고 다듬는 중" });
+  const current = between(last, "current_summary") ?? "";
+  if (!/^Topic: /m.test(current)) op({ op: "set_topic", text: "가림에 강한 비디오 자세 추정을 위한 시공간 라우팅" });
+  if (!/^Goal: /m.test(current)) op({ op: "set_goal", text: "데모 논문을 함께 읽고 다듬는 중" });
   for (const m of last.matchAll(/<turn number="(\d+)">\nuser: ([\s\S]*?)\nassistant: [\s\S]*?\n<\/turn>/g)) {
     const turn = Number(m[1]);
     const question = m[2].replace(/\s+/g, " ").trim();
     if (/앞으로|항상|from now on|always/i.test(question)) op({ op: "add", kind: "preference", text: question.slice(0, 120), turn });
-    else if (!(SMALL_TALK.test(question) && question.length < 40)) op({ op: "add", kind: "topic", text: `${question.slice(0, 60)} 에 답함`, turn });
+    else if (!(SMALL_TALK.test(question) && question.length < 40)) op({ op: "add", kind: "history", text: `${question.slice(0, 60)} → 답함`, turn });
   }
   return { tool: { name: "update_summary", args: { ops } } };
 }

@@ -80,12 +80,13 @@ describe("conversationFor", () => {
     expect(conversationFor({ ...turn, turns: [] }, "judge").info).toEqual({ turn_numbers: [] });
   });
 
-  it("gives the judge the last four turns, and the modules the turns the summary does not cover", () => {
+  it("gives every call at least the last four turns, and every turn the summary does not cover", () => {
     const t = at(many, 4);
     expect(conversationFor(t, "judge").info.turn_numbers).toEqual([3, 4, 5, 6]);
-    expect(conversationFor(t, "module").info.turn_numbers).toEqual([5, 6]);
-    expect(conversationFor(t, "module").history.map((m) => m.content)).toEqual(["q5", "a5", "q6", "a6"]);
+    expect(conversationFor(t, "module").info.turn_numbers).toEqual([3, 4, 5, 6]);
+    expect(conversationFor(t, "module").history.map((m) => m.content)).toEqual(["q3", "a3", "q4", "a4", "q5", "a5", "q6", "a6"]);
     expect(conversationFor(t, "module").sessionSummary).toContain("Goal: Tighten section 4");
+    expect(conversationFor(at(many, 1), "module").info.turn_numbers).toEqual([2, 3, 4, 5, 6]);
     expect(conversationFor(at(many, 0), "module").info.turn_numbers).toEqual([1, 2, 3, 4, 5, 6]);
     expect(conversationFor(at(many, 0), "judge").info.turn_numbers).toEqual([1, 2, 3, 4, 5, 6]);
   });
@@ -131,8 +132,9 @@ describe("Chat Orchestrator", () => {
       answer: () => response("ok"),
     }, { ...turn, turns, summary: { ...emptySummary(), coveredTurns: 7, goal: "Keep the context" } });
     await r.result;
-    for (const { task, request, options } of r.log) {
-      const expected = task === "judge" ? [6, 7, 8, 9] : [8, 9];
+    // Every call reads the last four turns, though the summary covers 1-7.
+    for (const { request, options } of r.log) {
+      const expected = [6, 7, 8, 9];
       expect(request.history?.map((m) => m.content)).toEqual(expected.flatMap((i) => [`q${i}`, `a${i}`]));
       expect(options.trace?.input).toEqual({ turn_numbers: expected });
       expect(request.sessionSummary).toContain("Keep the context");

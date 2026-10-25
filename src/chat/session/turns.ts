@@ -9,9 +9,9 @@
  * that did not finish stay in the conversation with a note, so the next
  * model call knows the request was not answered.
  *
- * Every call reads a recent window (four turns for the judge, two for the
- * other modules), extended to include every turn not yet summarized.
- * Long messages keep their start and end.
+ * Every call reads at least the last four turns, extended to include every
+ * turn not yet summarized; the judge reads longer messages than the other
+ * modules. Long messages keep their start and end.
  */
 import type { AIMessage } from "../../ai/types";
 import { t } from "../../i18n";
@@ -38,10 +38,10 @@ export interface TurnMessage {
 /** The judge keeps at least four recent turns, each message up to 10,000 characters. */
 export const JUDGE_TURNS = 4;
 export const JUDGE_MESSAGE_CHARS = 10_000;
-/** The other modules keep at least two recent turns, each message up to 4,000 characters. */
+/** The other modules keep at least four recent turns, each message up to 4,000 characters. */
 export const MODULE_MESSAGE_CHARS = 4_000;
-/** At least the last two turns go word for word, even when the summary covers them. */
-export const MODULE_TURNS = 2;
+/** At least the last four turns go word for word, even when the summary covers them. */
+export const MODULE_TURNS = 4;
 
 /** Notes after an answer that did not finish; the prompts explain them. */
 export const TURN_NOTES: Record<Exclude<TurnStatus, "done" | "clarify">, string> = {

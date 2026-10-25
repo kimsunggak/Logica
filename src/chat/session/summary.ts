@@ -2,26 +2,30 @@
  * L1 session summary: what the conversation before the recent turns left
  * behind, for every chat module to read instead of those turns.
  *
- *   Goal    the paper's topic and what the user is working on
- *   P#      preferences: how the user wants answers, standing requirements
- *   U#      requests that were not fully answered (stopped, failed, cut off, asked back)
- *   T#      what each answered turn dealt with, one line
- *   R#      material from outside the paper the user gave (later also tool results)
+ *   Topic            what the paper is about, one line
+ *   Goal             what the user is working on now, one line
+ *   P#               preferences: how the user wants answers, standing requirements
+ *   U#               open requests, not fully answered (stopped, failed, cut off, asked back)
+ *   Session history  each answered turn, one line: what was asked and how it ended
+ *   R#               material from outside the paper the user gave (later also tool results)
  *
- * The Summary Module never rewrites it: it returns operations (add, replace,
- * close, set_goal) that `applyOps` checks and applies, so items that did not
- * change stay exactly as they were. U# items are made here, from the turns'
- * status; the model can only close them. `renderSummary` always writes the
- * same text for the same summary, which keeps the prompt cache valid.
+ * The numbers (P1, U2, R1) let the Summary Module name an item to replace or
+ * close; history lines never change, so they go by their turn instead. The
+ * Summary Module never rewrites the summary: it returns operations
+ * (set_topic, set_goal, add, replace, close) that `applyOps` checks and
+ * applies, so items that did not change stay exactly as they were. U# items
+ * are made here, from the turns' status; the model can only close them.
+ * `renderSummary` always writes the same text for the same summary, which
+ * keeps the prompt cache valid.
  */
 import type { TurnRecord } from "./turns";
 
-export type SummaryKind = "preference" | "topic" | "reference" | "unresolved";
+export type SummaryKind = "preference" | "history" | "reference" | "unresolved";
 /** Where a reference came from; the Summary Module only adds pasted material. */
 export type ReferenceSource = "paste" | "web" | "figure" | "table";
 
 export interface SummaryItem {
-  /** P1, T3, R1, U2 */
+  /** P1, R1, U2; history lines have one too (H3) but are shown by their turn. */
   id: string;
   kind: SummaryKind;
   text: string;
@@ -38,6 +42,9 @@ export interface SummaryItem {
 export interface ConversationSummary {
   /** Turns 1..coveredTurns are folded into the summary. */
   coveredTurns: number;
+  /** What the paper is about. */
+  topic: string;
+  /** What the user is working on now. */
   goal: string;
   items: SummaryItem[];
   /** Next number per id prefix; ids are never reused. */
@@ -58,21 +65,29 @@ export interface IgnoredOp {
   why: string;
 }
 
-const PREFIX: Record<SummaryKind, string> = { preference: "P", topic: "T", reference: "R", unresolved: "U" };
+const PREFIX: Record<SummaryKind, string> = { preference: "P", history: "H", reference: "R", unresolved: "U" };
+const KINDS = Object.keys(PREFIX) as SummaryKind[];
 /** Longest text per item; longer text is cut. */
-const MAX_CHARS = { goal: 300, preference: 300, topic: 200, reference: 1500, unresolved: 300, note: 200 } as const;
+const MAX_CHARS = { topic: 200, goal: 200, preference: 300, history: 300, reference: 1500, unresolved: 300, note: 200 } as const;
 /** Longest rendered summary; older items are dropped beyond it (see `pruneSummary`). */
 export const SUMMARY_CHARS = 4_000;
 
 export function emptySummary(): ConversationSummary {
-  return { coveredTurns: 0, goal: "", items: [], next: { preference: 1, topic: 1, reference: 1, unresolved: 1 } };
+  return { coveredTurns: 0, topic: "", goal: "", items: [], next: { preference: 1, history: 1, reference: 1, unresolved: 1 } };
 }
 
 /** A summary read from a saved session, or null when it is missing or not one. */
 export function readSummary(value: unknown): ConversationSummary | null {
   const s = value as ConversationSummary | null | undefined;
   if (!s || typeof s !== "object" || typeof s.coveredTurns !== "number" || !Array.isArray(s.items) || !s.next) return null;
-  return { ...emptySummary(), ...s, next: { ...emptySummary().next, ...s.next } };
+  const saved: Partial<Record<string, number>> = s.next;
+  return {
+    ...emptySummary(),
+    ...s,
+    // Sessions saved before the session history called its lines topics (T#).
+    items: s.items.map((item) => ((item.kind as string) === "topic" ? { ...item, kind: "history" } : item)),
+    next: Object.fromEntries(KINDS.map((kind) => [kind, saved[kind] ?? 1])) as Record<SummaryKind, number>,
+  };
 }
 
 function cut(text: string, max: number): string {
@@ -139,12 +154,13 @@ export function applyOps(summary: ConversationSummary, ops: SummaryOp[], turns: 
   for (const op of ops) {
     const text = (op.text ?? "").trim();
     const skip = (why: string) => ignored.push({ op, why });
-    if (op.op === "set_goal") {
+    if (op.op === "set_topic" || op.op === "set_goal") {
+      const field = op.op === "set_topic" ? "topic" : "goal";
       if (!text) skip("no text");
-      else next.goal = cut(text, MAX_CHARS.goal);
+      else next[field] = cut(text, MAX_CHARS[field]);
     } else if (op.op === "add") {
       const kind = op.kind as SummaryKind;
-      if (kind !== "preference" && kind !== "topic" && kind !== "reference") skip(`cannot add ${op.kind || "an item without a kind"}`);
+      if (kind !== "preference" && kind !== "history" && kind !== "reference") skip(`cannot add ${op.kind || "an item without a kind"}`);
       else if (!text) skip("no text");
       else if (next.items.some((item) => item.kind === kind && item.status === "active" && item.text === cut(text, MAX_CHARS[kind]))) skip("duplicate");
       else add(next, { kind, text: cut(text, MAX_CHARS[kind]), turn: turnOf(op.turn), ...(kind === "reference" ? { source: "paste" as const } : {}) });
@@ -191,6 +207,8 @@ export function readOps(args: Record<string, unknown>): SummaryOp[] {
 }
 
 function line(item: SummaryItem): string {
+  // History lines never change, so they go by their turn instead of an id.
+  if (item.kind === "history") return `- turn ${item.turn}: ${item.text}`;
   const where = item.kind === "preference" ? "" : item.kind === "reference" ? ` (turn ${item.turn}, ${item.source === "paste" || !item.source ? "pasted" : item.source})` : ` (turn ${item.turn})`;
   const replaced = item.status === "replaced" ? ` (replaced by ${item.by})` : "";
   return `- ${item.id}${where}${replaced}: ${item.text}`;
@@ -202,18 +220,19 @@ function line(item: SummaryItem): string {
  * "go back to what I said first" can be followed.
  */
 export function renderSummary(summary: ConversationSummary | null): string {
-  if (!summary || (!summary.goal && summary.items.length === 0)) return "";
-  const of = (kind: SummaryKind, keep: (item: SummaryItem) => boolean) => summary.items.filter((item) => item.kind === kind && keep(item)).map(line);
-  const sections: [string, string[]][] = [
+  if (!summary || (!summary.topic && !summary.goal && summary.items.length === 0)) return "";
+  const of = (kind: SummaryKind, keep: (item: SummaryItem) => boolean) => summary.items.filter((item) => item.kind === kind && keep(item));
+  const sections: [string, SummaryItem[]][] = [
     ["Preferences (follow the active ones):", of("preference", (item) => item.status !== "closed")],
-    ["Requests not fully answered:", of("unresolved", (item) => item.status === "active")],
-    ["Topics covered:", of("topic", () => true)],
+    ["Open requests:", of("unresolved", (item) => item.status === "active")],
+    // One fold may add its lines in any order; the history reads oldest first.
+    ["Session history:", of("history", () => true).sort((a, b) => a.turn - b.turn)],
     ["Material from the user:", of("reference", (item) => item.status === "active")],
   ];
   return [
     summary.coveredTurns ? `Turns 1-${summary.coveredTurns} of this conversation are folded into this summary; later turns follow word for word.` : "",
-    summary.goal ? `Goal: ${summary.goal}` : "",
-    ...sections.filter(([, lines]) => lines.length).map(([title, lines]) => [title, ...lines].join("\n")),
+    [summary.topic ? `Topic: ${summary.topic}` : "", summary.goal ? `Goal: ${summary.goal}` : ""].filter(Boolean).join("\n"),
+    ...sections.filter(([, items]) => items.length).map(([title, items]) => [title, ...items.map(line)].join("\n")),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -221,15 +240,16 @@ export function renderSummary(summary: ConversationSummary | null): string {
 
 /**
  * Keep the rendered summary within `max` characters by dropping, oldest
- * first: settled requests, replaced preferences and references, topics, then
- * references. Active preferences and open requests are always kept.
+ * first: settled requests, replaced preferences and references, history
+ * lines, then references. Active preferences and open requests are always
+ * kept.
  */
 export function pruneSummary(summary: ConversationSummary, max = SUMMARY_CHARS): ConversationSummary {
   const next = copy(summary);
   const order: ((item: SummaryItem) => boolean)[] = [
     (item) => item.kind === "unresolved" && item.status === "closed",
     (item) => item.status === "replaced",
-    (item) => item.kind === "topic",
+    (item) => item.kind === "history",
     (item) => item.kind === "reference",
   ];
   for (const drop of order) {

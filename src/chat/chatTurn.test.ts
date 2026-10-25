@@ -91,38 +91,53 @@ describe("chat turn through the demo backend", () => {
     }
   });
 
-  it("folds the oldest turns into the session summary every two turns", async () => {
-    const questions = ["앞으로 답은 짧게 해줘", "What does Table 2 report?", "고마워", "What is in Section 3?", "Define the routing loss", "What does Figure 1 show?"];
+  it("folds all but the last four turns into the session summary once ten are open", async () => {
+    const questions = [
+      "앞으로 답은 짧게 해줘",
+      "What does Table 2 report?",
+      "고마워",
+      "What is in Section 3?",
+      "Define the routing loss",
+      "What does Figure 1 show?",
+      "Which datasets are used?",
+      "What is the baseline?",
+      "Explain the occlusion results",
+      "What are the limitations?",
+    ];
     const covered: number[] = [];
     for (const q of questions) {
       await sendChatMessage(q);
       await summaryIdle();
       covered.push(useChat.getState().summary?.coveredTurns ?? 0);
     }
-    // Four open turns: all but the last two are folded.
-    expect(covered).toEqual([0, 0, 0, 2, 2, 4]);
+    // Nothing is folded before ten turns are open; then all but the last four are.
+    expect(covered).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 6]);
     const summary = useChat.getState().summary!;
-    // Small talk (turn 3) gets no topic line.
-    expect(summary.items.map((item) => [item.id, item.turn])).toEqual([
-      ["P1", 1],
-      ["T1", 2],
-      ["T2", 4],
+    expect(summary.topic).not.toBe("");
+    expect(summary.goal).not.toBe("");
+    // Small talk (turn 3) gets no history line.
+    expect(summary.items.map((item) => [item.kind, item.turn])).toEqual([
+      ["preference", 1],
+      ["history", 2],
+      ["history", 4],
+      ["history", 5],
+      ["history", 6],
     ]);
-    expect(renderSummary(summary)).toContain("Turns 1-4 of this conversation are folded");
+    expect(renderSummary(summary)).toContain("Turns 1-6 of this conversation are folded");
 
-    // The next question reads the summary and only the turns after it.
+    // The next question reads the summary and the four turns after it.
     const generate = vi.spyOn(aiService, "generate");
     try {
       await sendChatMessage("What does Table 3 report?");
-      const answerCall = generate.mock.calls.find(([, request]) => request.task === "answer")![1];
-      expect(answerCall.sessionSummary).toContain("P1: 앞으로 답은 짧게 해줘");
-      expect(answerCall.history?.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["Define the routing loss", "What does Figure 1 show?"]);
-      const judge = generate.mock.calls.find(([, request]) => request.task === "judge")![1];
-      expect(judge.history?.filter((m) => m.role === "user")).toHaveLength(4);
+      for (const task of ["judge", "answer"]) {
+        const request = generate.mock.calls.find(([, r]) => r.task === task)![1];
+        expect(request.sessionSummary).toContain("P1: 앞으로 답은 짧게 해줘");
+        expect(request.history?.filter((m) => m.role === "user").map((m) => m.content)).toEqual(questions.slice(6));
+      }
     } finally {
       generate.mockRestore();
     }
-  }, 30_000);
+  }, 60_000);
 
   it("falls back to Claude when OpenAI fails, and says so", async () => {
     demo.__LOGICA_DEMO_FAIL_OPENAI = true;

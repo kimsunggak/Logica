@@ -102,7 +102,7 @@ svg text { font-family: var(--sans); fill: var(--ink); }
 .node.sel rect { stroke-width: 3.5; }
 .node.skipped { opacity: .45; }
 .node.skipped rect { stroke-dasharray: 2 4; }
-/* Summary Module before four turns are left unsummarized: it does not run yet. */
+/* Summary Module before ten turns (or 40,000 characters) are left unsummarized: it does not run yet. */
 .node.inactive { opacity: .55; }
 .node.inactive rect { stroke-dasharray: 6 4; fill: var(--soft); }
 .node .route { font: 600 11px var(--mono); fill: var(--llm); }
@@ -390,17 +390,22 @@ function llmStatus(t) {
 }
 /**
  * The Summary Module in a turn's graph before it runs: it starts after the
- * turn, once four turns are not in the summary. Counts come from the turn's input.
+ * turn, once ten turns are not in the summary or they pass 40,000 characters
+ * as the modules read them. Counts come from the turn's input; the length
+ * leaves out the turn itself, which has not ended yet.
  */
 function summaryIdle(t) {
   const root = rootOf(t);
   if (!root || root.status === "running") return { status: "waiting", lines: ["턴이 끝나면 요약 조건 확인"] };
   const input = (mainSpan(t, "user") || {}).output || {};
   const open = (input.session_turns || 0) + 1 - (input.summary_covered_turns || 0);
-  if (open >= FOLD_AT) return { status: "waiting", lines: [`미요약 턴 ${open}/${FOLD_AT}`, "이전 요약이 끝나면 실행"] };
-  return { status: "inactive", lines: [`미요약 턴 ${open}/${FOLD_AT}`, `${FOLD_AT}턴이 쌓이면 실행`] };
+  const chars = input.unsummarized_chars || 0;
+  const counts = [`미요약 턴 ${open}/${FOLD_AT}`, `이전 턴 미요약 ${chars.toLocaleString()}/${FOLD_CHARS.toLocaleString()}자`];
+  if (open >= FOLD_AT || chars > FOLD_CHARS) return { status: "waiting", lines: [...counts, "이전 요약이 끝나면 실행"] };
+  return { status: "inactive", lines: [...counts, `${FOLD_AT}턴이 쌓이거나 ${FOLD_CHARS.toLocaleString()}자를 넘으면 실행`] };
 }
-const FOLD_AT = 4;
+const FOLD_AT = 10;
+const FOLD_CHARS = 40000;
 
 /**
  * The Section Summary Module in a turn's graph before it reports: after a

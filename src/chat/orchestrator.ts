@@ -21,8 +21,8 @@
  * has only as a summary asks for it once, and is written again with it.
  *
  * Every call reads the session summary (L1) and recent turns word for word
- * (L2): at least four turns for the judge, two for the other modules,
- * including every turn the summary does not cover yet (see `./session/`).
+ * (L2): at least the last four turns, including every turn the summary does
+ * not cover yet (see `./session/`).
  */
 import { parseRefine, type RefineResult } from "../ai/agent/refine";
 import { callModel, type GatewayOptions, type GatewayResult, type RunControl } from "../ai/gateway";

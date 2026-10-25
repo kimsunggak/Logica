@@ -64,7 +64,7 @@ export const CHAT_MODELS: Record<ChatTask, { primary: ModelChoice; fallback: Mod
   reply: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
   refine: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
   answer: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
-  // Runs in the background every two turns.
+  // Runs in the background once ten turns are not in the session summary, or they run long.
   summary: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
   // Runs in the background after a turn that read the paper, for sections without a summary.
   sections: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },

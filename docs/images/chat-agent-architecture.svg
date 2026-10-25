@@ -19,7 +19,8 @@
 <path d="M318 410 H187" class="g" marker-end="url(#ag)"/>
 <text x="252" y="430" class="lg" text-anchor="middle">잡담 답, 답변, 되묻기</text>
 <path d="M430 168 V313" class="m" marker-end="url(#am)"/>
-<text x="442" y="250" class="lm" text-anchor="start">최근 대화 2턴</text>
+<text x="442" y="242" class="lm" text-anchor="start">세션 요약 +</text>
+<text x="442" y="260" class="lm" text-anchor="start">최근 4턴 이상</text>
 <path d="M430 612 V467" class="p" marker-end="url(#ap)"/>
 <text x="442" y="545" class="lp" text-anchor="start">섹션 원문 + 요약</text>
 <path d="M110 318 C110 160 250 120 348 120" class="m" marker-end="url(#am)"/>

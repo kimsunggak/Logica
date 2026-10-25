@@ -49,7 +49,9 @@ export class AnthropicProvider implements AIProvider {
     const prompt = buildPrompt(request);
     return {
       model: request.model,
-      system: prompt.system,
+      // Cache the tools and the system prompt, which every call of a task repeats;
+      // the messages after them change from turn to turn.
+      system: [{ type: "text", text: prompt.system, cache_control: { type: "ephemeral" } }],
       messages: prompt.messages.map((m) => ({ role: m.role, content: m.content })),
       max_tokens: request.maxOutputTokens ?? DEFAULT_MAX_TOKENS,
       stream: true,

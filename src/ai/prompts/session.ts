@@ -6,7 +6,7 @@ import type { AIRequest } from "../types";
 import { tag } from "./context";
 
 export const SESSION_RULES = [
-  "<session_summary>, when present, sums up the conversation before the recent turns: the user's goal, preferences (P#) to follow in every answer, requests that were not fully answered (U#), topics covered (T#) and material the user gave (R#).",
+  "<session_summary>, when present, sums up the conversation before the recent turns: what the paper is about (topic), what the user is working on now (goal), preferences (P#) to follow in every answer, open requests that were not fully answered (U#), the session history (one line per earlier turn: what was asked and how it ended) and material the user gave (R#).",
   "An earlier answer may end with [answer stopped by the user], [answer failed] or [answer cut off at the length limit]: that request was not fully answered. A long message may have its middle omitted, marked [... omitted ...].",
 ].join("\n");
 
