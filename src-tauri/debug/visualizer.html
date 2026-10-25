@@ -40,14 +40,8 @@ header .sub { color: var(--ink-2); font-size: 12px; }
 :focus-visible { outline: 2px solid var(--run); outline-offset: 2px; }
 
 /* Panes: sizes are CSS variables the gutters change (see "layout" in the script). */
-.app { --left: 250px; --right: 420px; --graph-h: 62%; flex: 1; min-height: 0; display: grid; grid-template-columns: var(--left) 6px minmax(0, 1fr) 6px var(--right); }
-.app.no-traces { --left: 34px; } .app.no-inspector { --right: 34px; }
-@media (max-width: 1100px) {
-  .app { grid-template-columns: var(--left) 6px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
-  .gutter.right { display: none; }
-  .inspector { grid-column: 1 / -1; border-left: none; border-top: 1px solid var(--line); max-height: 45vh; }
-}
-.col { min-height: 0; overflow: auto; }
+.app { --left: 250px; --right: 420px; --graph-h: 75%; --inspector-h: 30%; flex: 1; min-height: 0; min-width: 0; display: grid; grid-template-columns: var(--left) 10px minmax(0, 1fr) 10px var(--right); grid-template-rows: minmax(0, 1fr); }
+.col { min-height: 0; min-width: 0; overflow: auto; }
 .pane-head { display: flex; align-items: center; gap: 6px; padding-right: 8px; }
 .pane-head .section-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pbtn { border: 1px solid var(--line); background: var(--soft); border-radius: 5px; min-width: 26px; height: 24px; padding: 0 6px; cursor: pointer; font: 600 12px/1 var(--mono); color: var(--ink); }
@@ -56,16 +50,28 @@ header .sub { color: var(--ink-2); font-size: 12px; }
 .collapsed > :not(.pane-head) { display: none; }
 .collapsed .pane-head .section-title { display: none; }
 .collapsed .pane-head { flex-direction: column; padding: 8px 4px; }
-.gutter { background: transparent; position: relative; touch-action: none; }
+.gutter { background: var(--soft); position: relative; touch-action: none; user-select: none; }
 .gutter::after { content: ""; position: absolute; border-radius: 2px; background: var(--line); }
-.gutter.v { cursor: col-resize; } .gutter.v::after { top: 50%; left: 2px; width: 2px; height: 36px; margin-top: -18px; }
-.gutter.h { cursor: row-resize; height: 6px; flex: none; } .gutter.h::after { left: 50%; top: 2px; height: 2px; width: 36px; margin-left: -18px; }
+.gutter.v { cursor: col-resize; } .gutter.v::after { top: 50%; left: 3px; width: 4px; height: 48px; margin-top: -24px; }
+.gutter.h { cursor: row-resize; height: 10px; flex: none; } .gutter.h::after { left: 50%; top: 3px; height: 4px; width: 48px; margin-left: -24px; }
 .gutter:hover, .gutter.drag, .gutter:focus-visible { background: var(--run-soft); } .gutter:hover::after, .gutter.drag::after { background: var(--run); }
 .gutter.off { pointer-events: none; } .gutter.off::after { display: none; }
 /* A pane shown over the whole window (⤢); Esc or ⤢ again puts it back. */
 .maxed { position: fixed !important; inset: 0; z-index: 40; height: auto !important; max-height: none !important; background: var(--panel); border: 0 !important; }
 .traces { border-right: 1px solid var(--line); background: var(--panel); }
 .inspector { border-left: 1px solid var(--line); background: var(--panel); }
+@media (max-width: 1100px) {
+  .app { grid-template-columns: var(--left) 10px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 10px var(--inspector-h); }
+  .gutter.right { grid-column: 1 / -1; grid-row: 2; cursor: row-resize; }
+  .gutter.right::after { left: 50%; top: 3px; width: 48px; height: 4px; margin: 0 0 0 -24px; }
+  .inspector { grid-column: 1 / -1; grid-row: 3; border-left: none; border-top: 1px solid var(--line); }
+  .inspector.collapsed .pane-head { flex-direction: row; padding: 0 8px 0 0; }
+  .inspector.collapsed .pane-head .section-title { display: block; }
+}
+@media (max-width: 700px) {
+  header .sub { display: none; }
+  header .ctl { flex-wrap: wrap; }
+}
 .section-title { font: 600 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); padding: 12px 14px 8px; }
 
 .trace { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: transparent; padding: 9px 14px; cursor: pointer; }
@@ -76,8 +82,9 @@ header .sub { color: var(--ink-2); font-size: 12px; }
 .empty { color: var(--ink-2); padding: 14px; }
 
 .center { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
-/* A saved height larger than the window still leaves the timeline its 80px. */
-.graph-pane { height: var(--graph-h); min-height: 140px; max-height: calc(100% - 86px); display: flex; flex-direction: column; flex: none; }
+/* Resizing always leaves the timeline at least 80px. */
+.graph-pane { height: var(--graph-h); min-height: 0; max-height: calc(100% - 90px); display: flex; flex-direction: column; flex: none; }
+.graph-pane > .pane-head { flex-wrap: wrap; }
 .graph-pane.maxed { display: flex; }
 .zoom { display: flex; gap: 4px; align-items: center; }
 .graph-wrap { flex: 1; min-height: 0; position: relative; overflow: hidden; cursor: grab; touch-action: none; }
@@ -176,6 +183,7 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
   <span id="conn" class="pill off">연결 대기</span>
   <div class="ctl">
     <label><input type="checkbox" id="follow" checked> 최신 실행 따라가기</label>
+    <button class="btn" id="resetLayout" type="button" title="패널 크기와 그래프 배율을 기본값으로 되돌립니다">레이아웃 초기화</button>
     <button class="btn" id="clear" type="button">지우기</button>
   </div>
 </header>
@@ -381,8 +389,7 @@ function moduleDuration(t, module) {
 function render() {
   renderTraces();
   const t = traces.get(selTrace);
-  // A different run starts fitted; within a run the view the user set stays.
-  if (t?.id !== viewedTrace) { viewedTrace = t?.id; zoom.fitted = true; }
+  // Keep the chosen view when switching runs or receiving live events.
   renderGraph(t);
   applyView();
   renderTimeline(t);
@@ -726,12 +733,24 @@ function renderInspector(t) {
 
 /**
  * The graph's view: `k` screen pixels per graph unit, (x, y) the graph point
- * at the top left. Rendering sets the graph's size; while `fitted`, the view
- * follows it so a growing graph stays in sight.
+ * at the top left. Start at readable 100%; fitting the whole graph is opt-in.
+ * Manual zoom and pan survive live events, trace changes and page reloads.
  */
-const zoom = { x: 0, y: 0, k: 1, fitted: true, w: 840, h: 680, dragged: false };
-let viewedTrace;
+const zoom = { x: 0, y: 0, k: 1, mode: "readable", w: 840, h: 680, dragged: false };
 const K_MIN = 0.2, K_MAX = 4;
+const VIEW_KEY = "logica-debugger-view";
+try {
+  const saved = JSON.parse(localStorage.getItem(VIEW_KEY) || "{}");
+  if (["readable", "fit", "manual"].includes(saved.mode) && [saved.x, saved.y, saved.k].every(Number.isFinite)) {
+    zoom.mode = saved.mode;
+    zoom.x = saved.x; zoom.y = saved.y;
+    zoom.k = Math.min(Math.max(saved.k, K_MIN), K_MAX);
+  }
+} catch { /* storage unavailable or invalid */ }
+
+function saveView() {
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify({ x: zoom.x, y: zoom.y, k: zoom.k, mode: zoom.mode })); } catch { /* storage unavailable */ }
+}
 
 function graphSize(w, h) { zoom.w = w; zoom.h = h; }
 
@@ -747,7 +766,12 @@ function fitView() {
 function applyView() {
   const box = $("graphWrap").getBoundingClientRect();
   if (!box.width || !box.height) return;
-  if (zoom.fitted) fitView();
+  if (zoom.mode === "fit") fitView();
+  if (zoom.mode === "readable") {
+    zoom.k = 1;
+    zoom.x = (zoom.w - box.width) / 2;
+    zoom.y = Math.min(-16, (zoom.h - box.height) / 2);
+  }
   $("graph").setAttribute("viewBox", `${zoom.x} ${zoom.y} ${box.width / zoom.k} ${box.height / zoom.k}`);
   $("zoomLevel").textContent = `${Math.round(zoom.k * 100)}%`;
 }
@@ -758,13 +782,14 @@ function zoomAt(factor, px, py) {
   zoom.x += px / zoom.k - px / k;
   zoom.y += py / zoom.k - py / k;
   zoom.k = k;
-  zoom.fitted = false;
+  zoom.mode = "manual";
   applyView();
+  saveView();
 }
 
 function zoomBy(how) {
   const box = $("graphWrap").getBoundingClientRect();
-  if (how === "fit") { zoom.fitted = true; applyView(); return; }
+  if (how === "fit") { zoom.mode = "fit"; applyView(); saveView(); return; }
   if (how === "actual") { zoomAt(1 / zoom.k, box.width / 2, box.height / 2); return; }
   zoomAt(how === "in" ? 1.25 : 0.8, box.width / 2, box.height / 2);
 }
@@ -791,12 +816,12 @@ function zoomBy(how) {
     if (!start.moving) { start.moving = true; wrap.setPointerCapture(e.pointerId); wrap.classList.add("panning"); }
     zoom.x = start.x - dx / zoom.k;
     zoom.y = start.y - dy / zoom.k;
-    zoom.fitted = false;
+    zoom.mode = "manual";
     applyView();
   });
   const end = (e) => {
     if (!start || e.pointerId !== start.id) return;
-    if (start.moving) { zoom.dragged = true; wrap.classList.remove("panning"); setTimeout(() => { zoom.dragged = false; }, 0); }
+    if (start.moving) { saveView(); zoom.dragged = true; wrap.classList.remove("panning"); setTimeout(() => { zoom.dragged = false; }, 0); }
     start = null;
   };
   wrap.addEventListener("pointerup", end);
@@ -809,33 +834,75 @@ function zoomBy(how) {
 
 /** Pane sizes, collapsed panes and the pane shown over the window; sizes are kept in the browser. */
 const LAYOUT_KEY = "logica-debugger-layout";
-const DEFAULTS = { left: 250, right: 420, graph: null };
-const layout = { left: DEFAULTS.left, right: DEFAULTS.right, graph: DEFAULTS.graph, collapsed: { traces: false, inspector: false }, max: null };
+const DEFAULTS = { left: 250, right: 420, graph: null, inspector: null };
+const GUTTER = 10, COLLAPSED = 36, CENTER_MIN = 360;
+const narrowLayout = matchMedia("(max-width: 1100px)");
+const layout = { ...DEFAULTS, collapsed: { traces: false, inspector: false }, max: null };
 try {
   const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}");
-  for (const k of ["left", "right", "graph"]) if (typeof saved[k] === "number") layout[k] = saved[k];
-  if (saved.collapsed) Object.assign(layout.collapsed, saved.collapsed);
+  for (const k of Object.keys(DEFAULTS)) if (Number.isFinite(saved[k])) layout[k] = saved[k];
+  for (const k of ["traces", "inspector"]) if (typeof saved.collapsed?.[k] === "boolean") layout.collapsed[k] = saved.collapsed[k];
 } catch { /* no saved layout */ }
 
 function saveLayout() {
-  try { localStorage.setItem(LAYOUT_KEY, JSON.stringify({ left: layout.left, right: layout.right, graph: layout.graph, collapsed: layout.collapsed })); } catch { /* storage unavailable */ }
+  try { localStorage.setItem(LAYOUT_KEY, JSON.stringify({ left: layout.left, right: layout.right, graph: layout.graph, inspector: layout.inspector, collapsed: layout.collapsed })); } catch { /* storage unavailable */ }
 }
+
+const clampSize = (value, lo, hi) => Math.round(Math.min(Math.max(value, lo), hi));
+
+/** Clamp the displayed sizes, preserving preferred sizes for a larger window. */
+function measureLayout() {
+  const { width, height } = $("app").getBoundingClientRect();
+  const narrow = narrowLayout.matches;
+  const leftMax = Math.max(0, narrow
+    ? width - GUTTER - Math.min(CENTER_MIN, width * 0.65)
+    : width - GUTTER * 2 - CENTER_MIN - (layout.collapsed.inspector ? COLLAPSED : 260));
+  const leftMin = Math.min(160, leftMax);
+  const left = layout.collapsed.traces ? COLLAPSED : clampSize(layout.left, leftMin, leftMax);
+  const rightMax = Math.max(260, width - GUTTER * 2 - CENTER_MIN - left);
+  const right = layout.collapsed.inspector ? COLLAPSED : clampSize(layout.right, 260, rightMax);
+  const inspectorMax = Math.max(0, height - GUTTER - 240);
+  const inspectorMin = Math.min(120, inspectorMax);
+  const inspector = layout.collapsed.inspector ? COLLAPSED : clampSize(layout.inspector ?? height * 0.3, inspectorMin, inspectorMax);
+  const centerHeight = narrow ? Math.max(0, height - GUTTER - inspector) : height;
+  const graphMax = Math.max(0, centerHeight - GUTTER - 80);
+  const graphMin = Math.min(180, graphMax);
+  const graph = clampSize(layout.graph ?? centerHeight * 0.75, graphMin, graphMax);
+  return { left, right, inspector, graph, bounds: {
+    left: [leftMin, narrow ? leftMax : Math.max(leftMin, width - GUTTER * 2 - CENTER_MIN - right)],
+    right: [260, rightMax], inspector: [inspectorMin, inspectorMax], graph: [graphMin, graphMax],
+  } };
+}
+
+const gutterName = (g) => g.dataset.gutter === "right" && narrowLayout.matches ? "inspector" : g.dataset.gutter;
 
 function applyLayout() {
   const app = $("app");
-  app.style.setProperty("--left", `${layout.left}px`);
-  app.style.setProperty("--right", `${layout.right}px`);
-  app.style.setProperty("--graph-h", layout.graph == null ? "62%" : `${layout.graph}px`);
-  app.classList.toggle("no-traces", layout.collapsed.traces);
-  app.classList.toggle("no-inspector", layout.collapsed.inspector);
+  const sizes = measureLayout();
+  app.style.setProperty("--left", `${sizes.left}px`);
+  app.style.setProperty("--right", `${sizes.right}px`);
+  app.style.setProperty("--graph-h", `${sizes.graph}px`);
+  app.style.setProperty("--inspector-h", `${sizes.inspector}px`);
   $("paneTraces").classList.toggle("collapsed", layout.collapsed.traces);
   $("paneInspector").classList.toggle("collapsed", layout.collapsed.inspector);
   document.querySelector('[data-collapse="traces"]').textContent = layout.collapsed.traces ? "»" : "«";
   document.querySelector('[data-collapse="traces"]').title = layout.collapsed.traces ? "펼치기" : "접기";
-  document.querySelector('[data-collapse="inspector"]').textContent = layout.collapsed.inspector ? "«" : "»";
+  document.querySelector('[data-collapse="inspector"]').textContent = narrowLayout.matches
+    ? (layout.collapsed.inspector ? "↑" : "↓") : (layout.collapsed.inspector ? "«" : "»");
   document.querySelector('[data-collapse="inspector"]').title = layout.collapsed.inspector ? "펼치기" : "접기";
-  document.querySelector('[data-gutter="left"]').classList.toggle("off", layout.collapsed.traces);
-  document.querySelector('[data-gutter="right"]').classList.toggle("off", layout.collapsed.inspector);
+  document.querySelectorAll("[data-gutter]").forEach((g) => {
+    const name = gutterName(g), horizontal = name === "graph" || name === "inspector";
+    const off = g.dataset.gutter === "left" ? layout.collapsed.traces : g.dataset.gutter === "right" && layout.collapsed.inspector;
+    g.classList.toggle("off", off);
+    g.tabIndex = off ? -1 : 0;
+    g.setAttribute("aria-disabled", String(off));
+    g.setAttribute("aria-orientation", horizontal ? "horizontal" : "vertical");
+    g.setAttribute("aria-valuemin", sizes.bounds[name][0]);
+    g.setAttribute("aria-valuemax", sizes.bounds[name][1]);
+    g.setAttribute("aria-valuenow", sizes[name]);
+    if (g.dataset.gutter === "right") g.setAttribute("aria-label", horizontal ? "인스펙터 높이" : "인스펙터 너비");
+    g.title = `드래그 또는 방향키로 ${horizontal ? "높이" : "너비"} 조절, 더블클릭으로 기본값`;
+  });
 }
 
 function toggleCollapse(pane) {
@@ -850,50 +917,62 @@ function toggleMax(id) {
   layout.max = was === id ? null : id;
   if (layout.max) $(layout.max).classList.add("maxed");
   document.querySelectorAll("[data-max]").forEach((b) => { b.textContent = b.dataset.max === layout.max ? "✕" : "⤢"; b.title = b.dataset.max === layout.max ? "원래 크기로 (Esc)" : "화면 전체로 (Esc로 복귀)"; });
-  if (layout.max === "paneGraph" || was === "paneGraph") zoom.fitted = true;
   applyView();
 }
 
 /** Drag a gutter to resize the panes beside it; arrow keys move it by 20px, a double click resets it. */
 (() => {
-  const limits = {
-    left: () => [160, Math.max(200, innerWidth * 0.45)],
-    right: () => [260, Math.max(300, innerWidth * 0.6)],
-    graph: () => [140, Math.max(160, $("center").getBoundingClientRect().height - 90)],
-  };
-  const clamp = (name, v) => { const [lo, hi] = limits[name](); return Math.round(Math.min(Math.max(v, lo), hi)); };
-  const current = (name) => name === "graph" ? $("paneGraph").getBoundingClientRect().height : layout[name];
-  const set = (name, v) => { layout[name] = clamp(name, v); applyLayout(); };
+  const set = (name, v) => { layout[name] = clampSize(v, ...measureLayout().bounds[name]); applyLayout(); };
   document.querySelectorAll("[data-gutter]").forEach((g) => {
-    const name = g.dataset.gutter;
     let start = null;
     g.addEventListener("pointerdown", (e) => {
-      if (e.button !== 0) return;
+      if (e.button !== 0 || g.classList.contains("off")) return;
       e.preventDefault();
       g.setPointerCapture(e.pointerId);
       g.classList.add("drag");
-      start = { x: e.clientX, y: e.clientY, size: current(name) };
+      const name = gutterName(g);
+      start = { id: e.pointerId, name, x: e.clientX, y: e.clientY, size: measureLayout()[name] };
     });
     g.addEventListener("pointermove", (e) => {
-      if (!start) return;
-      const d = name === "graph" ? e.clientY - start.y : name === "left" ? e.clientX - start.x : start.x - e.clientX;
+      if (!start || start.id !== e.pointerId || start.name !== gutterName(g)) return;
+      const { name } = start;
+      const d = name === "graph" ? e.clientY - start.y : name === "inspector" ? start.y - e.clientY : name === "left" ? e.clientX - start.x : start.x - e.clientX;
       set(name, start.size + d);
     });
-    const end = () => { if (!start) return; start = null; g.classList.remove("drag"); saveLayout(); };
+    const end = () => {
+      if (!start) return;
+      const { id } = start; start = null;
+      if (g.hasPointerCapture(id)) g.releasePointerCapture(id);
+      g.classList.remove("drag"); saveLayout();
+    };
     g.addEventListener("pointerup", end);
     g.addEventListener("pointercancel", end);
-    g.addEventListener("dblclick", () => { layout[name] = DEFAULTS[name]; applyLayout(); saveLayout(); });
+    g.addEventListener("lostpointercapture", end);
+    g.addEventListener("dblclick", () => { const name = gutterName(g); layout[name] = DEFAULTS[name]; applyLayout(); saveLayout(); });
     g.addEventListener("keydown", (e) => {
-      const grow = { left: ["ArrowRight", "ArrowLeft"], right: ["ArrowLeft", "ArrowRight"], graph: ["ArrowDown", "ArrowUp"] }[name];
+      if (g.classList.contains("off")) return;
+      const name = gutterName(g);
+      const grow = { left: ["ArrowRight", "ArrowLeft"], right: ["ArrowLeft", "ArrowRight"], graph: ["ArrowDown", "ArrowUp"], inspector: ["ArrowUp", "ArrowDown"] }[name];
       const step = e.key === grow[0] ? 20 : e.key === grow[1] ? -20 : 0;
       if (!step) return;
       e.preventDefault();
-      set(name, current(name) + step);
+      set(name, measureLayout()[name] + step);
       saveLayout();
     });
   });
   applyLayout();
+  new ResizeObserver(() => applyLayout()).observe($("app"));
+  narrowLayout.addEventListener("change", () => applyLayout());
 })();
+
+$("resetLayout").addEventListener("click", () => {
+  if (layout.max) toggleMax(layout.max);
+  Object.assign(layout, DEFAULTS);
+  layout.collapsed = { traces: false, inspector: false };
+  zoom.mode = "readable";
+  applyLayout(); applyView();
+  saveLayout(); saveView();
+});
 
 // ------------------------------------------------------------ value viewer
 
