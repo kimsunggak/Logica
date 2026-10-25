@@ -68,7 +68,7 @@ export interface IgnoredOp {
 const PREFIX: Record<SummaryKind, string> = { preference: "P", history: "H", reference: "R", unresolved: "U" };
 const KINDS = Object.keys(PREFIX) as SummaryKind[];
 /** Longest text per item; longer text is cut. */
-const MAX_CHARS = { topic: 200, goal: 200, preference: 300, history: 300, reference: 1500, unresolved: 300, note: 200 } as const;
+const MAX_CHARS = { topic: 1000, goal: 1000, preference: 300, history: 300, reference: 1500, unresolved: 300, note: 200 } as const;
 /** Longest rendered summary; older items are dropped beyond it (see `pruneSummary`). */
 export const SUMMARY_CHARS = 4_000;
 

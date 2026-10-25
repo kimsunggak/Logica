@@ -36,7 +36,7 @@
 <rect x="76" y="254" width="73" height="20" rx="10" fill="#ffffff" stroke="#4f9fae" stroke-width="1"/>
 <text x="85" y="268" class="who" fill="#4f9fae">모델이 씀</text>
 <text x="330" y="220" class="desc">논문이 무엇에 관한 것인지 한 줄</text>
-<text x="330" y="242" class="desc">최대 200자</text>
+<text x="330" y="242" class="desc">최대 1,000자</text>
 <text x="330" y="264" class="desc">비어 있거나 바뀌었을 때만 새로 씁니다</text>
 <rect x="880" y="200" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
 <text x="896" y="222" class="mono">Topic: 가림에 강한 비디오 자세 추정을 위한 시공간 라우팅</text>
@@ -47,7 +47,7 @@
 <rect x="76" y="364" width="73" height="20" rx="10" fill="#ffffff" stroke="#6f9bd1" stroke-width="1"/>
 <text x="85" y="378" class="who" fill="#6f9bd1">모델이 씀</text>
 <text x="330" y="330" class="desc">사용자가 지금 하고 있는 작업 한 줄</text>
-<text x="330" y="352" class="desc">최대 200자</text>
+<text x="330" y="352" class="desc">최대 1,000자</text>
 <text x="330" y="374" class="desc">작업이 바뀌었을 때만 새로 씁니다</text>
 <rect x="880" y="310" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
 <text x="896" y="332" class="mono">Goal: 실험 결과(Table 1)와 3.2절 설명 다듬기</text>
