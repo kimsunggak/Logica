@@ -66,15 +66,15 @@
 <text x="896" y="480" class="mono">- P2: 답은 다섯 문장 이내로</text>
 <rect x="56" y="518" width="1328" height="100" rx="12" fill="#fdf3ea" stroke="#dde2ea" stroke-width="1.2"/>
 <rect x="56" y="518" width="6" height="100" rx="3" fill="#d88a52"/>
-<text x="76" y="552" class="nm" fill="#2b3240">Open request</text>
-<text x="76" y="574" class="kr">답하지 못한 요청  U1, …</text>
+<text x="76" y="552" class="nm" fill="#2b3240">Unfinished request</text>
+<text x="76" y="574" class="kr">미완료 요청  U1, …</text>
 <rect x="76" y="584" width="172" height="20" rx="10" fill="#ffffff" stroke="#d88a52" stroke-width="1"/>
 <text x="85" y="598" class="who" fill="#d88a52">코드가 씀, 모델은 닫기만</text>
 <text x="330" y="550" class="desc">중지, 실패, 길이 초과로 끝난 답과 LOGICA가 되물은 질문</text>
 <text x="330" y="572" class="desc">모델이 아니라 코드가 턴 상태를 보고 추가합니다</text>
 <text x="330" y="594" class="desc">나중 턴에서 처리되면 닫히고 요약에서 빠집니다</text>
 <rect x="880" y="530" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
-<text x="896" y="552" class="mono">Open requests:</text>
+<text x="896" y="552" class="mono">Unfinished requests:</text>
 <text x="896" y="571" class="mono">- U1 (turn 2): The user stopped the answer</text>
 <text x="896" y="590" class="mono">  to "3.2절 첫 문단 고쳐줘".</text>
 <rect x="56" y="628" width="1328" height="100" rx="12" fill="#ecf6f1" stroke="#dde2ea" stroke-width="1.2"/>
@@ -92,15 +92,15 @@
 <text x="896" y="700" class="mono">- turn 3: 3.2절 설명 → 정의를 앞으로 옮긴 수정안</text>
 <rect x="56" y="738" width="1328" height="100" rx="12" fill="#fcf7e6" stroke="#dde2ea" stroke-width="1.2"/>
 <rect x="56" y="738" width="6" height="100" rx="3" fill="#c9ad4f"/>
-<text x="76" y="772" class="nm" fill="#2b3240">Reference</text>
-<text x="76" y="794" class="kr">사용자 자료  R1, …</text>
+<text x="76" y="772" class="nm" fill="#2b3240">External reference</text>
+<text x="76" y="794" class="kr">외부 참고 자료  R1, …</text>
 <rect x="76" y="804" width="73" height="20" rx="10" fill="#ffffff" stroke="#c9ad4f" stroke-width="1"/>
 <text x="85" y="818" class="who" fill="#c9ad4f">모델이 씀</text>
 <text x="330" y="770" class="desc">사용자가 대화에 준 논문 밖 자료 (리뷰어 코멘트, 다른 논문, 데이터)</text>
 <text x="330" y="792" class="desc">원문 그대로 최대 1,500자, 논문 자체의 글은 넣지 않음</text>
 <text x="330" y="814" class="desc">사용자가 바꾸면 새 항목이 대체합니다</text>
 <rect x="880" y="750" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
-<text x="896" y="772" class="mono">Material from the user:</text>
+<text x="896" y="772" class="mono">External references (from the user):</text>
 <text x="896" y="791" class="mono">- R1 (turn 4, pasted): Reviewer 2: The</text>
 <text x="896" y="810" class="mono">  ablation in Table 2 lacks …</text>
 <text x="56" y="884" class="foot">요약 전체는 최대 4,000자입니다. 넘치면 닫힌 U#, 대체된 항목, 오래된 세션 기록, 오래된 R# 순으로 빼고, 활성 P#와 열린 U#는 항상 남깁니다.</text>

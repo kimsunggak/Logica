@@ -106,7 +106,7 @@ describe("session summary", () => {
         "Turns 1-2 of this conversation are folded into this summary; later turns follow word for word.",
         "Topic: 주제\nGoal: 목표",
         "Preferences (follow the active ones):\n- P1: 짧게",
-        'Open requests:\n- U1 (turn 2): The answer to "question 2" failed.',
+        'Unfinished requests:\n- U1 (turn 2): The answer to "question 2" failed.',
         "Session history:\n- turn 1: 표 2 → 지표 설명\n- turn 2: 표 3 → 해석 제시",
       ].join("\n\n"),
     );
@@ -115,7 +115,7 @@ describe("session summary", () => {
     expect(renderSummary(emptySummary())).toBe("");
   });
 
-  it("drops the oldest history lines first when it grows too long, but keeps preferences and open requests", () => {
+  it("drops the oldest history lines first when it grows too long, but keeps preferences and unfinished requests", () => {
     let s = addUnresolved(emptySummary(), [turn(1, "error")]);
     s = applyOps(s, [op({ op: "add", kind: "preference", text: "짧게" })], [turn(1)]).summary;
     for (let i = 2; i <= 40; i++) s = applyOps(s, [op({ op: "add", kind: "history", text: `turn ${i} ${"x".repeat(80)}`, turn: i })], [turn(i)]).summary;

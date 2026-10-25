@@ -5,9 +5,9 @@
  *   Topic            what the paper is about, one line
  *   Goal             what the user is working on now, one line
  *   P#               preferences: how the user wants answers, standing requirements
- *   U#               open requests, not fully answered (stopped, failed, cut off, asked back)
+ *   U#               unfinished requests, not fully answered (stopped, failed, cut off, asked back)
  *   Session history  each answered turn, one line: what was asked and how it ended
- *   R#               material from outside the paper the user gave (later also tool results)
+ *   R#               external references: material from outside the paper the user gave (later also tool results)
  *
  * The numbers (P1, U2, R1) let the Summary Module name an item to replace or
  * close; history lines never change, so they go by their turn instead. The
@@ -224,10 +224,10 @@ export function renderSummary(summary: ConversationSummary | null): string {
   const of = (kind: SummaryKind, keep: (item: SummaryItem) => boolean) => summary.items.filter((item) => item.kind === kind && keep(item));
   const sections: [string, SummaryItem[]][] = [
     ["Preferences (follow the active ones):", of("preference", (item) => item.status !== "closed")],
-    ["Open requests:", of("unresolved", (item) => item.status === "active")],
+    ["Unfinished requests:", of("unresolved", (item) => item.status === "active")],
     // One fold may add its lines in any order; the history reads oldest first.
     ["Session history:", of("history", () => true).sort((a, b) => a.turn - b.turn)],
-    ["Material from the user:", of("reference", (item) => item.status === "active")],
+    ["External references (from the user):", of("reference", (item) => item.status === "active")],
   ];
   return [
     summary.coveredTurns ? `Turns 1-${summary.coveredTurns} of this conversation are folded into this summary; later turns follow word for word.` : "",
@@ -241,7 +241,7 @@ export function renderSummary(summary: ConversationSummary | null): string {
 /**
  * Keep the rendered summary within `max` characters by dropping, oldest
  * first: settled requests, replaced preferences and references, history
- * lines, then references. Active preferences and open requests are always
+ * lines, then references. Active preferences and unfinished requests are always
  * kept.
  */
 export function pruneSummary(summary: ConversationSummary, max = SUMMARY_CHARS): ConversationSummary {

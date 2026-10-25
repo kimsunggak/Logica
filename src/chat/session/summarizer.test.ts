@@ -48,7 +48,7 @@ describe("turnsToFold", () => {
 });
 
 describe("foldTurns", () => {
-  it("sends the summary so far and the turns to fold, with the open requests already added", async () => {
+  it("sends the summary so far and the turns to fold, with the unfinished requests already added", async () => {
     const { call, log } = gateway({
       toolCalls: [
         {
