@@ -5,37 +5,33 @@
  *   Topic            what the paper is about, one line
  *   Goal             what the user is working on now, one line
  *   P#               preferences: how the user wants answers, standing requirements
- *   U#               unfinished requests, not fully answered (stopped, failed, cut off, asked back)
  *   Session history  each answered turn, one line: what was asked and how it ended
  *   R#               external references: material from outside the paper the user gave (later also tool results)
  *
- * The numbers (P1, U2, R1) let the Summary Module name an item to replace or
- * close; history lines never change, so they go by their turn instead. The
- * Summary Module never rewrites the summary: it returns operations
- * (set_topic, set_goal, add, replace, close) that `applyOps` checks and
- * applies, so items that did not change stay exactly as they were. U# items
- * are made here, from the turns' status; the model can only close them.
- * `renderSummary` always writes the same text for the same summary, which
- * keeps the prompt cache valid.
+ * The numbers (P1, R1) let the Summary Module name an item to replace;
+ * history lines never change, so they go by their turn instead. The Summary
+ * Module never rewrites the summary: it returns operations (set_topic,
+ * set_goal, add, replace) that `applyOps` checks and applies, so items that
+ * did not change stay exactly as they were. A request that was stopped or
+ * failed is not kept: the user asks again. `renderSummary` always writes the
+ * same text for the same summary, which keeps the prompt cache valid.
  */
 import type { TurnRecord } from "./turns";
 
-export type SummaryKind = "preference" | "history" | "reference" | "unresolved";
+export type SummaryKind = "preference" | "history" | "reference";
 /** Where a reference came from; the Summary Module only adds pasted material. */
 export type ReferenceSource = "paste" | "web" | "figure" | "table";
 
 export interface SummaryItem {
-  /** P1, R1, U2; history lines have one too (H3) but are shown by their turn. */
+  /** P1, R1; history lines have one too (H3) but are shown by their turn. */
   id: string;
   kind: SummaryKind;
   text: string;
   /** The turn it comes from. */
   turn: number;
-  status: "active" | "replaced" | "closed";
+  status: "active" | "replaced";
   /** The item that replaced it. */
   by?: string;
-  /** How an unresolved request was settled. */
-  note?: string;
   source?: ReferenceSource;
 }
 
@@ -65,15 +61,15 @@ export interface IgnoredOp {
   why: string;
 }
 
-const PREFIX: Record<SummaryKind, string> = { preference: "P", history: "H", reference: "R", unresolved: "U" };
+const PREFIX: Record<SummaryKind, string> = { preference: "P", history: "H", reference: "R" };
 const KINDS = Object.keys(PREFIX) as SummaryKind[];
 /** Longest text per item; longer text is cut. */
-const MAX_CHARS = { topic: 1000, goal: 1000, preference: 300, history: 300, reference: 1500, unresolved: 300, note: 200 } as const;
+const MAX_CHARS = { topic: 1000, goal: 1000, preference: 300, history: 300, reference: 1500 } as const;
 /** Longest rendered summary; older items are dropped beyond it (see `pruneSummary`). */
 export const SUMMARY_CHARS = 4_000;
 
 export function emptySummary(): ConversationSummary {
-  return { coveredTurns: 0, topic: "", goal: "", items: [], next: { preference: 1, history: 1, reference: 1, unresolved: 1 } };
+  return { coveredTurns: 0, topic: "", goal: "", items: [], next: { preference: 1, history: 1, reference: 1 } };
 }
 
 /** A summary read from a saved session, or null when it is missing or not one. */
@@ -84,8 +80,10 @@ export function readSummary(value: unknown): ConversationSummary | null {
   return {
     ...emptySummary(),
     ...s,
-    // Sessions saved before the session history called its lines topics (T#).
-    items: s.items.map((item) => ((item.kind as string) === "topic" ? { ...item, kind: "history" } : item)),
+    // Older sessions called history lines topics (T#) and kept unfinished requests (U#).
+    items: s.items
+      .filter((item) => (item.kind as string) !== "unresolved")
+      .map((item) => ((item.kind as string) === "topic" ? { ...item, kind: "history" } : item)),
     next: Object.fromEntries(KINDS.map((kind) => [kind, saved[kind] ?? 1])) as Record<SummaryKind, number>,
   };
 }
@@ -93,10 +91,6 @@ export function readSummary(value: unknown): ConversationSummary | null {
 function cut(text: string, max: number): string {
   const flat = text.trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
-}
-
-function short(text: string, max: number): string {
-  return cut(text.replace(/\s+/g, " "), max);
 }
 
 function add(summary: ConversationSummary, item: Omit<SummaryItem, "id" | "status">): SummaryItem {
@@ -109,33 +103,6 @@ function add(summary: ConversationSummary, item: Omit<SummaryItem, "id" | "statu
 
 function copy(summary: ConversationSummary): ConversationSummary {
   return { ...summary, items: summary.items.map((item) => ({ ...item })), next: { ...summary.next } };
-}
-
-/** What a turn left unanswered, as known from its status. */
-function unresolvedText(turn: TurnRecord): string | null {
-  const question = `"${short(turn.question, 160)}"`;
-  switch (turn.status) {
-    case "cancelled":
-      return `The user stopped the answer to ${question}.`;
-    case "error":
-      return `The answer to ${question} failed.`;
-    case "truncated":
-      return `The answer to ${question} was cut off at the length limit.`;
-    case "clarify":
-      return `LOGICA asked back "${short(turn.answer, 100)}" about ${question}.`;
-    default:
-      return null;
-  }
-}
-
-/** Add a U# item for every turn being folded that was not fully answered. */
-export function addUnresolved(summary: ConversationSummary, turns: TurnRecord[]): ConversationSummary {
-  const next = copy(summary);
-  for (const turn of turns) {
-    const text = unresolvedText(turn);
-    if (text) add(next, { kind: "unresolved", text: cut(text, MAX_CHARS.unresolved), turn: turn.index });
-  }
-  return next;
 }
 
 /**
@@ -160,29 +127,20 @@ export function applyOps(summary: ConversationSummary, ops: SummaryOp[], turns: 
       else next[field] = cut(text, MAX_CHARS[field]);
     } else if (op.op === "add") {
       const kind = op.kind as SummaryKind;
-      if (kind !== "preference" && kind !== "history" && kind !== "reference") skip(`cannot add ${op.kind || "an item without a kind"}`);
+      if (!KINDS.includes(kind)) skip(`cannot add ${op.kind || "an item without a kind"}`);
       else if (!text) skip("no text");
       else if (next.items.some((item) => item.kind === kind && item.status === "active" && item.text === cut(text, MAX_CHARS[kind]))) skip("duplicate");
       else add(next, { kind, text: cut(text, MAX_CHARS[kind]), turn: turnOf(op.turn), ...(kind === "reference" ? { source: "paste" as const } : {}) });
     } else if (op.op === "replace") {
       const old = find(op.id);
       if (!old) skip(`no item ${op.id}`);
-      else if (old.kind !== "preference" && old.kind !== "reference") skip(`${old.id} cannot be replaced`);
+      else if (old.kind === "history") skip(`${old.id} cannot be replaced`);
       else if (old.status !== "active") skip(`${old.id} is already ${old.status}`);
       else if (!text) skip("no text");
       else {
         const made = add(next, { kind: old.kind, text: cut(text, MAX_CHARS[old.kind]), turn: turnOf(op.turn), ...(old.source ? { source: old.source } : {}) });
         old.status = "replaced";
         old.by = made.id;
-      }
-    } else if (op.op === "close") {
-      const item = find(op.id);
-      if (!item) skip(`no item ${op.id}`);
-      else if (item.kind !== "unresolved") skip(`${item.id} is not an unresolved request`);
-      else if (item.status !== "active") skip(`${item.id} is already ${item.status}`);
-      else {
-        item.status = "closed";
-        if (text) item.note = cut(text, MAX_CHARS.note);
       }
     } else {
       skip(`unknown operation ${op.op}`);
@@ -215,16 +173,15 @@ function line(item: SummaryItem): string {
 }
 
 /**
- * The summary as prompt text, the same for the same summary. Settled
- * requests are left out; replaced preferences stay, marked, so a later
- * "go back to what I said first" can be followed.
+ * The summary as prompt text, the same for the same summary. Replaced
+ * preferences stay, marked, so a later "go back to what I said first" can be
+ * followed; replaced references are left out.
  */
 export function renderSummary(summary: ConversationSummary | null): string {
   if (!summary || (!summary.topic && !summary.goal && summary.items.length === 0)) return "";
   const of = (kind: SummaryKind, keep: (item: SummaryItem) => boolean) => summary.items.filter((item) => item.kind === kind && keep(item));
   const sections: [string, SummaryItem[]][] = [
-    ["Preferences (follow the active ones):", of("preference", (item) => item.status !== "closed")],
-    ["Unfinished requests:", of("unresolved", (item) => item.status === "active")],
+    ["Preferences (follow the active ones):", of("preference", () => true)],
     // One fold may add its lines in any order; the history reads oldest first.
     ["Session history:", of("history", () => true).sort((a, b) => a.turn - b.turn)],
     ["External references (from the user):", of("reference", (item) => item.status === "active")],
@@ -240,14 +197,12 @@ export function renderSummary(summary: ConversationSummary | null): string {
 
 /**
  * Keep the rendered summary within `max` characters by dropping, oldest
- * first: settled requests, replaced preferences and references, history
- * lines, then references. Active preferences and unfinished requests are always
- * kept.
+ * first: replaced preferences and references, history lines, then
+ * references. Active preferences are always kept.
  */
 export function pruneSummary(summary: ConversationSummary, max = SUMMARY_CHARS): ConversationSummary {
   const next = copy(summary);
   const order: ((item: SummaryItem) => boolean)[] = [
-    (item) => item.kind === "unresolved" && item.status === "closed",
     (item) => item.status === "replaced",
     (item) => item.kind === "history",
     (item) => item.kind === "reference",

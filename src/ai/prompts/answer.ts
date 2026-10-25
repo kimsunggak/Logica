@@ -27,7 +27,6 @@ const ANSWER_TASK = [
   "```",
   "ORIGINAL must be copied character for character from the file, long enough to be unique in it and no longer than needed. REVISED replaces exactly that text, so repeat any unchanged part you keep. The author reviews each block as a diff; never claim a change is already applied.",
   "Keep \\label, \\ref and \\cite keys, math, environments and LaTeX commands intact unless the user asks to change them.",
-  "When <session_summary> lists unfinished requests that were not fully answered (U#): handle one together with the user's message when it is related; otherwise end with one short line offering to continue it.",
   "Keep answers short and concrete unless the user's preferences say otherwise. Answer in the language the user writes in.",
 ];
 

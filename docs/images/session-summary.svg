@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="920" viewBox="0 0 1440 920" font-family="Pretendard, 'Noto Sans KR', sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="812" viewBox="0 0 1440 812" font-family="Pretendard, 'Noto Sans KR', sans-serif">
 <defs><style>
 .title{font-size:18px;font-weight:700;fill:#2b3240}
 .sub{font-size:12.5px;fill:#6b7385}
@@ -14,8 +14,8 @@
 .mono{font-size:11px;fill:#3d4556}
 .foot{font-size:12px;fill:#4a5263}
 </style></defs>
-<rect width="1440" height="920" fill="#ffffff"/>
-<rect x="40" y="24" width="1360" height="830" rx="16" fill="#fbfcfe" stroke="#c4cad6" stroke-width="1.5"/>
+<rect width="1440" height="812" fill="#ffffff"/>
+<rect x="40" y="24" width="1360" height="720" rx="16" fill="#fbfcfe" stroke="#c4cad6" stroke-width="1.5"/>
 <g transform="translate(64,44)" fill="none" stroke="#5d6678" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2h13l7 7v22H7z"/><path d="M20 2v7h7"/><path d="M11 15h12M11 20h12M11 25h8"/></g>
 <text x="104" y="64" class="title">세션 요약 (session summary)</text>
 <text x="104" y="86" class="sub">요약 안 된 턴이 10개가 되거나 4만 자를 넘으면, 최근 4턴만 원문으로 남기고 오래된 턴을 아래 항목으로 접어 판단과 모든 모듈에 함께 보냅니다.</text>
@@ -64,45 +64,32 @@
 <text x="896" y="442" class="mono">Preferences (follow the active ones):</text>
 <text x="896" y="461" class="mono">- P1 (replaced by P2): 답은 짧게</text>
 <text x="896" y="480" class="mono">- P2: 답은 다섯 문장 이내로</text>
-<rect x="56" y="518" width="1328" height="100" rx="12" fill="#fdf3ea" stroke="#dde2ea" stroke-width="1.2"/>
-<rect x="56" y="518" width="6" height="100" rx="3" fill="#d88a52"/>
-<text x="76" y="552" class="nm" fill="#2b3240">Unfinished request</text>
-<text x="76" y="574" class="kr">미완료 요청  U1, …</text>
-<rect x="76" y="584" width="172" height="20" rx="10" fill="#ffffff" stroke="#d88a52" stroke-width="1"/>
-<text x="85" y="598" class="who" fill="#d88a52">코드가 씀, 모델은 닫기만</text>
-<text x="330" y="550" class="desc">중지, 실패, 길이 초과로 끝난 답과 LOGICA가 되물은 질문</text>
-<text x="330" y="572" class="desc">모델이 아니라 코드가 턴 상태를 보고 추가합니다</text>
-<text x="330" y="594" class="desc">나중 턴에서 처리되면 닫히고 요약에서 빠집니다</text>
+<rect x="56" y="518" width="1328" height="100" rx="12" fill="#ecf6f1" stroke="#dde2ea" stroke-width="1.2"/>
+<rect x="56" y="518" width="6" height="100" rx="3" fill="#4ea37f"/>
+<text x="76" y="552" class="nm" fill="#2b3240">Session history</text>
+<text x="76" y="574" class="kr">세션 기록  턴 번호로 표시</text>
+<rect x="76" y="584" width="73" height="20" rx="10" fill="#ffffff" stroke="#4ea37f" stroke-width="1"/>
+<text x="85" y="598" class="who" fill="#4ea37f">모델이 씀</text>
+<text x="330" y="550" class="desc">답한 턴마다 무엇을 물었고 어떻게 끝났는지 한 줄</text>
+<text x="330" y="572" class="desc">답의 결론, 제안한 수정, 나중 턴에서 받아들였는지까지, 최대 300자</text>
+<text x="330" y="594" class="desc">잡담은 넣지 않고, 한 번 쓰면 바뀌지 않음 (최근 턴 원문 앞까지의 흐름)</text>
 <rect x="880" y="530" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
-<text x="896" y="552" class="mono">Unfinished requests:</text>
-<text x="896" y="571" class="mono">- U1 (turn 2): The user stopped the answer</text>
-<text x="896" y="590" class="mono">  to "3.2절 첫 문단 고쳐줘".</text>
-<rect x="56" y="628" width="1328" height="100" rx="12" fill="#ecf6f1" stroke="#dde2ea" stroke-width="1.2"/>
-<rect x="56" y="628" width="6" height="100" rx="3" fill="#4ea37f"/>
-<text x="76" y="662" class="nm" fill="#2b3240">Session history</text>
-<text x="76" y="684" class="kr">세션 기록  턴 번호로 표시</text>
-<rect x="76" y="694" width="73" height="20" rx="10" fill="#ffffff" stroke="#4ea37f" stroke-width="1"/>
-<text x="85" y="708" class="who" fill="#4ea37f">모델이 씀</text>
-<text x="330" y="660" class="desc">답한 턴마다 무엇을 물었고 어떻게 끝났는지 한 줄</text>
-<text x="330" y="682" class="desc">답의 결론, 제안한 수정, 나중 턴에서 받아들였는지까지, 최대 300자</text>
-<text x="330" y="704" class="desc">잡담은 넣지 않고, 한 번 쓰면 바뀌지 않음 (최근 턴 원문 앞까지의 흐름)</text>
+<text x="896" y="552" class="mono">Session history:</text>
+<text x="896" y="571" class="mono">- turn 1: Table 1(MPJPE) 해석 → 해석 문단 제시</text>
+<text x="896" y="590" class="mono">- turn 3: 3.2절 설명 → 정의를 앞으로 옮긴 수정안</text>
+<rect x="56" y="628" width="1328" height="100" rx="12" fill="#fcf7e6" stroke="#dde2ea" stroke-width="1.2"/>
+<rect x="56" y="628" width="6" height="100" rx="3" fill="#c9ad4f"/>
+<text x="76" y="662" class="nm" fill="#2b3240">External reference</text>
+<text x="76" y="684" class="kr">외부 참고 자료  R1, …</text>
+<rect x="76" y="694" width="73" height="20" rx="10" fill="#ffffff" stroke="#c9ad4f" stroke-width="1"/>
+<text x="85" y="708" class="who" fill="#c9ad4f">모델이 씀</text>
+<text x="330" y="660" class="desc">사용자가 대화에 준 논문 밖 자료 (리뷰어 코멘트, 다른 논문, 데이터)</text>
+<text x="330" y="682" class="desc">원문 그대로 최대 1,500자, 논문 자체의 글은 넣지 않음</text>
+<text x="330" y="704" class="desc">사용자가 바꾸면 새 항목이 대체합니다</text>
 <rect x="880" y="640" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
-<text x="896" y="662" class="mono">Session history:</text>
-<text x="896" y="681" class="mono">- turn 1: Table 1(MPJPE) 해석 → 해석 문단 제시</text>
-<text x="896" y="700" class="mono">- turn 3: 3.2절 설명 → 정의를 앞으로 옮긴 수정안</text>
-<rect x="56" y="738" width="1328" height="100" rx="12" fill="#fcf7e6" stroke="#dde2ea" stroke-width="1.2"/>
-<rect x="56" y="738" width="6" height="100" rx="3" fill="#c9ad4f"/>
-<text x="76" y="772" class="nm" fill="#2b3240">External reference</text>
-<text x="76" y="794" class="kr">외부 참고 자료  R1, …</text>
-<rect x="76" y="804" width="73" height="20" rx="10" fill="#ffffff" stroke="#c9ad4f" stroke-width="1"/>
-<text x="85" y="818" class="who" fill="#c9ad4f">모델이 씀</text>
-<text x="330" y="770" class="desc">사용자가 대화에 준 논문 밖 자료 (리뷰어 코멘트, 다른 논문, 데이터)</text>
-<text x="330" y="792" class="desc">원문 그대로 최대 1,500자, 논문 자체의 글은 넣지 않음</text>
-<text x="330" y="814" class="desc">사용자가 바꾸면 새 항목이 대체합니다</text>
-<rect x="880" y="750" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
-<text x="896" y="772" class="mono">External references (from the user):</text>
-<text x="896" y="791" class="mono">- R1 (turn 4, pasted): Reviewer 2: The</text>
-<text x="896" y="810" class="mono">  ablation in Table 2 lacks …</text>
-<text x="56" y="884" class="foot">요약 전체는 최대 4,000자입니다. 넘치면 닫힌 U#, 대체된 항목, 오래된 세션 기록, 오래된 R# 순으로 빼고, 활성 P#와 열린 U#는 항상 남깁니다.</text>
-<text x="56" y="904" class="foot">P1, U1, R1 같은 번호는 요약 모듈이 교체하거나 닫을 항목을 가리킬 때 씁니다. 세션 기록은 바뀌지 않으므로 번호 대신 턴 번호로 표시합니다.</text>
+<text x="896" y="662" class="mono">External references (from the user):</text>
+<text x="896" y="681" class="mono">- R1 (turn 4, pasted): Reviewer 2: The</text>
+<text x="896" y="700" class="mono">  ablation in Table 2 lacks …</text>
+<text x="56" y="776" class="foot">요약 전체는 최대 4,000자입니다. 넘치면 대체된 항목, 오래된 세션 기록, 오래된 R# 순으로 빼고, 활성 P#는 항상 남깁니다. 중단되거나 실패한 요청은 남기지 않습니다(다시 요청).</text>
+<text x="56" y="796" class="foot">P1, R1 같은 번호는 요약 모듈이 교체할 항목을 가리킬 때 씁니다. 세션 기록은 바뀌지 않으므로 번호 대신 턴 번호로 표시합니다.</text>
 </svg>

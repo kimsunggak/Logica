@@ -17,7 +17,7 @@ import { AIError } from "../../ai/errors";
 import { callModel, type RunControl } from "../../ai/gateway";
 import { SUMMARY_TOOLS, UPDATE_SUMMARY } from "../../ai/tools/summaryTools";
 import { step, traced, type Span } from "../../debug/trace";
-import { addUnresolved, applyOps, emptySummary, pruneSummary, readOps, renderSummary, type ConversationSummary, type IgnoredOp, type SummaryOp } from "./summary";
+import { applyOps, emptySummary, pruneSummary, readOps, renderSummary, type ConversationSummary, type IgnoredOp, type SummaryOp } from "./summary";
 import { MODULE_MESSAGE_CHARS, MODULE_TURNS, type TurnRecord } from "./turns";
 
 /** Fold once this many turns are not in the summary, */
@@ -79,11 +79,7 @@ export async function foldTurns(summary: ConversationSummary | null, turns: Turn
     "runSummaryModule",
     () => ({ question: `세션 요약: 턴 ${first}~${last} 접기`, fold_turns: turns.map((t) => ({ turn: t.index, status: t.status })), covered_before: summary?.coveredTurns ?? 0 }),
     async (span) => {
-      // Requests left unanswered are known from the turns' status, not from the model.
-      const before = addUnresolved(summary ?? emptySummary(), turns);
-      step(options.traceId, span, "summary", "addUnresolved", () => turns.map((t) => ({ turn: t.index, status: t.status })), () =>
-        before.items.filter((item) => !summary?.items.some((old) => old.id === item.id)),
-      );
+      const before = summary ?? emptySummary();
       const result = await call(
         "summary",
         {

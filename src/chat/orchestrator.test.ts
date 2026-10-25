@@ -9,7 +9,7 @@ import { buildPaperDocument } from "../latex/parser/documentModel";
 import { samplePaper } from "../test/samplePaper";
 import { askedForSections, chooseRoute, conversationFor, runChatTurn, type Paper, type Stage, type Turn } from "./orchestrator";
 import { FRONT, paperUnits } from "./paper/sections";
-import { addUnresolved, emptySummary } from "./session/summary";
+import { emptySummary } from "./session/summary";
 import type { TurnRecord } from "./session/turns";
 
 const response = (text: string, toolCalls?: ToolCall[]): AIResponse => ({
@@ -73,7 +73,7 @@ describe("conversationFor", () => {
   const at = (turns: TurnRecord[], coveredTurns: number): Turn => ({
     ...turn,
     turns,
-    summary: coveredTurns ? { ...addUnresolved(emptySummary(), []), coveredTurns, goal: "Tighten section 4" } : null,
+    summary: coveredTurns ? { ...emptySummary(), coveredTurns, goal: "Tighten section 4" } : null,
   });
 
   it("has no turns before the first answer", () => {

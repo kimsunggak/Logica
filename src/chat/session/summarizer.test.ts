@@ -48,7 +48,7 @@ describe("turnsToFold", () => {
 });
 
 describe("foldTurns", () => {
-  it("sends the summary so far and the turns to fold, with the unfinished requests already added", async () => {
+  it("sends the summary so far and the turns to fold, and applies the changes", async () => {
     const { call, log } = gateway({
       toolCalls: [
         {
@@ -59,7 +59,6 @@ describe("foldTurns", () => {
               { op: "set_topic", kind: "", id: "", text: "비디오 자세 추정", turn: 0 },
               { op: "set_goal", kind: "", id: "", text: "표 해석", turn: 0 },
               { op: "add", kind: "history", id: "", text: "표 2 → 지표 설명", turn: 1 },
-              { op: "close", kind: "", id: "U1", text: "턴 2에서 다시 물어 답함", turn: 0 },
             ],
           },
         },
@@ -70,7 +69,8 @@ describe("foldTurns", () => {
     expect(log.map((c) => c.task)).toEqual(["summary"]);
     const request = log[0].request;
     expect(request.tools?.map((t) => t.name)).toEqual(["update_summary"]);
-    expect(request.sessionSummary).toContain('U1 (turn 1): The user stopped the answer to "q1".');
+    // A stopped turn leaves nothing behind: the user asks again.
+    expect(request.sessionSummary).toBeUndefined();
     expect(request.foldTurns?.map((t) => t.index)).toEqual([1, 2]);
     const prompt = buildPrompt({ ...request, task: "summary", model: "m" }).messages[0].content;
     expect(prompt).toContain("<paper_outline>\n1 Intro\n2 Method\n</paper_outline>");
@@ -79,7 +79,6 @@ describe("foldTurns", () => {
     expect(result.ignored).toEqual([]);
     expect(renderSummary(result.summary)).toContain("Topic: 비디오 자세 추정\nGoal: 표 해석");
     expect(renderSummary(result.summary)).toContain("Session history:\n- turn 1: 표 2 → 지표 설명");
-    expect(result.summary.items.find((item) => item.id === "U1")?.status).toBe("closed");
   });
 
   it("fails without a tool call, so the turns are folded again later", async () => {

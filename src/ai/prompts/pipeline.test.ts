@@ -117,11 +117,10 @@ describe("refine and answer prompts", () => {
   });
 
   it("put the session summary right after the paper, before the conversation", () => {
-    const answer = buildPrompt({ ...turn, task: "answer", sessionSummary: "U1 (turn 2): The answer failed." });
+    const answer = buildPrompt({ ...turn, task: "answer", sessionSummary: "Goal: Tighten section 4" });
     const first = answer.messages[0].content;
     expect(first.indexOf("</paper>")).toBeLessThan(first.indexOf("<session_summary>"));
     expect(first.indexOf("<session_summary>")).toBeLessThan(first.indexOf("Hi"));
-    expect(answer.messages.at(-1)!.content).toContain("requests that were not fully answered (U#)");
   });
 
   it("give the answer the refined question next to the user's own message", () => {

@@ -20,7 +20,7 @@ const SUMMARY_RULES = [
   "- replace: the user changed an earlier preference or reference; give its id and the new text.",
   "- add history: one line per answered turn, with its turn number: what the user asked (name the section, figure, table or equation) and how it ended (the answer's conclusion or the change it proposed, and whether a later turn took it up or turned it down). Skip small talk.",
   "- add reference: material from outside the paper the user gave in a turn (reviewer comments, text of another paper, data), copied word for word, up to 1500 characters. Not the paper's own text.",
-  "- close: an item U# that a turn in <turns_to_fold> settled, with how. Items U# are added for you: the answers marked [answer stopped by the user], [answer failed] or [answer cut off at the length limit], and questions LOGICA asked back.",
+  "A turn whose answer was stopped, failed or cut off gets no item: the user asks again if they still want it.",
   "Write the text in the language the user writes in. Set fields an operation does not use to \"\" and turn to 0.",
 ].join("\n");
 
