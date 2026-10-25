@@ -29,6 +29,8 @@ struct HubState {
     started: HashMap<String, u64>,
     /// Active project and its fixed application-managed summary path.
     paper: Option<(String, std::path::PathBuf)>,
+    /// Active conversation, independent of the trace selected in the debugger.
+    session: Option<(String, String, std::path::PathBuf)>,
 }
 
 struct Inner {
@@ -63,6 +65,7 @@ impl DebugHub {
                 links: HashMap::new(),
                 started: HashMap::new(),
                 paper: None,
+                session: None,
             }),
         }))
     }
@@ -71,10 +74,11 @@ impl DebugHub {
         self.0.enabled
     }
 
-    fn set_paper(&self, paper: Option<(String, std::path::PathBuf)>) {
+    fn set_project(&self, paper: Option<(String, std::path::PathBuf)>, session: Option<(String, String, std::path::PathBuf)>) {
         if self.enabled() {
             if let Ok(mut state) = self.0.state.lock() {
                 state.paper = paper;
+                state.session = session;
             }
         }
     }
@@ -88,6 +92,20 @@ impl DebugHub {
             Some((root, path)) => crate::papers::inspect_summary(&path, &root),
             None => json!({ "status": "no_project", "project": null, "path": null, "text": null }),
         }
+    }
+
+    fn session_summary(&self) -> Value {
+        let session = match self.0.state.lock() {
+            Ok(state) => match &state.session {
+                Some(session) => session.clone(),
+                None => return match &state.paper {
+                    Some((root, _)) => json!({ "status": "no_session", "project": root, "session_id": null, "path": null, "text": null, "summary": null }),
+                    None => json!({ "status": "no_project", "project": null, "session_id": null, "path": null, "text": null, "summary": null }),
+                },
+            },
+            Err(_) => return json!({ "status": "error", "error": "Could not read the active conversation" }),
+        };
+        crate::chats::inspect_session(&session.2, &session.0, &session.1)
     }
 
     /// Redact, number, log and broadcast one event.
@@ -285,18 +303,26 @@ pub fn debug_trace(hub: State<'_, DebugHub>, event: Value) {
 
 /// Track the open project before its first question, and clear it on returning home.
 #[tauri::command]
-pub fn debug_project(app: tauri::AppHandle, hub: State<'_, DebugHub>, root: Option<String>) -> crate::error::CmdResult<()> {
+pub fn debug_project(app: tauri::AppHandle, hub: State<'_, DebugHub>, root: Option<String>, session_id: Option<String>) -> crate::error::CmdResult<()> {
     if !hub.enabled() {
         return Ok(());
     }
-    let paper = match root {
+    let (paper, session) = match root {
         Some(root) => {
-            let path = crate::papers::summary_path(&crate::chats::base_dir(&app)?, &root);
-            Some((root, path))
+            let base = crate::chats::base_dir(&app)?;
+            let path = crate::papers::summary_path(&base, &root);
+            let session = match session_id {
+                Some(id) => {
+                    let path = crate::chats::session_path(&base, &root, &id)?;
+                    Some((root.clone(), id, path))
+                }
+                None => None,
+            };
+            (Some((root, path)), session)
         }
-        None => None,
+        None => (None, None),
     };
-    hub.set_paper(paper);
+    hub.set_project(paper, session);
     Ok(())
 }
 
@@ -411,6 +437,7 @@ mod server {
             "/" => respond(&mut stream, "200 OK", "text/html; charset=utf-8", PAGE).await,
             "/health" => respond(&mut stream, "200 OK", "text/plain", "ok").await,
             "/paper-summary" => respond(&mut stream, "200 OK", "application/json; charset=utf-8", &hub.paper_summary().to_string()).await,
+            "/session-summary" => respond(&mut stream, "200 OK", "application/json; charset=utf-8", &hub.session_summary().to_string()).await,
             "/events" => events(stream, hub).await,
             _ => respond(&mut stream, "404 Not Found", "text/plain", "").await,
         }
@@ -575,7 +602,7 @@ mod tests {
             serde_json::from_str::<Value>(response.split_once("\r\n\r\n").unwrap().1).unwrap()
         };
         assert_eq!(get().await["status"], "no_project");
-        hub.set_paper(Some(("/paper-a".into(), path.clone())));
+        hub.set_project(Some(("/paper-a".into(), path.clone())), None);
         assert_eq!(get().await["status"], "missing");
         assert!(!base.exists());
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -583,12 +610,64 @@ mod tests {
         assert_eq!(get().await["text"], "sections:\n  - summary: 첫 요약\n");
         std::fs::write(&path, "sections:\n  - summary: 수정한 요약\n").unwrap();
         assert_eq!(get().await["text"], "sections:\n  - summary: 수정한 요약\n");
-        hub.set_paper(Some(("/paper-b".into(), crate::papers::summary_path(&base, "/paper-b"))));
+        hub.set_project(Some(("/paper-b".into(), crate::papers::summary_path(&base, "/paper-b"))), None);
         let next = get().await;
         assert_eq!(next["status"], "missing");
         assert_eq!(next["project"], "/paper-b");
-        hub.set_paper(None);
+        hub.set_project(None, None);
         assert_eq!(get().await["status"], "no_project");
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[cfg(debug_assertions)]
+    #[tokio::test]
+    async fn inspects_the_selected_session_and_clears_it_when_the_project_changes() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::{TcpListener, TcpStream};
+
+        let base = std::env::temp_dir().join(format!("logica-debug-session-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let hub = DebugHub::new(true);
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(super::server::serve(listener, hub.clone(), port));
+        let get = |method: &'static str, host: String| async move {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            stream.write_all(format!("{method} /session-summary HTTP/1.1\r\nHost: {host}\r\n\r\n").as_bytes()).await.unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).await.unwrap();
+            response
+        };
+        let snapshot = |response: String| -> Value {
+            assert!(response.starts_with("HTTP/1.1 200 OK"));
+            serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap()
+        };
+        assert_eq!(snapshot(get("GET", format!("localhost:{port}")).await)["status"], "no_project");
+        let paper = Some(("/paper-a".into(), crate::papers::summary_path(&base, "/paper-a")));
+        hub.set_project(paper.clone(), None);
+        assert_eq!(snapshot(get("GET", format!("localhost:{port}")).await)["status"], "no_session");
+        let path = crate::chats::session_path(&base, "/paper-a", "s1").unwrap();
+        hub.set_project(paper.clone(), Some(("/paper-a".into(), "s1".into(), path.clone())));
+        assert_eq!(snapshot(get("GET", format!("localhost:{port}")).await)["status"], "missing");
+        assert!(!base.exists());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, r#"{"messages":[],"summary":{"coveredTurns":2,"goal":"first"}}"#).unwrap();
+        assert_eq!(snapshot(get("GET", format!("localhost:{port}")).await)["summary"]["goal"], "first");
+        std::fs::write(&path, r#"{"messages":[],"summary":{"coveredTurns":4,"goal":"updated"}}"#).unwrap();
+        assert_eq!(snapshot(get("GET", format!("localhost:{port}")).await)["summary"]["goal"], "updated");
+        let next = crate::chats::session_path(&base, "/paper-a", "s2").unwrap();
+        hub.set_project(paper, Some(("/paper-a".into(), "s2".into(), next)));
+        let switched = snapshot(get("GET", format!("localhost:{port}")).await);
+        assert_eq!(switched["session_id"], "s2");
+        assert!(switched["summary"].is_null());
+        hub.set_project(Some(("/paper-b".into(), crate::papers::summary_path(&base, "/paper-b"))), None);
+        let switched = snapshot(get("GET", format!("localhost:{port}")).await);
+        assert_eq!(switched["status"], "no_session");
+        assert_eq!(switched["project"], "/paper-b");
+        hub.set_project(None, None);
+        assert_eq!(snapshot(get("GET", format!("localhost:{port}")).await)["status"], "no_project");
+        assert!(get("POST", format!("localhost:{port}")).await.starts_with("HTTP/1.1 405"));
+        assert!(get("GET", format!("attacker.example:{port}")).await.starts_with("HTTP/1.1 403"));
         std::fs::remove_dir_all(base).unwrap();
     }
 }

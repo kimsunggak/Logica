@@ -37,9 +37,9 @@ export function tracing(): boolean {
   return ENABLED;
 }
 
-/** Keep the debugger on the active project even before it has a conversation. */
-export function setDebugProject(root: string | null): void {
-  if (ENABLED) void call("debug_project", { root }).catch(() => {
+/** Keep saved-file inspection on the project and conversation shown in the app. */
+export function setDebugProject(root: string | null, sessionId: string | null): void {
+  if (ENABLED) void call("debug_project", { root, sessionId }).catch(() => {
     // Debugger inspection must never prevent opening a project.
   });
 }

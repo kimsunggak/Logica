@@ -174,6 +174,12 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
 .summary-meta { padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--ink-2); overflow-wrap: anywhere; }
 .summary-meta p { margin: 2px 0; }
 .btn:disabled { opacity: .5; cursor: default; }
+.btn[aria-pressed="true"] { color: var(--run); border-color: var(--run); background: var(--run-soft); }
+@media (max-width: 700px) {
+  .viewer { padding: 12px; }
+  .viewer-head { flex-wrap: wrap; }
+  .viewer-head b { flex-basis: 100%; }
+}
 .legend { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; color: var(--ink-2); font-size: 11.5px; padding: 0 12px 8px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; border: 2px solid; }
 </style>
@@ -187,6 +193,7 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
   <div class="ctl">
     <label><input type="checkbox" id="follow" checked> 최신 실행 따라가기</label>
     <button class="btn" id="paperSummary" type="button">논문 요약 파일</button>
+    <button class="btn" id="sessionSummary" type="button">세션 요약 파일</button>
     <button class="btn" id="resetLayout" type="button" title="패널 크기와 그래프 배율을 기본값으로 되돌립니다">레이아웃 초기화</button>
     <button class="btn" id="clear" type="button">지우기</button>
   </div>
@@ -263,6 +270,26 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
       <p>현재 열린 프로젝트의 저장 파일을 1초마다 확인합니다. 이 창은 요약을 생성하거나 파일을 변경하지 않습니다.</p>
     </div>
     <pre id="paperSummaryBody" tabindex="0"></pre>
+  </div>
+</div>
+<div class="viewer" id="sessionSummaryViewer" hidden role="dialog" aria-modal="true" aria-labelledby="sessionSummaryTitle">
+  <div class="viewer-box">
+    <div class="viewer-head">
+      <b id="sessionSummaryTitle">세션 요약 파일</b>
+      <button class="btn" type="button" id="sessionSummarySummaryMode" aria-pressed="true">요약만</button>
+      <button class="btn" type="button" id="sessionSummaryFileMode" aria-pressed="false">전체 파일</button>
+      <button class="btn" type="button" id="sessionSummaryRefresh">새로고침</button>
+      <button class="btn" type="button" id="sessionSummaryCopy" disabled>복사</button>
+      <button class="btn" type="button" id="sessionSummaryClose">닫기 (Esc)</button>
+    </div>
+    <div class="summary-meta" aria-live="polite">
+      <p id="sessionSummaryStatus"></p>
+      <p id="sessionSummaryProject"></p>
+      <p id="sessionSummarySession"></p>
+      <p id="sessionSummaryPath"></p>
+      <p>앱에서 현재 선택한 대화의 저장 파일을 1초마다 확인합니다. 요약은 세션 JSON의 summary 필드에 저장됩니다.</p>
+    </div>
+    <pre id="sessionSummaryBody" tabindex="0"></pre>
   </div>
 </div>
 <script>
@@ -997,69 +1024,107 @@ $("resetLayout").addEventListener("click", () => {
 
 // ------------------------------------------------------------ value viewer
 
-let paperSummaryTimer, paperSummaryRequest = null, paperSummaryFile = null;
-
-function showPaperSummary(file) {
-  paperSummaryFile = file;
+function paperSummaryContent(file) {
   const statuses = { no_project: "프로젝트가 열려 있지 않습니다.", missing: "파일 없음 (none)", ready: "저장된 파일", error: "파일을 읽을 수 없습니다." };
-  const updated = file.modified_at ? ` · 수정: ${new Date(file.modified_at).toLocaleString()}` : "";
-  $("paperSummaryStatus").textContent = `${statuses[file.status] || "파일을 확인할 수 없습니다."}${updated}`;
-  $("paperSummaryProject").textContent = file.project ? `프로젝트: ${file.project}` : "";
-  $("paperSummaryPath").textContent = file.path ? `저장 경로: ${file.path}` : "";
   const text = file.status === "ready" ? (file.text || "(파일이 비어 있습니다.)")
     : file.status === "missing" ? "none\n\npaper-summary.yaml 파일이 아직 없습니다.\n첫 질문에서 논문 요약이 성공적으로 저장되면 여기에 표시됩니다."
     : file.status === "no_project" ? "앱에서 논문 프로젝트를 열어 주세요."
     : file.error || "앱과 디버거의 연결을 확인해 주세요.";
-  // Keep scroll and text selection stable while polling an unchanged file.
-  if ($("paperSummaryBody").textContent !== text) $("paperSummaryBody").textContent = text;
-  $("paperSummaryCopy").disabled = file.status !== "ready";
-  $("paperSummaryCopy").textContent = "복사";
+  return { status: statuses[file.status] || "파일을 확인할 수 없습니다.", text, copy: file.status === "ready" ? file.text : null };
 }
 
-async function refreshPaperSummary() {
-  clearTimeout(paperSummaryTimer);
-  if (paperSummaryRequest) paperSummaryRequest.abort();
-  const request = new AbortController();
-  paperSummaryRequest = request;
-  try {
-    const response = await fetch("/paper-summary", { cache: "no-store", signal: request.signal });
-    if (!response.ok) throw new Error(`파일 확인 실패 (HTTP ${response.status}). 앱을 최신 빌드로 재시작해 주세요.`);
-    const file = await response.json();
-    if (paperSummaryRequest === request && !$("paperSummaryViewer").hidden) showPaperSummary(file);
-  } catch (err) {
-    if (err.name !== "AbortError" && paperSummaryRequest === request && !$("paperSummaryViewer").hidden) showPaperSummary({ status: "error", error: err.message });
-  } finally {
-    if (paperSummaryRequest === request) {
-      paperSummaryRequest = null;
-      if (!$("paperSummaryViewer").hidden) paperSummaryTimer = setTimeout(refreshPaperSummary, 1000);
+function sessionSummaryContent(file, mode) {
+  const statuses = { no_project: "프로젝트가 열려 있지 않습니다.", no_session: "선택한 대화가 없습니다.", missing: "세션 파일 없음 (none)", ready: "저장된 세션 파일", error: "세션 파일을 읽을 수 없습니다." };
+  let text, copy = null;
+  if (file.status === "ready") {
+    if (mode === "file") copy = text = JSON.stringify(JSON.parse(file.text), null, 2);
+    else if (file.summary != null) copy = text = JSON.stringify(file.summary, null, 2);
+    else text = "null\n\n세션 파일은 저장되어 있지만 summary 필드는 아직 없습니다.\n세션 요약이 생성되어 저장되면 여기에 표시됩니다.";
+  } else {
+    text = file.status === "missing" ? "none\n\n현재 대화의 세션 JSON이 아직 저장되지 않았습니다.\n첫 답변이 끝나고 대화가 저장되면 파일을 확인할 수 있습니다."
+      : file.status === "no_project" ? "앱에서 논문 프로젝트를 열어 주세요."
+      : file.status === "no_session" ? "앱에서 대화를 선택하거나 새 대화를 시작해 주세요."
+      : file.error || "앱과 디버거의 연결을 확인해 주세요.";
+  }
+  const status = file.status === "ready" && file.summary == null ? "세션 파일 있음 · summary 없음" : statuses[file.status];
+  return { status: status || "파일을 확인할 수 없습니다.", text, copy };
+}
+
+/** Both saved-file viewers poll only while open and never invoke a save. */
+function setupFileViewer(prefix, endpoint, content) {
+  const el = (suffix) => $(prefix + suffix);
+  let timer, request = null, file = null, mode = "summary", copy = null;
+  const isOpen = () => !el("Viewer").hidden;
+  function show(next) {
+    file = next;
+    const result = content(file, mode);
+    copy = result.copy;
+    const updated = file.modified_at ? ` · 수정: ${new Date(file.modified_at).toLocaleString()}` : "";
+    el("Status").textContent = result.status + updated;
+    el("Project").textContent = file.project ? `프로젝트: ${file.project}` : "";
+    el("Path").textContent = file.path ? `저장 경로: ${file.path}` : "";
+    if (el("Session")) el("Session").textContent = file.session_id ? `대화 ID: ${file.session_id}` : "";
+    // Keep scroll and text selection stable while polling an unchanged file.
+    if (el("Body").textContent !== result.text) el("Body").textContent = result.text;
+    el("Copy").disabled = typeof copy !== "string";
+    el("Copy").textContent = "복사";
+    for (const [suffix, value] of [["SummaryMode", "summary"], ["FileMode", "file"]]) {
+      if (el(suffix)) el(suffix).setAttribute("aria-pressed", String(mode === value));
     }
   }
+  async function refresh() {
+    clearTimeout(timer);
+    if (request) request.abort();
+    const current = new AbortController();
+    request = current;
+    try {
+      const response = await fetch(endpoint, { cache: "no-store", signal: current.signal });
+      if (!response.ok) throw new Error(`파일 확인 실패 (HTTP ${response.status}). 앱을 최신 빌드로 재시작해 주세요.`);
+      const next = await response.json();
+      if (request === current && isOpen()) show(next);
+    } catch (err) {
+      if (err.name !== "AbortError" && request === current && isOpen()) show({ status: "error", error: err.message });
+    } finally {
+      if (request === current) {
+        request = null;
+        if (isOpen()) timer = setTimeout(refresh, 1000);
+      }
+    }
+  }
+  function close() {
+    el("Viewer").hidden = true;
+    clearTimeout(timer);
+    if (request) request.abort();
+    request = null;
+    $(prefix).focus();
+  }
+  $(prefix).addEventListener("click", () => {
+    el("Viewer").hidden = false;
+    mode = "summary";
+    show({ status: "loading" });
+    el("Status").textContent = "저장 파일 확인 중…";
+    el("Body").textContent = "";
+    el("Close").focus();
+    void refresh();
+  });
+  el("Refresh").addEventListener("click", refresh);
+  el("Close").addEventListener("click", close);
+  el("Viewer").addEventListener("click", (e) => { if (e.target === el("Viewer")) close(); });
+  el("Copy").addEventListener("click", async () => {
+    if (typeof copy !== "string") return;
+    try { await navigator.clipboard.writeText(copy); el("Copy").textContent = "복사됨"; }
+    catch { const r = document.createRange(); r.selectNodeContents(el("Body")); getSelection().removeAllRanges(); getSelection().addRange(r); el("Copy").textContent = "선택됨, Ctrl+C"; }
+  });
+  for (const [suffix, value] of [["SummaryMode", "summary"], ["FileMode", "file"]]) {
+    if (el(suffix)) el(suffix).addEventListener("click", () => { mode = value; if (file) show(file); });
+  }
+  return { isOpen, close, element: el("Viewer") };
 }
 
-function closePaperSummary() {
-  $("paperSummaryViewer").hidden = true;
-  clearTimeout(paperSummaryTimer);
-  if (paperSummaryRequest) paperSummaryRequest.abort();
-  paperSummaryRequest = null;
-  $("paperSummary").focus();
-}
-
-$("paperSummary").addEventListener("click", () => {
-  $("paperSummaryViewer").hidden = false;
-  showPaperSummary({ status: "loading" });
-  $("paperSummaryStatus").textContent = "저장 파일 확인 중…";
-  $("paperSummaryBody").textContent = "";
-  $("paperSummaryClose").focus();
-  void refreshPaperSummary();
-});
-$("paperSummaryRefresh").addEventListener("click", refreshPaperSummary);
-$("paperSummaryClose").addEventListener("click", closePaperSummary);
-$("paperSummaryViewer").addEventListener("click", (e) => { if (e.target === $("paperSummaryViewer")) closePaperSummary(); });
-$("paperSummaryCopy").addEventListener("click", async () => {
-  if (paperSummaryFile?.status !== "ready") return;
-  try { await navigator.clipboard.writeText(paperSummaryFile.text); $("paperSummaryCopy").textContent = "복사됨"; }
-  catch { const r = document.createRange(); r.selectNodeContents($("paperSummaryBody")); getSelection().removeAllRanges(); getSelection().addRange(r); $("paperSummaryCopy").textContent = "선택됨, Ctrl+C"; }
-});
+const fileViewers = [
+  setupFileViewer("paperSummary", "/paper-summary", paperSummaryContent),
+  setupFileViewer("sessionSummary", "/session-summary", sessionSummaryContent),
+];
 
 let viewing = null;
 function openViewer(key) {
@@ -1113,10 +1178,11 @@ document.addEventListener("click", (e) => {
   if (row) { selModule = row.dataset.module; selSpan = row.dataset.span; schedule(); }
 });
 document.addEventListener("keydown", (e) => {
-  if (!$("paperSummaryViewer").hidden) {
-    if (e.key === "Escape") { e.preventDefault(); closePaperSummary(); }
+  const fileViewer = fileViewers.find((viewer) => viewer.isOpen());
+  if (fileViewer) {
+    if (e.key === "Escape") { e.preventDefault(); fileViewer.close(); }
     if (e.key === "Tab") {
-      const focusable = [...$("paperSummaryViewer").querySelectorAll("button:not(:disabled), [tabindex='0']")];
+      const focusable = [...fileViewer.element.querySelectorAll("button:not(:disabled), [tabindex='0']")];
       const first = focusable[0], last = focusable.at(-1);
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }

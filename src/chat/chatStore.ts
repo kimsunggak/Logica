@@ -394,7 +394,6 @@ export async function openChatsFor(root: string | null): Promise<void> {
   stopSectionSummaries();
   clearTimeout(saveTimer);
   useChat.setState({ root, messages: [], summary: null, sessions: [], sessionId: newSessionId(), createdAt: Date.now() });
-  setDebugProject(root);
   if (!root) return;
   const sessions = await listSessions(root).catch(() => [] as SessionSummary[]);
   if (useChat.getState().root !== root) return;
@@ -465,6 +464,7 @@ function flushSave() {
 
 // Save shortly after the conversation changes (new message, finished answer, applied edit, new summary).
 useChat.subscribe((state, prev) => {
+  if (state.root !== prev.root || state.sessionId !== prev.sessionId) setDebugProject(state.root, state.sessionId);
   if (state.messages === prev.messages && state.runningId === prev.runningId && state.summary === prev.summary) return;
   if (state.sessionId !== prev.sessionId || state.root !== prev.root) return;
   clearTimeout(saveTimer);

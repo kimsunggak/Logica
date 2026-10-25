@@ -52,6 +52,45 @@ fn chats_dir(base: &Path, root: &str) -> PathBuf {
     base.join("chats").join(project_id(root))
 }
 
+pub(crate) fn session_path(base: &Path, root: &str, id: &str) -> CmdResult<PathBuf> {
+    check_session_id(id)?;
+    Ok(chats_dir(base, root).join(format!("{id}.json")))
+}
+
+/// Inspect the actual saved session without creating it or folding any turns.
+pub(crate) fn inspect_session(path: &Path, root: &str, id: &str) -> serde_json::Value {
+    let mut snapshot = serde_json::json!({
+        "project": root, "session_id": id, "path": path.to_string_lossy(), "text": null, "summary": null,
+    });
+    match std::fs::read_to_string(path) {
+        Ok(text) => {
+            let session = serde_json::from_str::<serde_json::Value>(&text);
+            match session {
+                Ok(session) if session["messages"].is_array() => {
+                    snapshot["status"] = "ready".into();
+                    snapshot["summary"] = session.get("summary").cloned().unwrap_or(serde_json::Value::Null);
+                    snapshot["text"] = text.into();
+                    if let Ok(modified) = std::fs::metadata(path).and_then(|m| m.modified()) {
+                        if let Ok(age) = modified.duration_since(std::time::UNIX_EPOCH) {
+                            snapshot["modified_at"] = serde_json::json!(age.as_millis() as u64);
+                        }
+                    }
+                }
+                _ => {
+                    snapshot["status"] = "error".into();
+                    snapshot["error"] = "The saved session is not valid session JSON".into();
+                }
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => snapshot["status"] = "missing".into(),
+        Err(err) => {
+            snapshot["status"] = "error".into();
+            snapshot["error"] = err.to_string().into();
+        }
+    }
+    snapshot
+}
+
 pub(crate) fn base_dir(app: &AppHandle) -> CmdResult<PathBuf> {
     app.path().app_local_data_dir().map_err(|e| CmdError::new("io", format!("No local data directory: {e}")))
 }
@@ -157,6 +196,34 @@ pub async fn chat_delete_session(app: AppHandle, root: String, id: String) -> Cm
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inspects_a_session_before_and_after_its_summary_is_saved() {
+        let base = std::env::temp_dir().join(format!("logica-session-inspect-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let root = "/papers/inspect";
+        let path = session_path(&base, root, "s1").unwrap();
+        assert_eq!(inspect_session(&path, root, "s1")["status"], "missing");
+        assert!(!base.exists());
+        let mut file = session("Explain the results", 10);
+        save(path.parent().unwrap(), root, "s1", &file).unwrap();
+        let before = inspect_session(&path, root, "s1");
+        assert_eq!(before["status"], "ready");
+        assert!(before["summary"].is_null());
+        let summary = serde_json::json!({ "coveredTurns": 2, "goal": "결과 검토", "items": [], "next": { "topic": 1 } });
+        file["summary"] = summary.clone();
+        save(path.parent().unwrap(), root, "s1", &file).unwrap();
+        let after = inspect_session(&path, root, "s1");
+        assert_eq!(after["summary"], summary);
+        assert_eq!(after["session_id"], "s1");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(after["text"].as_str().unwrap()).unwrap(), file);
+        std::fs::write(&path, "broken JSON").unwrap();
+        assert_eq!(inspect_session(&path, root, "s1")["status"], "error");
+        assert_eq!(inspect_session(&base, root, "s1")["status"], "error");
+        assert!(session_path(&base, root, "../s1").is_err());
+        assert!(session_path(&base, root, "").is_err());
+        std::fs::remove_dir_all(base).unwrap();
+    }
 
     fn session(question: &str, updated_at: u64) -> serde_json::Value {
         serde_json::json!({
