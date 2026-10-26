@@ -30,6 +30,10 @@ describe("validateRewrite", () => {
   it("rejects empty output", () => {
     expect(errors("a", "  ")).toHaveLength(1);
   });
+  it("accepts an explicit deletion but still reports broken LaTeX structure", () => {
+    expect(validateRewrite("Delete this sentence.", "", { allowEmpty: true })).toEqual([]);
+    expect(validateRewrite("\\begin{itemize}", "", { allowEmpty: true }).some((i) => i.severity === "error")).toBe(true);
+  });
 });
 
 describe("normalizeRewrite", () => {

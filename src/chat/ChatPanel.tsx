@@ -59,8 +59,8 @@ function EditCard({ messageId, index, edit, state, exact = false }: { messageId:
   const bibEntries = useProject((s) => s.bibEntries);
   useProject((s) => s.doc); // Recheck diff anchors when the author's source changes.
   const issues = useMemo(
-    () => validateRewrite(edit.original, edit.revised, { bibKeys: new Set(bibEntries.map((e) => e.key)) }),
-    [edit, bibEntries],
+    () => validateRewrite(edit.original, edit.revised, { bibKeys: new Set(bibEntries.map((e) => e.key)), allowEmpty: exact }),
+    [edit, bibEntries, exact],
   );
   const text = currentTexts().get(edit.path);
   const at = state ? null : text === undefined ? null : (exact ? locateExact : locateEdit)(text, edit.original);
