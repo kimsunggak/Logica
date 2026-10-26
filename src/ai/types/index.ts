@@ -41,7 +41,7 @@ export type AITask = "inline-edit" | "judge" | "reply" | "refine" | "answer" | "
 /** The model calls of a chat turn. */
 export type ChatTask = Exclude<AITask, "inline-edit">;
 
-export type ReasoningEffort = "low" | "medium" | "high";
+export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
 /** A function the model may call; `parameters` is a JSON Schema object. */
 export interface ToolDefinition {

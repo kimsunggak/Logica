@@ -58,7 +58,7 @@ const CLAUDE_FALLBACK: ModelChoice = { provider: "anthropic", model: "claude-son
  */
 export const CHAT_MODELS: Record<ChatTask, { primary: ModelChoice; fallback: ModelChoice }> = {
   judge: {
-    primary: { provider: "anthropic", model: "claude-sonnet-5-5", reasoningEffort: "high" },
+    primary: { provider: "anthropic", model: "claude-sonnet-5-5", reasoningEffort: "xhigh" },
     fallback: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" },
   },
   reply: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },

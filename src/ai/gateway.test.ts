@@ -64,10 +64,10 @@ describe("LLM Gateway", () => {
     scripts.anthropic = reply("anthropic", "ok");
     const judge = await callModel("judge", request, { control: control() });
     const refine = await callModel("refine", request, { control: control() });
-    expect(judge.choice).toEqual({ provider: "anthropic", model: "claude-sonnet-5-5", reasoningEffort: "high" });
+    expect(judge.choice).toEqual({ provider: "anthropic", model: "claude-sonnet-5-5", reasoningEffort: "xhigh" });
     expect(refine.choice).toEqual({ provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" });
     expect(calls.map((c) => [c.request.task, c.request.model, c.request.reasoningEffort])).toEqual([
-      ["judge", "claude-sonnet-5-5", "high"],
+      ["judge", "claude-sonnet-5-5", "xhigh"],
       ["refine", "gpt-6.1-sol", "medium"],
     ]);
     expect(judge.fallbackFrom).toBeUndefined();
