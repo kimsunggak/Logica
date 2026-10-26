@@ -1,5 +1,5 @@
 /**
- * Summary Module: folds the oldest turns into the session summary.
+ * Session Summary Module: folds the oldest turns into the session summary.
  *
  *   after turn 10:  summary(1-6) + turns 7-10 word for word
  *   after turn 16:  summary(1-12) + turns 13-16
@@ -67,7 +67,7 @@ function cap(text: string): string {
   return text.length > FOLD_MESSAGE_CHARS ? `${text.slice(0, FOLD_MESSAGE_CHARS)}\n[... ${text.length - FOLD_MESSAGE_CHARS} characters omitted ...]` : text;
 }
 
-/** Fold `turns` into `summary` with one call to the Summary Module. */
+/** Fold `turns` into `summary` with one call to the Session Summary Module. */
 export async function foldTurns(summary: ConversationSummary | null, turns: TurnRecord[], options: FoldOptions): Promise<FoldResult> {
   const call = options.call ?? callModel;
   const first = turns[0]?.index ?? 0;
@@ -76,7 +76,7 @@ export async function foldTurns(summary: ConversationSummary | null, turns: Turn
     options.traceId,
     options.parent ?? null,
     "summary",
-    "runSummaryModule",
+    "runSessionSummaryModule",
     () => ({ question: `세션 요약: 턴 ${first}~${last} 접기`, fold_turns: turns.map((t) => ({ turn: t.index, status: t.status })), covered_before: summary?.coveredTurns ?? 0 }),
     async (span) => {
       const before = summary ?? emptySummary();
@@ -94,7 +94,7 @@ export async function foldTurns(summary: ConversationSummary | null, turns: Turn
       );
       const toolCall = result.response.toolCalls?.find((c) => c.name === UPDATE_SUMMARY);
       if (!toolCall || toolCall.argumentsError) {
-        throw new AIError("unknown", toolCall ? "The Summary Module sent unreadable changes" : "The Summary Module did not call update_summary");
+        throw new AIError("unknown", toolCall ? "The Session Summary Module sent unreadable changes" : "The Session Summary Module did not call update_summary");
       }
       const ops = readOps(toolCall.arguments);
       const applied = applyOps(before, ops, turns);

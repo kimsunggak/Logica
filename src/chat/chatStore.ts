@@ -5,9 +5,9 @@
  * is run by the Chat Orchestrator (`./orchestrator.ts`), which decides
  * whether to reply directly, answer, or refine the question first, and
  * reports every step to the localhost runtime debugger in development. After
- * a turn the Summary Module (`./session/summarizer.ts`) folds older turns
- * into the summary, and after a turn that read the paper the Section Summary
- * Module (`./paper/sectionSummarizer.ts`) summarizes the sections the paper
+ * a turn the Session Summary Module (`./session/summarizer.ts`) folds older turns
+ * into the summary, and after a turn that read the paper the Paper Summary Module
+ * (`./paper/sectionSummarizer.ts`) summarizes the sections the paper
  * report has no summary for, both in the background.
  */
 import { create } from "zustand";
@@ -192,7 +192,7 @@ export async function sendChatMessage(text: string): Promise<void> {
     question: instruction,
     session_turns: turn.turns.length,
     summary_covered_turns: turn.summary?.coveredTurns ?? 0,
-    // How close the earlier turns are to the Summary Module's length limit.
+    // How close the earlier turns are to the Session Summary Module's length limit.
     unsummarized_chars: moduleChars(unsummarized(turn.turns, turn.summary ?? null)),
   }));
   const control: RunControl = { stopped: false, activeRequest: null };
@@ -260,7 +260,7 @@ export function stopChat() {
 
 // ---------------------------------------------------------------- session summary
 
-/** The Summary Module run in the background, for one session at a time. */
+/** The Session Summary Module run in the background, for one session at a time. */
 let summarizing: { control: RunControl; again: boolean; done: Promise<void> } | null = null;
 /** The turn that ended last; a summary run shows in its trace. */
 let foldTrace: { traceId: string; root: Span } | null = null;
@@ -322,7 +322,7 @@ export async function summaryIdle(): Promise<void> {
 
 // ---------------------------------------------------------------- section summaries
 
-/** The Section Summary Module run in the background, for one project at a time. */
+/** The Paper Summary Module run in the background, for one project at a time. */
 let sectioning: { control: RunControl; again: boolean; done: Promise<void> } | null = null;
 /** The turn that ended last; a section summary run shows in its trace. */
 let sectionTrace: { traceId: string; root: Span } | null = null;

@@ -5,7 +5,7 @@
 //! ```
 //!
 //! It is a YAML document with one short summary per section of the paper,
-//! in reading order, written by the chat's Section Summary Module and not
+//! in reading order, written by the chat's Paper Summary Module and not
 //! interpreted here. The project id is the same hash as for the chat history
 //! (`chats.rs`), so every chat session of a project reads the same summary.
 

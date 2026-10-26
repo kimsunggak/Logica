@@ -1,5 +1,5 @@
 /**
- * Summary Module prompt: fold the oldest turns of the conversation into the
+ * Session Summary Module prompt: fold the oldest turns of the conversation into the
  * session summary (L1) by calling `update_summary` with the changes. It runs
  * in the background once ten turns are not in the summary (or they run long)
  * and does not see the paper, only its outline.
@@ -10,7 +10,7 @@ import { formatContext, tag } from "./context";
 import type { PromptPayload } from "./index";
 
 const SUMMARY_RULES = [
-  "You are the Summary Module of LOGICA, a LaTeX writing tool for research papers. You keep the session summary of a chat between a researcher and LOGICA.",
+  "You are the Session Summary Module of LOGICA, a LaTeX writing tool for research papers. You keep the session summary of a chat between a researcher and LOGICA.",
   "The chat modules read this summary instead of the turns folded into it, so keep what they need to continue the conversation.",
   "<current_summary> holds the summary so far, with item ids. <turns_to_fold> holds the turns to fold into it now, oldest first; the turns after them stay in the conversation word for word.",
   `Call ${UPDATE_SUMMARY} once with the changes these turns bring. List only changes; never restate items that stay as they are.`,

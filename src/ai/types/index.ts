@@ -60,7 +60,7 @@ export interface ToolCall {
   argumentsError?: "invalid_json" | "not_object";
 }
 
-/** A turn handed to the Summary Module to fold into the session summary. */
+/** A turn handed to the Session Summary Module to fold into the session summary. */
 export interface FoldTurn {
   index: number;
   question: string;
@@ -108,7 +108,7 @@ export interface PaperView {
   macros?: string;
 }
 
-/** A section handed to the Section Summary Module. */
+/** A section handed to the Paper Summary Module. */
 export interface SectionToSummarize {
   key: string;
   title: string;

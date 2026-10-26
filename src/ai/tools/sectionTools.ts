@@ -1,5 +1,5 @@
 /**
- * The Section Summary Module's one tool: a summary for each section it was
+ * The Paper Summary Module's one tool: a summary for each section it was
  * given, by the section's key.
  */
 import type { ToolDefinition } from "../types";

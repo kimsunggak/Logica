@@ -8,7 +8,7 @@
  *   Session history  each answered turn, one line: what was asked and how it ended
  *   R#               external references: material from outside the paper the user gave (later also tool results)
  *
- * The numbers (P1, R1) let the Summary Module name an item to replace;
+ * The numbers (P1, R1) let the Session Summary Module name an item to replace;
  * history lines never change, so they go by their turn instead. The Summary
  * Module never rewrites the summary: it returns operations (set_topic,
  * set_goal, add, replace) that `applyOps` checks and applies, so items that
@@ -19,7 +19,7 @@
 import type { TurnRecord } from "./turns";
 
 export type SummaryKind = "preference" | "history" | "reference";
-/** Where a reference came from; the Summary Module only adds pasted material. */
+/** Where a reference came from; the Session Summary Module only adds pasted material. */
 export type ReferenceSource = "paste" | "web" | "figure" | "table";
 
 export interface SummaryItem {
@@ -47,7 +47,7 @@ export interface ConversationSummary {
   next: Record<SummaryKind, number>;
 }
 
-/** One change returned by the Summary Module. Fields an operation does not use are "" (or 0). */
+/** One change returned by the Session Summary Module. Fields an operation does not use are "" (or 0). */
 export interface SummaryOp {
   op: string;
   kind: string;
@@ -106,7 +106,7 @@ function copy(summary: ConversationSummary): ConversationSummary {
 }
 
 /**
- * Apply the Summary Module's operations to a summary that `turns` are folded
+ * Apply the Session Summary Module's operations to a summary that `turns` are folded
  * into. Operations that name a missing item, do what their kind does not
  * allow, or carry no text are left out and reported.
  */
@@ -150,7 +150,7 @@ export function applyOps(summary: ConversationSummary, ops: SummaryOp[], turns: 
   return { summary: next, ignored };
 }
 
-/** The operations in the Summary Module's tool call, read loosely. */
+/** The operations in the Session Summary Module's tool call, read loosely. */
 export function readOps(args: Record<string, unknown>): SummaryOp[] {
   const list = Array.isArray(args.ops) ? args.ops : [];
   return list

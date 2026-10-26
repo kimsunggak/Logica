@@ -12,10 +12,10 @@
  *         - key: "1.1"
  *
  * The document follows the paper's reading order. Summaries are found by the
- * unit's text hash, so an edited section has no summary until the Section
- * Summary Module (`./sectionSummarizer.ts`) writes one; until then it is read
+ * unit's text hash, so an edited section has no summary until the Paper Summary Module
+ * (`./sectionSummarizer.ts`) writes one; until then it is read
  * word for word. A paper with no summary at all has not been read yet: the
- * Section Summary Module summarizes it before the first answer.
+ * Paper Summary Module summarizes it before the first answer.
  */
 import { Document, parse } from "yaml";
 import { call } from "../../lib/backend";

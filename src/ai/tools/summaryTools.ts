@@ -1,5 +1,5 @@
 /**
- * The Summary Module's one tool: the changes to the session summary. Every
+ * The Session Summary Module's one tool: the changes to the session summary. Every
  * field is required for strict schemas; an operation sets the fields it
  * does not use to "" (or 0).
  */

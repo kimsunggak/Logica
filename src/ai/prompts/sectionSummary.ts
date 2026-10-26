@@ -1,5 +1,5 @@
 /**
- * Section Summary Module prompt: summarize sections of the paper for the
+ * Paper Summary Module prompt: summarize sections of the paper for the
  * paper map. The judge reads the map to choose the sections a question needs
  * word for word, and the Refine and Answer modules read the summaries of the
  * sections they do not get word for word. It runs before the first answer
@@ -11,7 +11,7 @@ import { formatContext, tag } from "./context";
 import type { PromptPayload } from "./index";
 
 const SECTION_RULES = [
-  "You are the Section Summary Module of LOGICA, a LaTeX writing tool for research papers. You write the paper map: one summary for each section of the paper you are given.",
+  "You are the Paper Summary Module of LOGICA, a LaTeX writing tool for research papers. You write the paper map: one summary for each section of the paper you are given.",
   "Other models read only these summaries to choose which sections to read word for word for a question, and read them in place of the sections they do not open. Say what each section contains and claims, so they can tell whether it holds what a question needs.",
   "Each summary is three or four lines, one sentence per line, in the language of the paper. Name the problem, claim or idea; the method, model or definitions; the datasets, metrics, figures, tables and equations it presents, with their \\label keys; and its key numbers and results. Use the paper's own terms and macro names.",
   "The section with key abstract is the title block and the abstract: summarize the paper's problem, approach and main result from it.",

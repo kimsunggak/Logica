@@ -158,7 +158,7 @@ AI 채팅 에이전트 구조 (원본: [`docs/images/chat-agent-architecture.svg
     - L1 세션 요약: 오래된 턴을 접은 대화 요약입니다(논문 주제, 지금 하는 작업, 선호 P#, 턴별 세션 기록, 외부 참고 자료 R#). 요약에 안 들어간 턴이 10개가 되거나, 그 턴들의 길이가 4만 자(모듈이 읽는 기준, 메시지마다 최대 4,000자로 셈)를 넘으면 최근 4턴을 남기고 나머지를 접습니다(10턴 끝, 16턴 끝, 22턴 끝처럼). 5턴은 아무리 길어도 4만 자를 넘지 않으므로 한 번에 최소 2턴씩 접습니다. 요약 모듈(`gpt-6.1-sol` low)은 요약을 새로 쓰지 않고 `update_summary` 툴로 바뀐 항목만 돌려주며, 코드가 검사해 적용합니다. 항목 구조는 아래 [세션 요약 구조](#세션-요약-구조)에 있습니다.
     - L2 최근 턴 원문: 공통 선택 함수가 판단과 모든 모듈에 요약에 안 들어간 턴을 모두, 최소 최근 4턴을 원문으로 보냅니다(메시지당 판단 10,000자, 나머지 4,000자). 그래서 세션 기록과 원문이 겹치지 않고 이어지며, 요약이 지연되거나 실패해도 대화가 빠지지 않습니다. 메시지 길이 상한을 넘으면 앞 70%와 뒤 30%를 남기고 가운데를 생략 표시합니다.
     - L3: 지금 질문과 모듈의 작업 지시. 지금 질문은 자르지 않습니다.
-  - 1턴은 질문 하나와 그 결과입니다. 중지되거나 실패하거나 길이 초과로 잘린 답도 턴으로 남기고 `[answer stopped by the user]` 같은 표시를 붙여, 다음 질문에서 모델이 답하지 못한 요청을 알 수 있게 합니다(오류 문구 자체는 보내지 않습니다). 지금 보내는 질문은 아직 턴이 아니므로, 첫 질문에서 디버거의 `session_turns`는 0입니다. User Input에는 요약에 안 들어간 이전 턴의 길이(`unsummarized_chars`)를, Orchestrator 입력에는 `session_turns`, `summary_covered_turns`, 논문 지도의 요약 수(`paper_map`)를, 출력에는 고른 `sections`를, 각 LLM 호출에는 실제 읽는 원문 번호 `turn_numbers`와 잘린 메시지를 표시합니다. 정제와 답변의 `paperView` 단계에는 원문으로 보낸 섹션, 요약으로 보낸 섹션 수, 요약이 없어 원문으로 보낸 섹션이 나옵니다. 세션 요약과 섹션 요약 실행은 그 턴의 그래프에 Summary Module(오른쪽 아래)과 Section Summary Module로 나타납니다. Section Summary Module은 첫 질문에서는 판단보다 먼저 실행되어 User Input 옆에, 그 뒤에는 턴이 끝난 뒤 실행되어 왼쪽 아래에 나오고, 실행할 조건이 아니면 비활성으로 표시됩니다.
+  - 1턴은 질문 하나와 그 결과입니다. 중지되거나 실패하거나 길이 초과로 잘린 답도 턴으로 남기고 `[answer stopped by the user]` 같은 표시를 붙여, 다음 질문에서 모델이 답하지 못한 요청을 알 수 있게 합니다(오류 문구 자체는 보내지 않습니다). 지금 보내는 질문은 아직 턴이 아니므로, 첫 질문에서 디버거의 `session_turns`는 0입니다. User Input에는 요약에 안 들어간 이전 턴의 길이(`unsummarized_chars`)를, Orchestrator 입력에는 `session_turns`, `summary_covered_turns`, 논문 지도의 요약 수(`paper_map`)를, 출력에는 고른 `sections`를, 각 LLM 호출에는 실제 읽는 원문 번호 `turn_numbers`와 잘린 메시지를 표시합니다. 정제와 답변의 `paperView` 단계에는 원문으로 보낸 섹션, 요약으로 보낸 섹션 수, 요약이 없어 원문으로 보낸 섹션이 나옵니다. 세션 요약과 섹션 요약 실행은 그 턴의 그래프에 Session Summary Module(오른쪽 아래)과 Paper Summary Module로 나타납니다. Paper Summary Module은 첫 질문에서는 판단보다 먼저 실행되어 User Input 옆에, 그 뒤에는 턴이 끝난 뒤 실행되어 왼쪽 아래에 나오고, 실행할 조건이 아니면 비활성으로 표시됩니다.
   - 정제와 답변 요청은 같은 system prompt, 원고, 세션 요약, 대화로 시작하고 각자의 지시와 질문을 마지막 메시지에 둡니다. 앞부분이 같아야 provider의 prompt cache가 두 번째 호출에서 원고를 다시 계산하지 않기 때문입니다. 캐시된 토큰 수는 런타임 디버거에서 확인합니다.
 
 문단은 빈 줄로 나누며, `\section`, `\begin`/`\end`, `\label`, 주석 줄 같은 구조 줄과 `\title`, `\author`, `\date` 같은 앞부분 명령(여러 줄에 걸치면 닫는 중괄호까지), 그리고 `\begin{document}` 앞의 preamble 전체는 문단에 넣지 않습니다. 그래서 "이 문단 고쳐줘"가 section 제목이나 논문 제목을 바꾸지 않습니다.
@@ -180,7 +180,7 @@ P1, R1 같은 번호는 요약 모듈이 교체할 항목을 가리킬 때 씁�
 
 ### 논문 요약 문서
 
-논문에 대한 첫 질문에서 Section Summary Module(`src/chat/paper/`)이 판단보다 먼저 논문을 섹션별로 요약해 YAML 문서로 저장합니다. 판단은 이 요약을 논문 지도로 받아 원문으로 읽을 섹션을 고르고, 정제와 답변은 고르지 않은 섹션을 이 요약으로 읽습니다.
+논문에 대한 첫 질문에서 Paper Summary Module(`src/chat/paper/`)이 판단보다 먼저 논문을 섹션별로 요약해 YAML 문서로 저장합니다. 판단은 이 요약을 논문 지도로 받아 원문으로 읽을 섹션을 고르고, 정제와 답변은 고르지 않은 섹션을 이 요약으로 읽습니다.
 
 - 순서: 논문의 읽는 순서대로 abstract(제목 블록과 초록), introduction, 이후 섹션이 이어지고, 하위 절은 `subsections` 아래에 들어갑니다.
 - 요약: 섹션마다 논문의 언어로 3~4줄(한 줄에 한 문장)입니다. 자기 본문이 없는 섹션(제목과 label만 있고 내용은 하위 절에 있는 섹션 포함)은 "아직 내용 없음", 본문이 아주 짧은 섹션은 본문을 그대로 씁니다.
@@ -283,7 +283,7 @@ cd src-tauri && cargo test -- --ignored   # 실제 Anthropic API에 잘못된 ke
 
 ### 런타임 디버거 (개발용)
 
-`npm run tauri dev`로 앱을 띄운 뒤 브라우저에서 `http://localhost:1420`을 열면 런타임 디버거(`http://127.0.0.1:1430`, 터미널에도 `LOGICA debug visualizer`로 출력)로 넘어갑니다. 앱은 Tauri 창에서 그대로 실행되고, 앱 빌드가 끝나기 전에 열면 디버거가 뜰 때까지 기다렸다가 넘어갑니다. 디버거에서는 앱에서 보낸 채팅 질문이 User Input, Chat Orchestrator, Refine Module, Answer Module, Final Answer 중 어느 갈래로 처리되는지(건너뛴 모듈은 흐리게), Section Summary Module과 Summary Module이 실행됐는지 실시간으로 볼 수 있습니다. Chat Orchestrator 노드에는 논문 지도의 요약 수와 고른 섹션이, Refine과 Answer 노드에는 원문으로 읽은 섹션과 요약으로 읽은 섹션 수가 표시됩니다. LLM Gateway 노드에는 호출마다 모델, 실패와 Claude fallback이 표시됩니다. 실행 중인 단계 강조, 함수 호출 순서(caller와 callee), 단계별 입력과 출력, 모델에 보낸 프롬프트와 응답, Rust의 AI 요청 처리까지 질문 하나를 trace 하나로 묶어 보여 주며, 같은 이벤트가 터미널에도 한 줄씩 찍힙니다.
+`npm run tauri dev`로 앱을 띄운 뒤 브라우저에서 `http://localhost:1420`을 열면 런타임 디버거(`http://127.0.0.1:1430`, 터미널에도 `LOGICA debug visualizer`로 출력)로 넘어갑니다. 앱은 Tauri 창에서 그대로 실행되고, 앱 빌드가 끝나기 전에 열면 디버거가 뜰 때까지 기다렸다가 넘어갑니다. 디버거에서는 앱에서 보낸 채팅 질문이 User Input, Chat Orchestrator, Refine Module, Answer Module, Final Answer 중 어느 갈래로 처리되는지(건너뛴 모듈은 흐리게), Paper Summary Module과 Session Summary Module이 실행됐는지 실시간으로 볼 수 있습니다. Chat Orchestrator 노드에는 논문 지도의 요약 수와 고른 섹션이, Refine과 Answer 노드에는 원문으로 읽은 섹션과 요약으로 읽은 섹션 수가 표시됩니다. LLM Gateway 노드에는 호출마다 모델, 실패와 Claude fallback이 표시됩니다. 실행 중인 단계 강조, 함수 호출 순서(caller와 callee), 단계별 입력과 출력, 모델에 보낸 프롬프트와 응답, Rust의 AI 요청 처리까지 질문 하나를 trace 하나로 묶어 보여 주며, 같은 이벤트가 터미널에도 한 줄씩 찍힙니다.
 
 - 이벤트는 웹뷰(`src/debug/trace.ts`)와 Rust(`src-tauri/src/ai.rs`)의 실제 실행에서 만들어지고, `src-tauri/src/debug_trace.rs`가 Server-Sent Events로 페이지에 보냅니다.
 - 패널 사이 경계선을 드래그하거나 방향키로 크기를 조절합니다. 창 너비가 1100px 이하이면 Data Inspector가 하단으로 이동하고 위쪽 경계로 높이를 조절할 수 있습니다. 경계선을 더블클릭하면 해당 패널 크기가 기본값으로 돌아갑니다.

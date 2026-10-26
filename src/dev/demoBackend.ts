@@ -239,7 +239,7 @@ function simulateJudge(last: string): DemoReply {
   return { tool: { name: "answer_question", args: { reason: "The message says what it is about.", sections } } };
 }
 
-/** Section Summary Module: the first sentence of each section, as plain text. */
+/** Paper Summary Module: the first sentence of each section, as plain text. */
 function simulateSectionSummaries(last: string): DemoReply {
   const summaries = [...last.matchAll(/<section key="([^"]+)" title="([^"]*)">\n([\s\S]*?)\n<\/section>/g)].map((m) => {
     const text = latexToPlain(m[3].replace(/\\(?:sub)*section\*?\{[^}]*\}/g, "")).replace(/\s+/g, " ").trim();
@@ -301,7 +301,7 @@ function simulateAnswerModule(all: string, last: string): string {
   ].join("\n");
 }
 
-/** Summary Module: a topic and a goal once, a preference for "from now on" requests, and a history line per question. */
+/** Session Summary Module: a topic and a goal once, a preference for "from now on" requests, and a history line per question. */
 function simulateSummary(last: string): DemoReply {
   const ops: Record<string, unknown>[] = [];
   const op = (o: { op: string; kind?: string; id?: string; text: string; turn?: number }) => ops.push({ kind: "", id: "", turn: 0, ...o });
