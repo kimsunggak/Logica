@@ -1,7 +1,7 @@
 /**
- * Chat Orchestrator: the agent that runs one chat turn.
+ * Paper Orchestra: the agent that runs one chat turn.
  *
- *   👤 User → Chat Orchestrator ─┬─ reply_directly  → Reply Module ─────────────────→ 💬
+ *   👤 User → Paper Orchestra ─┬─ reply_directly  → Reply Module ─────────────────→ 💬
  *                                ├─ answer_question → Answer Module ────────────────→ 💬
  *                                └─ refine_question → Refine Module → Answer Module → 💬
  *                                                                  └─ (still unclear) ask back → 💬

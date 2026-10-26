@@ -1,6 +1,6 @@
 /**
  * Answer Module prompt: answer from the paper, with the question as
- * rewritten by the Refine Module when the Chat Orchestrator refined it first.
+ * rewritten by the Refine Module when the Paper Orchestra refined it first.
  * When the paper comes section by section and a section it needs is only a
  * summary, the first answer may ask for it instead (`[[need_sections: ...]]`).
  */

@@ -92,7 +92,7 @@ export function reportYaml(report: PaperReport, units: SectionUnit[], title?: st
   const doc = new Document({ version: REPORT_VERSION, ...(title ? { title } : {}), updated: now.toISOString(), sections });
   doc.commentBefore = [
     " LOGICA 논문 요약: 섹션마다 3~4줄, 논문의 읽는 순서대로.",
-    " Chat Orchestrator는 각 섹션의 요약을 읽고, 질문에 필요한 섹션을 선택합니다.",
+    " Paper Orchestra는 각 섹션의 요약을 읽고, 질문에 필요한 섹션을 선택합니다.",
     " 답변 모델에는 선택한 섹션의 원문과 나머지 섹션의 요약을 보냅니다.",
     " hash는 섹션 본문의 해시입니다. 본문을 고치면 달라지고, 그 섹션은 다시 요약됩니다.",
   ].join("\n");

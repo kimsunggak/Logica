@@ -226,7 +226,7 @@ function namedSections(last: string, question: string): string[] {
   return keys;
 }
 
-/** Chat Orchestrator's judge: one tool per route, with the reason for it and the sections to read. */
+/** Paper Orchestra's judge: one tool per route, with the reason for it and the sections to read. */
 function simulateJudge(last: string): DemoReply {
   const question = between(last, "user_message") ?? "";
   if (SMALL_TALK.test(question) && question.length < 40) {

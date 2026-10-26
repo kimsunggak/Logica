@@ -62,7 +62,7 @@
 </g>
 <g><rect x="315.0" y="313.0" width="230" height="154" rx="14" fill="#efeafc" stroke="#8c7ad8" stroke-width="1.5"/>
 <g transform="translate(414,327.0)" fill="none" stroke="#8c7ad8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="16" r="3"/><path d="M8 16h8"/><path d="M16 16l10-11M16 16h11M16 16l10 11"/><path d="M23 4h4v4M24 13l3 3-3 3M23 28h4v-4"/></g>
-<text x="430" y="379.0" class="t">Chat Orchestrator</text>
+<text x="430" y="379.0" class="t">Paper Orchestra</text>
 <text x="430" y="397.0" class="s">판단 LLM이 갈래와 섹션 선택</text>
 </g>
 <g class="chips"><rect x="352" y="433" width="44" height="18" rx="9"/><text x="374" y="446">A</text><rect x="408" y="433" width="44" height="18" rx="9"/><text x="430" y="446">B</text><rect x="464" y="433" width="44" height="18" rx="9"/><text x="486" y="446">C</text></g>

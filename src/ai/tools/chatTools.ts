@@ -1,5 +1,5 @@
 /**
- * Tools the Chat Orchestrator's judge model calls, one per route. Each tool
+ * Tools the Paper Orchestra's judge model calls, one per route. Each tool
  * is a module that makes one model call of its own; the judge never writes
  * text for the user and never sees the paper's text, only its map. With the
  * answer and refine routes it names the sections to read word for word.

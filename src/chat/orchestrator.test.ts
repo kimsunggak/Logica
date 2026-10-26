@@ -122,7 +122,7 @@ describe("chooseRoute", () => {
   });
 });
 
-describe("Chat Orchestrator", () => {
+describe("Paper Orchestra", () => {
   it.each(["reply", "answer", "refine"] as const)("passes the selected history and its turn numbers along the %s route", async (route) => {
     const turns: TurnRecord[] = Array.from({ length: 9 }, (_, i) => ({ index: i + 1, question: `q${i + 1}`, answer: `a${i + 1}`, status: "done" }));
     const r = run({

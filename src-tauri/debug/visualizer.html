@@ -323,7 +323,7 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
 "use strict";
 const MODULES = {
   user:         { title: "👤 User Input" },
-  orchestrator: { title: "Chat Orchestrator" },
+  orchestrator: { title: "Paper Orchestra" },
   reply:        { title: "Reply Module" },
   refine:       { title: "Refine Module" },
   answer:       { title: "Answer Module" },
@@ -811,7 +811,7 @@ function renderFlowChart() {
     flowBox("paper-initial-save", "document", 230, 365, 340, 70, ["paper-summary.yaml", "논문 요약 저장"], "", "paperSummary"),
     flowBox("paper-reuse", "document", 720, 365, 340, 70, ["저장된 논문 요약 재사용", "LLM 호출 없음"], "", "paperSummary"),
     flowBox("conversation-data", "document", 1160, 510, 360, 80, ["저장된 세션 요약 + 최근 대화", "현재 질문과 함께 전달"], "", "sessionSummary"),
-    flowBox("orchestrator", "module", 720, 510, 360, 90, ["Chat Orchestrator", "논문 지도 · 대화 정보로 판단"], "orchestrator"),
+    flowBox("orchestrator", "module", 720, 510, 360, 90, ["Paper Orchestra", "논문 지도 · 대화 정보로 판단"], "orchestrator"),
     flowBox("route", "decision", 720, 660, 360, 140, ["어떤 처리 경로인가?", "오케스트레이터의 선택"]),
     flowBox("reply", "module", 230, 660, 300, 80, ["Reply Module", "잡담 응답"], "reply"),
     flowBox("refine", "module", 1160, 660, 330, 80, ["Refine Module", "질문 구체화"], "refine"),

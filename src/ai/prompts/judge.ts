@@ -1,5 +1,5 @@
 /**
- * Judge prompt: the Chat Orchestrator's own model call. It picks the route
+ * Judge prompt: the Paper Orchestra's own model call. It picks the route
  * of a message (reply, answer, or refine first) by calling one tool, from the
  * session summary, the last four turns, the paper map and the message. With
  * the answer and refine routes it names the sections the next step reads
@@ -13,7 +13,7 @@ import type { PromptPayload } from "./index";
 import { conversationBlock, SESSION_RULES, summaryBlock } from "./session";
 
 const JUDGE_RULES = [
-  "You are the Chat Orchestrator of LOGICA, a LaTeX writing tool for research papers. For each user message you choose what happens next by calling exactly one tool. You never write the answer yourself.",
+  "You are the Paper Orchestra of LOGICA, a LaTeX writing tool for research papers. For each user message you choose what happens next by calling exactly one tool. You never write the answer yourself.",
   "You do not see the paper's text. <paper_map>, when present, lists its sections in reading order, each with its key, title, word count, labels and summary.",
   "Choose exactly one:",
   `1. Small talk, thanks, a greeting, or a message that is not about the paper or writing it: call ${REPLY_DIRECTLY}.`,

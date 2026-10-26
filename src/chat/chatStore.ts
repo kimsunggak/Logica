@@ -2,7 +2,7 @@
  * Chat about the current paper.
  *
  * This store holds the conversation and its session summary; each question
- * is run by the Chat Orchestrator (`./orchestrator.ts`), which decides
+ * is run by the Paper Orchestra (`./orchestrator.ts`), which decides
  * whether to reply directly, answer, or refine the question first, and
  * reports every step to the localhost runtime debugger in development. After
  * a turn the Session Summary Module (`./session/summarizer.ts`) folds older turns

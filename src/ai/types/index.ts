@@ -30,7 +30,7 @@ export interface AIMessage {
 }
 
 /**
- * Chat is run by the Chat Orchestrator: `judge` picks the route of a message
+ * Chat is run by the Paper Orchestra: `judge` picks the route of a message
  * and the sections to read by calling a tool, `reply` answers small talk,
  * `refine` rewrites an abstract question into a clear one, and `answer`
  * answers from the paper. `summary` folds older turns into the session
