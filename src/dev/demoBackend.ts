@@ -191,7 +191,7 @@ function namedSections(last: string, question: string): string[] {
   const asked = question.toLowerCase();
   const keys: string[] = [];
   for (const m of map.matchAll(/^\s*\[([^\]]+)\] ([^(\n]+?) \(/gm)) {
-    if (asked.includes(m[2].toLowerCase()) || new RegExp(`\\b(section|sec\\.?|§)\\s*${m[1].replace(/\./g, "\\.")}\\b`, "i").test(question)) keys.push(m[1]);
+    if (asked.includes(m[2].toLowerCase()) || new RegExp(`\\b(section|sec\\.?|§)\\s*${m[1].replace(/\./g, "\\.")}\\b(?!\\.\\d)`, "i").test(question)) keys.push(m[1]);
   }
   return keys;
 }
@@ -226,11 +226,9 @@ function simulatePaperEdit(all: string, last: string): DemoReply {
   for (const block of blocks) {
     if (!keys.includes("all") && !keys.some((key) => block[1] === key || block[1].startsWith(key + "."))) continue;
     for (const source of block[2].matchAll(/<source file="([^"]+)" lines="[^"]*">\n([\s\S]*?)\n<\/source>/g)) {
-      const original = source[2].split("\n").find((line) => line.length > 40 && !/^\s*[\\%]/.test(line));
-      if (original) {
-        const revised = demoRewrite(original, question);
-        if (revised !== original) edits.push({ path: source[1], original, revised });
-      }
+      const original = source[2];
+      const revised = demoRewrite(original, question);
+      if (original.trim() && revised !== original) edits.push({ path: source[1], original, revised });
     }
   }
   if (!edits.length) return demoClarify(question);
@@ -252,7 +250,7 @@ function simulateRefine(last: string): string {
   return (between(last, "user_message") ?? "").trim();
 }
 
-/** Answer Module: edit blocks for an edit request, otherwise a short demo answer. */
+/** Paper Chat Module: a short answer with no executable manuscript changes. */
 function simulateAnswerModule(all: string, last: string): string {
   const question = between(last, "user_message") ?? "";
   if (SMALL_TALK.test(question) && question.length < 40) return hangul(question) ? "천만에요! 논문에 대해 궁금한 점을 물어보세요." : "You're welcome! Ask me anything about the paper.";
