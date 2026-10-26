@@ -25,7 +25,7 @@ import { foldTurns, moduleChars, turnsToFold, unsummarized } from "./session/sum
 import { readSummary, type ConversationSummary } from "./session/summary";
 import { turnsOf } from "./session/turns";
 import { endSpan, failSpan, setDebugProject, startSpan, step, type Span } from "../debug/trace";
-import type { ProjectFile, ProviderId } from "../ai/types";
+import type { ChatMode, ProjectFile, ProviderId } from "../ai/types";
 import { editorSession } from "../editor/editorSession";
 import { buildPaperDocument, outlineText } from "../latex/parser/documentModel";
 import { currentTexts, navigateTo, openFile } from "../project/projectActions";
@@ -36,6 +36,8 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** UI purpose frozen when this turn was sent. Old messages default to Auto. */
+  mode?: ChatMode;
   status: "done" | "streaming" | "error" | "cancelled";
   /** The model that wrote the answer (the one running while it streams). */
   provider?: ProviderId;
@@ -44,6 +46,9 @@ export interface ChatMessage {
   instruction?: string;
   /** Outcome of each proposed edit block, by its index in the answer. */
   editStates?: Record<number, EditState>;
+  /** Validated arguments of the queued apply_paper_edits tool call. */
+  edits?: ProposedEdit[];
+  editToolCallId?: string;
   /** Step of the turn running for this answer. */
   stage?: Stage;
   /** How the turn ended: direct reply, answer, or a question back. */
@@ -59,6 +64,7 @@ export interface ChatMessage {
 export type EditState = "applied" | "rejected" | "failed";
 
 interface ChatState {
+  mode: ChatMode;
   messages: ChatMessage[];
   runningId: string | null;
   /** Project the conversation belongs to, and the session being shown. */
@@ -72,6 +78,7 @@ interface ChatState {
 }
 
 export const useChat = create<ChatState>()(() => ({
+  mode: "auto",
   messages: [],
   runningId: null,
   root: null,
@@ -159,37 +166,45 @@ function updateMessage(id: string, patch: Partial<ChatMessage>) {
 /** The turn running now, so it can be stopped. */
 let running: RunControl | null = null;
 
+export function setChatMode(mode: ChatMode) {
+  if (mode === "auto" || mode === "chat" || mode === "edit") useChat.setState({ mode });
+}
+
 export async function sendChatMessage(text: string): Promise<void> {
   const instruction = text.trim();
   if (!instruction || useChat.getState().runningId) return;
+  const { mode, root: projectRoot, sessionId } = useChat.getState();
   // Only the question goes; the editor's open file, selection and cursor
   // often have nothing to do with what is asked.
   const requestId = newRequestId();
   const turn: Turn = {
     id: requestId,
     instruction,
+    mode,
     turns: turnsOf(useChat.getState().messages),
     summary: useChat.getState().summary,
   };
 
-  const first = CHAT_MODELS.judge.primary;
-  const userMessage: ChatMessage = { id: `${requestId}-u`, role: "user", content: instruction, status: "done" };
+  const first = CHAT_MODELS.refine.primary;
+  const userMessage: ChatMessage = { id: `${requestId}-u`, role: "user", content: instruction, status: "done", mode };
   const assistantMessage: ChatMessage = {
     id: requestId,
     role: "assistant",
     content: "",
+    mode,
     status: "streaming",
     provider: first.provider,
     model: first.model,
     instruction,
-    stage: "judge",
+    stage: "refine",
   };
   useChat.setState((s) => ({ messages: [...s.messages, userMessage, assistantMessage], runningId: requestId }));
 
   // One trace per question; its id is the answer's message id.
-  const root = startSpan(requestId, null, "pipeline", "sendChatMessage", () => ({ question: instruction, models: CHAT_MODELS }));
+  const root = startSpan(requestId, null, "pipeline", "sendChatMessage", () => ({ question: instruction, ui_mode: mode, models: CHAT_MODELS }));
   step(requestId, root, "user", "receiveUserInput", instruction, () => ({
     question: instruction,
+    ui_mode: mode,
     session_turns: turn.turns.length,
     summary_covered_turns: turn.summary?.coveredTurns ?? 0,
     // How close the earlier turns are to the Session Summary Module's length limit.
@@ -221,6 +236,8 @@ export async function sendChatMessage(text: string): Promise<void> {
       status: "done",
       stage: undefined,
       route: result.outcome,
+      edits: result.edits,
+      editToolCallId: result.editToolCallId,
       provider: result.choice.provider,
       model: result.choice.model,
       fallbackFrom: result.fallbackFrom?.model,
@@ -233,7 +250,8 @@ export async function sendChatMessage(text: string): Promise<void> {
       fallback_from: result.fallbackFrom?.model ?? null,
       finishReason: result.finishReason,
       usage: result.usage,
-      edit_blocks: splitBlocks(content).filter((b) => b.kind === "code" && b.lang === "edit").length,
+      proposed_edits: result.edits?.length ?? 0,
+      ui_mode: mode,
     }));
     endSpan(root, "pipeline", { status: "done", route: result.route, outcome: result.outcome });
   } catch (err) {
@@ -243,11 +261,13 @@ export async function sendChatMessage(text: string): Promise<void> {
     failSpan(root, "pipeline", error);
   } finally {
     if (running === control) running = null;
-    useChat.setState({ runningId: null });
+    if (useChat.getState().runningId === requestId) useChat.setState({ runningId: null });
     // Stopped and failed turns count too: they are turns left unanswered.
-    scheduleSummary({ traceId: requestId, root });
-    // A turn that may have read the paper: summarize the sections edited since.
-    if (route) scheduleSectionSummaries({ traceId: requestId, root });
+    if (useChat.getState().root === projectRoot && useChat.getState().sessionId === sessionId) {
+      scheduleSummary({ traceId: requestId, root });
+      // A turn that may have read the paper: summarize the sections edited since.
+      if (route) scheduleSectionSummaries({ traceId: requestId, root });
+    }
   }
 }
 
@@ -396,7 +416,7 @@ export async function openChatsFor(root: string | null): Promise<void> {
   stopSummary();
   stopSectionSummaries();
   clearTimeout(saveTimer);
-  useChat.setState({ root, messages: [], summary: null, sessions: [], sessionId: newSessionId(), createdAt: Date.now() });
+  useChat.setState({ root, mode: "auto", messages: [], summary: null, sessions: [], sessionId: newSessionId(), createdAt: Date.now() });
   if (!root) return;
   const sessions = await listSessions(root).catch(() => [] as SessionSummary[]);
   if (useChat.getState().root !== root) return;
@@ -425,7 +445,8 @@ export async function switchChatSession(id: string): Promise<void> {
   // A summary of more turns than the session has does not belong to it.
   const summary = readSummary(file.summary);
   const fits = summary && summary.coveredTurns <= turnsOf(messages).length ? summary : null;
-  useChat.setState({ messages, summary: fits, sessionId: id, createdAt: file.createdAt });
+  const mode = file.mode === "chat" || file.mode === "edit" ? file.mode : "auto";
+  useChat.setState({ messages, mode, summary: fits, sessionId: id, createdAt: file.createdAt });
 }
 
 export async function deleteChatSession(id: string): Promise<void> {
@@ -455,10 +476,10 @@ function sessionTitle(messages: ChatMessage[]): string {
 /** Write the shown conversation now (when it has messages and no answer is streaming). */
 function flushSave() {
   clearTimeout(saveTimer);
-  const { root, sessionId, createdAt, messages, summary, runningId, sessions } = useChat.getState();
+  const { root, sessionId, createdAt, messages, summary, runningId, sessions, mode } = useChat.getState();
   if (!root || messages.length === 0 || runningId) return;
   const updatedAt = Date.now();
-  void saveSession(root, sessionId, { version: SESSION_VERSION, createdAt, updatedAt, messages, ...(summary ? { summary } : {}) }).catch(() => {
+  void saveSession(root, sessionId, { version: SESSION_VERSION, createdAt, updatedAt, mode, messages, ...(summary ? { summary } : {}) }).catch(() => {
     // Saving is best effort; the conversation stays usable in memory.
   });
   const entry: SessionSummary = { id: sessionId, title: sessionTitle(messages), createdAt, updatedAt, messageCount: messages.length };
@@ -468,7 +489,7 @@ function flushSave() {
 // Save shortly after the conversation changes (new message, finished answer, applied edit, new summary).
 useChat.subscribe((state, prev) => {
   if (state.root !== prev.root || state.sessionId !== prev.sessionId) setDebugProject(state.root, state.sessionId);
-  if (state.messages === prev.messages && state.runningId === prev.runningId && state.summary === prev.summary) return;
+  if (state.messages === prev.messages && state.runningId === prev.runningId && state.summary === prev.summary && state.mode === prev.mode) return;
   if (state.sessionId !== prev.sessionId || state.root !== prev.root) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flushSave, SAVE_DELAY_MS);

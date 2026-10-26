@@ -15,6 +15,7 @@
  */
 import type { AIMessage } from "../../ai/types";
 import { t } from "../../i18n";
+import type { ProposedEdit } from "../../ai/agent/edits";
 
 export type TurnStatus = "done" | "clarify" | "truncated" | "cancelled" | "error";
 
@@ -33,6 +34,8 @@ export interface TurnMessage {
   status: "done" | "streaming" | "error" | "cancelled";
   route?: string;
   truncated?: boolean;
+  edits?: ProposedEdit[];
+  editStates?: Record<number, string>;
 }
 
 /** The judge keeps at least four recent turns, each message up to 10,000 characters. */
@@ -70,7 +73,12 @@ function answerOf(m: TurnMessage): { answer: string; status: TurnStatus } {
     const text = m.content.endsWith(notice) ? m.content.slice(0, -notice.length) : m.content;
     return { answer: note(text, TURN_NOTES.truncated), status: "truncated" };
   }
-  return { answer: m.content, status: m.route === "clarify" ? "clarify" : "done" };
+  const edits = m.edits?.map((edit, i) => [
+    `[paper edit ${i + 1}: ${m.editStates?.[i] ?? "pending application"}; file: ${edit.path}]`,
+    `ORIGINAL:\n${edit.original}`,
+    `REVISED:\n${edit.revised}`,
+  ].join("\n")).join("\n\n");
+  return { answer: [m.content, edits].filter(Boolean).join("\n\n"), status: m.route === "clarify" ? "clarify" : "done" };
 }
 
 function note(text: string, mark: string): string {
