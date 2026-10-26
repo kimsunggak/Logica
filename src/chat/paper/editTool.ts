@@ -43,7 +43,7 @@ function expandedKeys(paper: Paper, selected: string[]): string[] {
 
 /** Only edit targets are writable; full reference sections remain read-only. */
 export function editableSources(paper: Paper, selected: string[]): SourceRange[] {
-  if (selected.includes(ALL_SECTIONS) && !paper.units?.length) {
+  if (selected.includes(ALL_SECTIONS)) {
     return paper.files.map((f) => ({ ...f, fromLine: 1, toLine: f.text.split("\n").length }));
   }
   const keys = new Set(expandedKeys(paper, selected));

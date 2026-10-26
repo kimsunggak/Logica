@@ -9,7 +9,7 @@
  */
 import type { DemoBackend } from "../lib/backend";
 import { buildPaperDocument, locateGi } from "../latex/parser/documentModel";
-import { latexToPlain, maskComments } from "../latex/parser/text";
+import { findCommands, latexToPlain, maskComments } from "../latex/parser/text";
 import mainTex from "../../examples/sample-paper/main.tex?raw";
 import introTex from "../../examples/sample-paper/sections/introduction.tex?raw";
 import relatedTex from "../../examples/sample-paper/sections/related_work.tex?raw";
@@ -207,11 +207,20 @@ function demoClarify(question: string): DemoReply {
   return { tool: { name: "clarify_request", args: { question: hangul(question) ? "어느 부분을 말씀하시는 건가요? 섹션이나 문장을 알려 주세요." : "Which part do you mean? Name the section or quote the sentence." } } };
 }
 
+/** Deliberately small metadata simulator; the desktop uses the connected model. */
+function metadataField(question: string): "title" | "author" | null {
+  const field = /\b(title|authors?)\b|제목|저자/i.exec(question)?.[0];
+  return !field ? null : /title|제목/i.test(field) ? "title" : "author";
+}
+
 function simulateSelection(last: string, edit: boolean): DemoReply {
   const question = between(last, "user_message") ?? "";
   if (/^(이거|그거|this|that)\s*\??$/i.test(question)) return demoClarify(question);
   const sections = namedSections(last, question);
   if (edit) {
+    if (/^\s*\[metadata\]/m.test(last) && metadataField(question) && EDIT_REQUEST.test(question)) {
+      return { tool: { name: "select_edit_sections", args: { reason: "Read the literal title and author declarations.", edit_sections: ["metadata"], reference_sections: [] } } };
+    }
     if (!sections.length && !/whole|entire|across|전체|통일/i.test(question)) return demoClarify(question);
     return { tool: { name: "select_edit_sections", args: { reason: "Read the requested edit targets and preserve the rest.", edit_sections: sections.length ? sections : ["all"], reference_sections: [] } } };
   }
@@ -220,12 +229,27 @@ function simulateSelection(last: string, edit: boolean): DemoReply {
 
 function simulatePaperEdit(all: string, last: string): DemoReply {
   const question = between(last, "user_message") ?? "";
+  const field = metadataField(question);
+  const quoted = /["“]([^"”]+)["”]|'([^']+)'/.exec(question);
+  const replacement = quoted?.[1] ?? quoted?.[2];
   const keys = (between(last, "editable_sections") ?? "").split(",").map((key) => key.trim());
   const edits: { path: string; original: string; revised: string }[] = [];
   const blocks = [...all.matchAll(/<section key="([^"]+)" title="[^"]*" content="full">\n([\s\S]*?)\n<\/section>/g)];
   for (const block of blocks) {
     if (!keys.includes("all") && !keys.some((key) => block[1] === key || block[1].startsWith(key + "."))) continue;
     for (const source of block[2].matchAll(/<source file="([^"]+)" lines="[^"]*">\n([\s\S]*?)\n<\/source>/g)) {
+      if (block[1] === "metadata") {
+        if (!field || replacement === undefined) return demoClarify(question);
+        for (const command of findCommands(maskComments(source[2]), [field])) {
+          if (command.arg === null) continue;
+          const original = source[2].slice(command.start, command.end);
+          // The required argument ends at command.end; retain optional short titles.
+          const argumentStart = command.end - command.arg.length - 1;
+          const revised = source[2].slice(command.start, argumentStart) + replacement + "}";
+          if (original !== revised) edits.push({ path: source[1], original, revised });
+        }
+        continue;
+      }
       const original = source[2];
       const revised = demoRewrite(original, question);
       if (original.trim() && revised !== original) edits.push({ path: source[1], original, revised });

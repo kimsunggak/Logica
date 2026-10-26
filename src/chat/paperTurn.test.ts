@@ -32,7 +32,7 @@ describe("reading the paper by sections, through the demo backend", () => {
       await sendChatMessage("What does Table 1 report?");
       expect(tasks()).toEqual(["sections", "refine", "judge", "select", "answer"]);
       const report = await loadReport(ROOT);
-      expect(Object.keys(report.summaries)).toHaveLength(17);
+      expect(Object.keys(report.summaries)).toHaveLength(18);
       const first = generate.mock.calls.find(([, r]) => r.task === "answer")![1];
       expect(first.projectFiles).toBeUndefined();
       expect(Object.fromEntries(first.paperView!.sections.map((s) => [s.key, s.content]))).toMatchObject({ abstract: "full", "4.3": "summary" });

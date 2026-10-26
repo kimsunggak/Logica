@@ -128,7 +128,16 @@ function paperOf(report: PaperReport): Paper {
 async function summarizeFirst(project: string, report: PaperReport, run: { traceId: string; root: Span; control: RunControl; onStart: () => void }): Promise<PaperReport> {
   const { tex, doc } = paperNow();
   const { units } = paperUnits(doc, tex);
-  if (!units.length || hasSummaries(units, report)) return report;
+  if (!units.length) return report;
+  if (hasSummaries(units, report)) {
+    const next = withSummaries(report, [], units);
+    const metadataChanged = units.some((unit) => unit.summary !== undefined && report.summaries[unit.hash]?.summary !== unit.summary);
+    if (metadataChanged || Object.keys(next.summaries).length !== Object.keys(report.summaries).length) {
+      await saveReport(project, next, units, doc.title);
+      return next;
+    }
+    return report;
+  }
   // A run in the background may be writing the first summaries already.
   if (sectioning) {
     await sectioning.done;
@@ -370,7 +379,12 @@ export function scheduleSectionSummaries(after?: { traceId: string; root: Span }
       summarized: sections - todo.length,
       to_summarize: todo.map((u) => u.key),
     }));
-    if (!todo.length || !current()) return;
+    if (!current()) return;
+    if (!todo.length) {
+      const next = withSummaries(report, [], units);
+      if (Object.keys(next.summaries).length !== Object.keys(report.summaries).length) await saveReport(project, next, units, doc.title);
+      return;
+    }
     const result = await summarizeSections(todo, {
       traceId: trace.traceId,
       parent: trace.root,
