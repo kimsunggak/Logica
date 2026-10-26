@@ -4,6 +4,7 @@ import { useProject } from "../project/projectStore";
 import { loadSession, saveSession } from "./chatHistory";
 import { runChatTurn, type Turn, type TurnResult } from "./orchestrator";
 import { sendChatMessage, setChatMode, switchChatSession, useChat } from "./chatStore";
+import { preparePaperEdits } from "./paper/editTool";
 
 vi.mock("./orchestrator", async (original) => ({ ...(await original<object>()), runChatTurn: vi.fn() }));
 vi.mock("./chatHistory", async (original) => ({
@@ -64,5 +65,33 @@ describe("UI modes and persisted editing proposals", () => {
     vi.mocked(loadSession).mockResolvedValue({ version: 1, createdAt: 1, updatedAt: 2, messages: [] });
     await switchChatSession("legacy");
     expect(useChat.getState().mode).toBe("auto");
+  });
+
+  it("normalizes saved CRLF proposals without changing message metadata, statuses or ordinary spaces", async () => {
+    const message = {
+      id: "answer", role: "assistant" as const, content: "Proposal description.\r\nKeep this text.", status: "done" as const,
+      mode: "edit" as const, route: "edit" as const, editToolCallId: "existing-call", provider: "openai" as const, model: "gpt-6.1-sol",
+      instruction: "Keep the spacing.", refined: "Rewrite the two sentences with their spacing preserved.",
+      edits: [
+        { path: "main.tex", original: "First  sentence.\r\nSecond sentence.\rThird sentence.", revised: "Revised  first.\r\nRevised second.\rRevised third." },
+        { path: "other.tex", original: "Previously\r\napplied.", revised: "Already\r\napplied." },
+      ],
+      editStates: { 1: "applied" as const },
+    };
+    vi.mocked(loadSession).mockResolvedValue({ version: 2, createdAt: 10, updatedAt: 20, mode: "edit", messages: [message] });
+    await switchChatSession("saved-crlf");
+    const loaded = useChat.getState().messages[0];
+    expect(loaded).toEqual({
+      ...message,
+      edits: [
+        { path: "main.tex", original: "First  sentence.\nSecond sentence.\nThird sentence.", revised: "Revised  first.\nRevised second.\nRevised third." },
+        { path: "other.tex", original: "Previously\napplied.", revised: "Already\napplied." },
+      ],
+    });
+    expect(useChat.getState()).toMatchObject({ mode: "edit", sessionId: "saved-crlf", createdAt: 10 });
+    const edit = loaded.edits![0];
+    expect(preparePaperEdits([edit], new Map([["main.tex", "First  sentence.\nSecond sentence.\nThird sentence."]]))).not.toBeNull();
+    expect(preparePaperEdits([edit], new Map([["main.tex", "First sentence.\nSecond sentence.\nThird sentence."]]))).toBeNull();
+    expect(message.edits[0].original).toContain("\r\n");
   });
 });

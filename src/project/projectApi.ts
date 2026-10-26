@@ -29,8 +29,11 @@ export function listProjectFiles(root: string): Promise<ProjectListing> {
   return call<ProjectListing>("list_project_files", { root });
 }
 
-export function readTextFile(root: string, path: string): Promise<TextFile> {
-  return call<TextFile>("read_text_file", { root, path });
+export async function readTextFile(root: string, path: string): Promise<TextFile> {
+  const file = await call<TextFile>("read_text_file", { root, path });
+  // CodeMirror stores lines with LF. Use that representation before parsing,
+  // hashing or sending source to a model, including files not opened yet.
+  return { ...file, content: file.content.replace(/\r\n?/g, "\n") };
 }
 
 export function writeTextFile(

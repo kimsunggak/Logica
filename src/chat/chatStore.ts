@@ -435,8 +435,18 @@ export async function switchChatSession(id: string): Promise<void> {
   flushSave();
   const file = await loadSession<ChatMessage>(root, id).catch(() => null);
   if (!file || useChat.getState().root !== root) return;
-  // An answer that was still streaming when the app closed is shown as stopped.
-  const messages = file.messages.map((m) => (m.status === "streaming" ? { ...m, status: "cancelled" as const, stage: undefined } : m));
+  const messages = file.messages.map((saved) => {
+    // An answer that was still streaming when the app closed is shown as stopped.
+    const message = saved.status === "streaming" ? { ...saved, status: "cancelled" as const, stage: undefined } : saved;
+    if (!message.edits) return message;
+    // Older proposals may have been generated from unopened CRLF files.
+    // Keep them compatible with the LF source used by file reads and CodeMirror.
+    return { ...message, edits: message.edits.map((edit) => ({
+      ...edit,
+      original: edit.original.replace(/\r\n?/g, "\n"),
+      revised: edit.revised.replace(/\r\n?/g, "\n"),
+    })) };
+  });
   // A summary of more turns than the session has does not belong to it.
   const summary = readSummary(file.summary);
   const fits = summary && summary.coveredTurns <= turnsOf(messages).length ? summary : null;
