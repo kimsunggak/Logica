@@ -23,7 +23,7 @@ LOGICA는 개인 연구용 로컬 LaTeX 논문 작성 도구입니다. 논문 �
 | Editor | CodeMirror 6, LaTeX 문법 강조, 줄 번호, 괄호 매칭, undo/redo, 검색/바꾸기, 저장 상태 표시, `\section` `\cite` `\ref` `\eqref` `\label` 등 자동완성 |
 | 미리보기와 PDF | TeX 엔진 내장(설치된 TeX가 없으면 자동 사용), 입력을 멈추면 자동 저장 후 컴파일하는 실시간 미리보기(설정에서 끌 수 있음), 논문 페이지만 보이는 미리보기, **PDF 내보내기**로 원하는 위치에 저장, `latexmk` > `pdflatex` > `xelatex` 순 자동 선택(또는 직접 지정/사용자 명령), 타임아웃, 주요 오류만 추출(파일:줄 클릭 이동) |
 | AI 인라인 편집 | 텍스트 선택 후 `Cmd/Ctrl+K`, 기본 명령(Improve writing, Make concise, Make academic, Improve clarity, Fix grammar, Rewrite, 직접 입력), streaming 표시, Stop, diff 확인 후 Accept / Reject / Regenerate(다른 provider로 재생성 가능) |
-| AI 채팅 (에이전트) | Paper Orchestra가 질문마다 처리 갈래를 고름: 잡담은 Reply Module이 답하고, 명확한 질문은 바로 답변하고, 모호한 질문은 논문 전체를 보고 명확한 질문으로 정제한 뒤 답변(정제해도 모호하면 되물음). 수정 요청에는 여러 곳, 여러 파일의 수정안을 제안하고 수정마다 diff와 LaTeX 검사 결과를 보여 주며 하나씩 또는 모두 적용/거절 |
+| AI 채팅 (에이전트) | Chat/Edit/Auto 모드, 공통 요청 정제, 실행별 섹션 선택. Chat은 질의응답, Edit은 수정·참고 원문으로 tool 변경안을 생성하고 diff 검토 후 개별/전체 적용·거절. Auto만 의도를 분류하며, 원문 적용 후 변경 섹션 요약 갱신 |
 | Citation / Reference | `references.bib` 파싱, `\cite{` 입력 시 key/제목/저자/연도 자동완성, `\ref{` 라벨 자동완성, `\ref` `\eqref` `\cite` `\input` 위에서 `F12` 또는 `Cmd/Ctrl+클릭`으로 정의 위치 이동 |
 | 상태 복원 | 마지막 프로젝트, 열린 파일, 파일별 커서 위치, outline 접힘 상태, 패널 크기와 표시 여부, 테마, provider와 model 선택 |
 
@@ -142,24 +142,44 @@ LOGICA는 특정 provider에 묶이지 않도록 공통 `AIProvider` 인터페�
 
 인라인 편집은 선택 텍스트만 보내지 않고, 같은 문서 모델(`PaperDocument`)에서 필요한 부분만 골라 공통 semantic context를 만듭니다. 채팅은 논문에 대한 첫 질문에서 먼저 논문을 섹션별로 요약해 두고, 질문에 필요한 섹션만 원문으로, 나머지 섹션은 그 요약으로 보냅니다.
 
-![AI 채팅 에이전트 구조: Paper Orchestra가 판단 LLM으로 Reply, Answer, Refine 중 갈래를 고르고, 모든 LLM 호출은 LLM Gateway와 Rust를 거쳐 OpenAI나 Anthropic으로 갑니다](docs/images/chat-agent-architecture.png)
+채팅은 `UI Mode → Request Refinement → Routing → Section Selection → Execution` 순서로 처리합니다. 입력창 왼쪽의 **Chat**은 논문 질의응답, **Edit**은 원문 수정안 생성, **Auto**는 요청에 따른 Chat/Edit 자동 선택입니다. 전송한 모드는 해당 턴에 고정되며 대화 파일에 함께 저장됩니다.
 
-AI 채팅 에이전트 구조 (원본: [`docs/images/chat-agent-architecture.svg`](docs/images/chat-agent-architecture.svg)). 사용자 질문은 Paper Orchestra로 들어가고, 판단 LLM이 툴 하나로 갈래(A 잡담, B 바로 답변, C 정제 후 답변)와 원문으로 읽을 섹션을 고릅니다. 각 모듈의 결과는 오케스트레이터를 거쳐 화면에 표시되고, 답이 끝난 질문은 대화 메모리에 1턴으로 저장됩니다.
+```mermaid
+flowchart TD
+  U[User Input + UI Mode] --> R[Request Refinement: 요청 문자열]
+  H[Session History: 세션 요약 + 최근 대화] --> R
+  R --> M{UI Mode}
+  M -->|Chat| C[Chat 섹션 선택]
+  M -->|Edit| E[Edit 수정 대상·참고 섹션 선택]
+  M -->|Auto| A{Auto Router: Chat / Edit}
+  A -->|Chat| C
+  A -->|Edit| E
+  A -->|불명확| Q[사용자에게 되묻기]
+  P[Paper Summary: 섹션별 요약] --> C
+  P --> E
+  C --> CA[Paper Chat: 선택 원문 + 나머지 요약]
+  E --> ED[Paper Edit: 수정·참고 원문 + 논문 요약]
+  CA --> F[Final Answer]
+  ED --> D[apply_paper_edits 호출 인자 → Diff]
+  D --> F
+  F -->|미요약 10턴 이상 또는 40,000자 초과| SS[Session Summary Module]
+  SS -. 다음 요청 .-> H
+  D -->|사용자가 적용| T[원문 검증·교체 tool]
+  T --> S[변경된 섹션의 논문 요약 갱신]
+```
 
-- 인라인 편집: 논문 제목, abstract, outline, 현재 section 경로(예: `3 Method › 3.2 Uncertainty Estimation`), 앞 문단, 선택 텍스트, 다음 문단
-- 채팅: 한 질문에 모델을 최대 3번 부릅니다(답변이 섹션 원문을 더 요청하면 4번). 논문에 대한 첫 질문에서는 판단보다 먼저 논문 요약을 부르고(약 40,000자마다 1번), 그 뒤에는 고친 섹션이 있을 때만 턴이 끝난 뒤 백그라운드로 다시 부릅니다. 세션 요약은 요약에 안 들어간 턴이 10개가 되거나 4만 자를 넘으면 백그라운드로 부릅니다(보통 첫 요약은 10턴 끝, 그 뒤로는 6턴마다 1번). 판단은 `claude-sonnet-5-5`(reasoning high, 실패하면 `gpt-6.1-sol`), 나머지는 `gpt-6.1-sol`(실패하면 `claude-sonnet-5-5`)입니다(`src/ai/models/modelConfig.ts`의 `CHAT_MODELS`).
-  1. 판단(Paper Orchestra): 세션 요약, 최근 턴 원문(최소 4턴), 논문 지도(섹션별 키, 제목, 단어 수, label, 요약), 질문 순서로 보냅니다. 원고 본문은 보내지 않습니다. 모델은 `reply_directly`, `answer_question`, `refine_question` 중 하나를 반드시 부르고, 인자 `reason`에 그 갈래를 고른 근거(다른 두 갈래가 아닌 이유)를 적습니다. `answer_question`과 `refine_question`은 인자 `sections`에 원문으로 읽을 섹션 키를 함께 적습니다(요약으로 충분하면 빈 목록, 논문 전체가 필요하면 `["all"]`). 판단 모델은 사용자에게 보이는 글을 쓰지 않습니다. 툴 호출은 강제하되(OpenAI `required`, Claude `any`), Claude는 thinking을 켜면 강제 호출을 받지 않으므로 `auto`로 보내고 프롬프트로 요구합니다. 그래도 툴 없이 글만 오면 잡담으로 처리합니다. Claude 요청은 툴 정의와 system prompt 끝에 캐시 지점(`cache_control`)을 두어, 5분 안의 다음 질문에서는 이 부분을 캐시로 읽습니다(대화와 논문 지도는 매번 바뀌어 캐시하지 않습니다).
-     - 잡담(`reply_directly`)이면 Reply Module(reasoning low)이 세션 요약, 요약에 아직 안 들어간 턴, 질문만 보고 답합니다. 원고는 보내지 않으므로 잡담은 모델을 2번 부릅니다.
-  2. 정제(Refine Module, reasoning medium, 판단이 `refine_question`일 때만): 논문(초록과 판단이 고른 섹션은 원문, 나머지는 섹션 요약. 요약을 만들지 못했으면 원고 전체, 최대 150,000자), 세션 요약, 요약에 아직 안 들어간 턴, 질문. 명확한 질문 하나로 다시 쓰거나 되물을 질문을 JSON으로 돌려줍니다. 섹션 단위로 받았을 때는 질문을 다듬은 뒤 원문으로 읽을 섹션을 `sections`로 다시 고르며, 이 선택이 판단의 선택을 대신합니다.
-  3. 답변(Answer Module, reasoning medium): 논문(정해진 섹션은 원문, 나머지는 요약), 세션 요약, 요약에 아직 안 들어간 턴, 원래 질문, 정제된 질문(있을 때). 요약만 받은 섹션의 원문이 필요하면 `[[need_sections: 4.3]]`처럼 답하고, 그 섹션을 원문으로 받아 한 번 더 답합니다(한 번만, 이 요청은 화면에 보이지 않습니다).
-  - 편집기의 상태(열린 파일, 선택 텍스트, 커서 문단과 section)는 보내지 않습니다. 열린 탭과 커서는 마지막으로 작업한 자리에 남아 있어 질문과 관계없는 경우가 많기 때문입니다. 특정 부분을 물으려면 질문에 section 이름이나 문장을 적습니다.
-  - 대화 상태는 네 층으로 보냅니다(`src/chat/paper/`, `src/chat/session/`).
-    - L0: 규칙과 툴, 그리고 논문. 판단은 대화 다음에 논문 지도를 받고, 정제와 답변은 섹션 원문과 요약(또는 원고 전체)을 맨 앞에 받습니다. 정제와 답변은 앞부분이 같아야 prompt cache를 쓰므로 가장 덜 바뀌는 논문을 맨 앞에 둡니다.
-    - L1 세션 요약: 오래된 턴을 접은 대화 요약입니다(논문 주제, 지금 하는 작업, 선호 P#, 턴별 세션 기록, 외부 참고 자료 R#). 요약에 안 들어간 턴이 10개가 되거나, 그 턴들의 길이가 4만 자(모듈이 읽는 기준, 메시지마다 최대 4,000자로 셈)를 넘으면 최근 4턴을 남기고 나머지를 접습니다(10턴 끝, 16턴 끝, 22턴 끝처럼). 5턴은 아무리 길어도 4만 자를 넘지 않으므로 한 번에 최소 2턴씩 접습니다. 요약 모듈(`gpt-6.1-sol` low)은 요약을 새로 쓰지 않고 `update_summary` 툴로 바뀐 항목만 돌려주며, 코드가 검사해 적용합니다. 항목 구조는 아래 [세션 요약 구조](#세션-요약-구조)에 있습니다.
-    - L2 최근 턴 원문: 공통 선택 함수가 판단과 모든 모듈에 요약에 안 들어간 턴을 모두, 최소 최근 4턴을 원문으로 보냅니다(메시지당 판단 10,000자, 나머지 4,000자). 그래서 세션 기록과 원문이 겹치지 않고 이어지며, 요약이 지연되거나 실패해도 대화가 빠지지 않습니다. 메시지 길이 상한을 넘으면 앞 70%와 뒤 30%를 남기고 가운데를 생략 표시합니다.
-    - L3: 지금 질문과 모듈의 작업 지시. 지금 질문은 자르지 않습니다.
-  - 1턴은 질문 하나와 그 결과입니다. 중지되거나 실패하거나 길이 초과로 잘린 답도 턴으로 남기고 `[answer stopped by the user]` 같은 표시를 붙여, 다음 질문에서 모델이 답하지 못한 요청을 알 수 있게 합니다(오류 문구 자체는 보내지 않습니다). 지금 보내는 질문은 아직 턴이 아니므로, 첫 질문에서 디버거의 `session_turns`는 0입니다. User Input에는 요약에 안 들어간 이전 턴의 길이(`unsummarized_chars`)를, Orchestrator 입력에는 `session_turns`, `summary_covered_turns`, 논문 지도의 요약 수(`paper_map`)를, 출력에는 고른 `sections`를, 각 LLM 호출에는 실제 읽는 원문 번호 `turn_numbers`와 잘린 메시지를 표시합니다. 정제와 답변의 `paperView` 단계에는 원문으로 보낸 섹션, 요약으로 보낸 섹션 수, 요약이 없어 원문으로 보낸 섹션이 나옵니다. 세션 요약과 섹션 요약 실행은 그 턴의 그래프에 Session Summary Module(오른쪽 아래)과 Paper Summary Module로 나타납니다. Paper Summary Module은 첫 질문에서는 판단보다 먼저 실행되어 User Input 옆에, 그 뒤에는 턴이 끝난 뒤 실행되어 왼쪽 아래에 나오고, 실행할 조건이 아니면 비활성으로 표시됩니다.
-  - 정제와 답변 요청은 같은 system prompt, 원고, 세션 요약, 대화로 시작하고 각자의 지시와 질문을 마지막 메시지에 둡니다. 앞부분이 같아야 provider의 prompt cache가 두 번째 호출에서 원고를 다시 계산하지 않기 때문입니다. 캐시된 토큰 수는 런타임 디버거에서 확인합니다.
+- 인라인 편집은 논문 제목, abstract, outline, 현재 section 경로, 앞 문단, 선택 텍스트, 다음 문단을 사용합니다.
+- 채팅의 단계별 책임은 다음과 같습니다.
+  1. **Request Refinement**: 모든 모드에서 세션 요약, 최근 대화, 사용자 입력으로 문맥과 지시 대상을 복원합니다. 출력은 정제된 요청 문자열 하나입니다. 의도 분류나 섹션 선택을 수행하지 않으며, 질문/명령, 부정, 조건, 요청 범위를 보존합니다.
+  2. **Routing**: Chat/Edit은 코드가 경로를 고정합니다. Auto만 `route_chat`, `route_edit`, `clarify_request` 도구를 가진 모델을 호출합니다. 이 모델에는 원래 입력, 정제된 요청, 대화 정보와 논문 지도를 보내며 원문 선택은 맡기지 않습니다. 의도가 불명확하거나 tool 호출이 유효하지 않으면 확인 질문을 반환합니다.
+  3. **Section Selection**: 정해진 실행 모드에서 논문 지도(섹션별 key, title, label, 요약), 원래 입력, 정제된 요청, 대화를 읽습니다. Chat은 `select_chat_sections`의 `sections`로 원문이 필요한 섹션을, Edit은 `select_edit_sections`의 `edit_sections`와 `reference_sections`로 수정 대상과 참고 대상을 구분합니다. 코드의 `resolveScope()`와 `paperRequest()`가 원문·요약을 구성합니다. Edit에서 선택된 대상과 참고 섹션은 모두 원문을 확보해야 실행합니다.
+  4. **Execution**: Paper Chat은 질의응답 전용이며 수정 tool을 제공하지 않습니다. 더 필요한 원문이 있으면 `[[need_sections: 4.3]]`으로 한 번 추가 요청할 수 있습니다. Paper Edit은 원래 입력, 정제된 요청, 세션 기록, 전체 섹션 요약, 수정·참고 섹션 원문, 전용 수정 지침으로 변경안을 만들고 `apply_paper_edits`를 호출합니다. 인자는 변경 설명 `summary`와 `edits: [{ path, original, revised }]`입니다. 읽기 전용 참고 섹션이나 요약만 보고 만든 수정안은 실행 대상으로 받지 않습니다.
+  5. **적용**: tool 인자는 먼저 diff로 표시합니다. 사용자가 개별 적용/모두 적용을 누르면 현재 프로젝트·세션과 저장된 제안을 확인하고, 현재 파일에서 원문이 정확하고 유일하게 일치하는지, 수정 구간이 겹치지 않는지 검증합니다. 모두 적용은 전체 검증 후 파일별 아래쪽 구간부터 교체합니다. 편집기 버퍼에 반영하므로 기존 저장·되돌리기 흐름을 따릅니다. 실제 적용 뒤 변경 섹션 해시를 다시 확인해 논문 요약을 갱신합니다.
+- Chat/Edit의 기본 LLM 호출은 정제·선택·실행 3회이며 Auto는 의도 판단 1회가 추가됩니다. 최초 논문 요약, Chat의 추가 원문 요청, 백그라운드 요약과 provider fallback은 별도입니다. 정제·섹션 선택은 `gpt-6.1-sol` low, Chat/Edit은 같은 모델 medium, Auto Router는 `claude-sonnet-5-5` xhigh입니다. 모델과 대체 provider는 `src/ai/models/modelConfig.ts`의 `CHAT_MODELS`에서 관리합니다.
+- 논문 요약은 첫 요청에서 준비하고, 그 이후에는 섹션 해시가 바뀌거나 요약이 누락된 부분만 갱신합니다. 원고 입력 한도는 150,000자입니다. 편집기의 열린 탭이나 커서 위치로 대상을 추측하지 않으므로 요청에 섹션이나 문장을 지정합니다.
+- 모든 단계는 세션 요약(L1)과 최근 대화 원문(L2)을 사용합니다. 최소 최근 4턴과 미요약 턴을 포함하며 메시지당 Auto Router는 최대 10,000자, 다른 모듈은 4,000자로 제한합니다. 긴 메시지는 앞 70%와 뒤 30%를 남깁니다. 현재 요청(L3)은 자르지 않습니다.
+- Session Summary Module은 미요약 대화가 10턴 이상이거나 모듈이 읽는 길이 기준 40,000자를 넘으면 최근 4턴을 남기고 한 번에 최대 6턴씩 접습니다. 중지·실패·길이 초과도 미완료 상태를 붙여 턴으로 남깁니다. 수정안은 원문·수정문과 적용/대기/거절 상태를 대화 기록에 포함해 다음 요청이 실제 적용 여부를 알 수 있게 합니다.
+- 디버거에는 UI 모드, 원래 입력과 정제 요청, Auto 판단 근거, 선택된 수정·참고 섹션, 실제 모델 프롬프트와 tool 인자, 원문 검증·적용 결과가 기록됩니다. Paper Summary Module은 고정된 위치에서 YAML 생성·재사용·갱신 연결을 보여주고, Session Summary Module은 별도 조건에 따라 실행됩니다.
 
 문단은 빈 줄로 나누며, `\section`, `\begin`/`\end`, `\label`, 주석 줄 같은 구조 줄과 `\title`, `\author`, `\date` 같은 앞부분 명령(여러 줄에 걸치면 닫는 중괄호까지), 그리고 `\begin{document}` 앞의 preamble 전체는 문단에 넣지 않습니다. 그래서 "이 문단 고쳐줘"가 section 제목이나 논문 제목을 바꾸지 않습니다.
 
@@ -259,7 +279,9 @@ src-tauri/src/
 의존 방향:
 
 ```
-Chat UI → Paper Orchestra → Refine / Answer Module → LLM Gateway (모델 선택, Claude fallback)
+Chat UI → Request Refinement → Paper Orchestra → Section Selection → Chat / Edit Module
+                                                               ↓
+                                          LLM Gateway (모델 선택, provider fallback)
                                                             ↓
 Editor (인라인 편집) ───────────────────────────→ AI Service (src/ai/service.ts)
    ↓
@@ -283,7 +305,7 @@ cd src-tauri && cargo test -- --ignored   # 실제 Anthropic API에 잘못된 ke
 
 ### 런타임 디버거 (개발용)
 
-`npm run tauri dev`로 앱을 띄운 뒤 브라우저에서 `http://localhost:1420`을 열면 런타임 디버거(`http://127.0.0.1:1430`, 터미널에도 `LOGICA debug visualizer`로 출력)로 넘어갑니다. 앱은 Tauri 창에서 그대로 실행되고, 앱 빌드가 끝나기 전에 열면 디버거가 뜰 때까지 기다렸다가 넘어갑니다. 디버거에서는 앱에서 보낸 채팅 질문이 User Input, Paper Orchestra, Refine Module, Answer Module, Final Answer 중 어느 갈래로 처리되는지(건너뛴 모듈은 흐리게), Paper Summary Module과 Session Summary Module이 실행됐는지 실시간으로 볼 수 있습니다. Paper Orchestra 노드에는 논문 지도의 요약 수와 고른 섹션이, Refine과 Answer 노드에는 원문으로 읽은 섹션과 요약으로 읽은 섹션 수가 표시됩니다. LLM Gateway 노드에는 호출마다 모델, 실패와 Claude fallback이 표시됩니다. 실행 중인 단계 강조, 함수 호출 순서(caller와 callee), 단계별 입력과 출력, 모델에 보낸 프롬프트와 응답, Rust의 AI 요청 처리까지 질문 하나를 trace 하나로 묶어 보여 주며, 같은 이벤트가 터미널에도 한 줄씩 찍힙니다.
+`npm run tauri dev`로 앱을 띄운 뒤 브라우저에서 `http://localhost:1420`을 열면 런타임 디버거(`http://127.0.0.1:1430`, 터미널에도 `LOGICA debug visualizer`로 출력)로 넘어갑니다. 앱은 Tauri 창에서 그대로 실행되고, 앱 빌드가 끝나기 전에 열면 디버거가 뜰 때까지 기다렸다가 넘어갑니다. 디버거에서는 User Input → Request Refinement → Paper Orchestra → Section Selection → Paper Chat/Edit 실행과 원문 적용 tool을 추적합니다. Architecture는 실제 호출과 건너뛴 모듈, Flow Chart는 UI 모드·섹션 해시·수정안 적용·세션 요약의 조건 분기를 표시합니다. 각 노드의 Inspector에서 함수 호출, 입력·출력, 모델 프롬프트, 수정 tool 인자와 실제 적용 결과를 볼 수 있습니다. Paper Summary Module과 Session Summary Module은 각자의 조건에 따라 별도로 표시되며, 상단 버튼으로 현재 프로젝트의 논문 요약 YAML과 세션 요약 JSON을 확인할 수 있습니다. LLM Gateway는 호출 모델, 오류와 fallback을 표시하고 동일 이벤트를 터미널에도 기록합니다.
 
 - 이벤트는 웹뷰(`src/debug/trace.ts`)와 Rust(`src-tauri/src/ai.rs`)의 실제 실행에서 만들어지고, `src-tauri/src/debug_trace.rs`가 Server-Sent Events로 페이지에 보냅니다.
 - 중앙의 `Architecture`와 `Flow Chart` 버튼으로 모듈 구조·실행 상태와 조건별 처리 흐름을 전환합니다. Flow Chart는 최초 요약의 해시 일치 여부, 응답 경로, 답변 후 변경 섹션 재요약과 세션 요약 조건을 마름모와 Yes/No로 표시합니다. 모듈을 클릭하면 선택한 실행의 Inspector가 열리고, 저장 파일 노드를 클릭하면 해당 요약 파일 조회 창이 열립니다.

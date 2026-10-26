@@ -1,5 +1,5 @@
 /**
- * The paper as section units (L0): what the judge picks from and what the
+ * The paper as section units (L0): what source selection picks from and what the
  * Refine and Answer modules read, each unit word for word or as its summary.
  *
  *   abstract  title block and abstract, read word for word in every turn

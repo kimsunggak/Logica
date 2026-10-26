@@ -1,5 +1,5 @@
 /**
- * What a turn reads of the paper. The judge picks the sections a message
+ * What a turn reads of the paper. Source selection picks the sections a message
  * needs word for word from the paper map; the others are read as their
  * summaries from the paper report.
  *
@@ -46,7 +46,7 @@ export interface Scope {
   chars: number;
 }
 
-/** The sections the judge picks from, or nothing when the paper has no sections. */
+/** The sections source selection picks from, or nothing when the paper has no sections. */
 export function paperMap(paper: Paper): MapEntry[] | undefined {
   if (!paper.units?.length) return undefined;
   return paper.units.map((u) => {

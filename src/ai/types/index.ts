@@ -76,7 +76,7 @@ export interface SourceRange {
   text: string;
 }
 
-/** A section of the paper map: what the judge sees of it. */
+/** A section of the paper map: what routing and source selection see of it. */
 export interface MapEntry {
   key: string;
   title: string;
@@ -90,7 +90,7 @@ export interface MapEntry {
   always?: boolean;
 }
 
-/** A section as the Refine and Answer modules read it: word for word, as its summary, or left out. */
+/** A section as the Chat and Edit modules read it: word for word, as its summary, or left out. */
 export type ViewSection = { key: string; title: string; depth: number } & (
   | { content: "full"; sources: SourceRange[] }
   | { content: "summary"; summary: string }
@@ -131,7 +131,7 @@ export interface AIRequest {
   omittedFiles?: string[];
   /** The paper section by section (Chat and Edit), in place of `projectFiles`. */
   paperView?: PaperView;
-  /** The sections the judge picks from, with their summaries (Auto Router and section selection). */
+  /** The sections routing and source selection read, with their summaries (Auto Router and section selection). */
   paperMap?: MapEntry[];
   /** The answer may ask for sections it has only as summaries (answer only). */
   mayAskForSections?: boolean;

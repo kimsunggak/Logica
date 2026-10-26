@@ -1,14 +1,8 @@
 /**
- * Chat about the current paper.
- *
- * This store holds the conversation and its session summary; each question
- * is run by the Paper Orchestra (`./orchestrator.ts`), which decides
- * whether to reply directly, answer, or refine the question first, and
- * reports every step to the localhost runtime debugger in development. After
- * a turn the Session Summary Module (`./session/summarizer.ts`) folds older turns
- * into the summary, and after a turn that read the paper the Paper Summary Module
- * (`./paper/sectionSummarizer.ts`) summarizes the sections the paper
- * report has no summary for, both in the background.
+ * Conversation state, frozen UI modes, queued paper edit tool calls and saved sessions.
+ * Paper Orchestra runs common refinement, routing, source selection and Chat/Edit.
+ * Session and paper summaries run independently in the background; accepted source
+ * edits use the editor's normal save and undo workflow and refresh paper summaries.
  */
 import { create } from "zustand";
 import { AIError } from "../ai/errors";

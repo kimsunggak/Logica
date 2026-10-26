@@ -252,7 +252,7 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
       <span><i style="border-color:var(--ink-2);background:var(--soft);border-radius:999px"></i>디버깅 모듈 (결과 기록만 함)</span>
     </div>
     <div class="legend" id="flowchartLegend" hidden>
-      <span>마름모: 코드의 조건 검사 · Yes / No: 분기 · 점선: 답변 후 백그라운드 처리</span>
+      <span>마름모: 조건·모드 분기 · Yes / No: 검사 결과 · 점선: 요약 처리·사용자 적용 이벤트</span>
       <span>전체 흐름 설명 · 드래그로 이동 · 맞춤으로 전체 보기 · 모듈 클릭 시 선택한 실행의 데이터 확인</span>
     </div>
   </section>
@@ -326,18 +326,20 @@ const MODULES = {
   user:         { title: "👤 User Input" },
   orchestrator: { title: "Paper Orchestra" },
   reply:        { title: "Reply Module" },
-  refine:       { title: "Refine Module" },
-  answer:       { title: "Answer Module" },
+  refine:       { title: "Request Refinement Module" },
+  selection:    { title: "Section Selection" },
+  edit:         { title: "Paper Edit Module" },
+  answer:       { title: "Paper Chat Module" },
   final:        { title: "💬 Final Answer", debug: true },
   llm:          { title: "LLM Gateway" },
   summary:      { title: "Session Summary Module" },
   sections:     { title: "Paper Summary Module" },
 };
 // The modules of a turn; a turn runs through some of them (its route).
-const CHAIN = ["user", "orchestrator", "reply", "answer", "refine", "final"];
+const CHAIN = ["user", "refine", "orchestrator", "selection", "answer", "edit", "final"];
 // Top-level span of each module: its output is what the module hands on.
-const MAIN_FN = { user: "receiveUserInput", orchestrator: "runOrchestrator", reply: "runReplyModule", refine: "runRefineModule", answer: "runAnswerModule", final: "showFinalAnswer", summary: "runSessionSummaryModule", sections: "runPaperSummaryModule" };
-const ROUTE_LABEL = { reply: "A reply_directly", answer: "B answer_question", refine: "C refine_question", clarify: "C refine_question → 되묻기" };
+const MAIN_FN = { selection: "runSectionSelection", edit: "runPaperEditModule", user: "receiveUserInput", orchestrator: "runOrchestrator", reply: "runReplyModule", refine: "runRefineModule", answer: "runAnswerModule", final: "showFinalAnswer", summary: "runSessionSummaryModule", sections: "runPaperSummaryModule" };
+const ROUTE_LABEL = { chat: "Chat → 질의응답", edit: "Edit → 논문 수정", clarify: "의도 확인 · 되묻기", reply: "이전 Reply 경로", answer: "이전 Answer 경로", refine: "이전 Refine 경로" };
 const PREVIEW = 1500;
 
 let traces = new Map();   // trace_id -> trace
@@ -401,13 +403,19 @@ function routeOf(t) {
   const orch = t && mainSpan(t, "orchestrator");
   const route = orch && orch.output && orch.output.route;
   if (!route) return null;
-  const refine = mainSpan(t, "refine");
-  const clarify = Boolean(refine && refine.output && refine.output.kind === "clarify");
-  const path = route === "reply" ? ["user", "orchestrator", "reply", "final"]
-    : route === "answer" ? ["user", "orchestrator", "answer", "final"]
-    : clarify ? ["user", "orchestrator", "refine", "final"] : ["user", "orchestrator", "refine", "answer", "final"];
-  return { route, clarify, path, reason: orch.output.reason, reasonIssue: orch.output.reason_issue };
+  const selection = mainSpan(t, "selection");
+  const final = mainSpan(t, "final");
+  const clarify = route === "clarify" || Boolean(selection && selection.output && selection.output.clarify) || Boolean(final && final.output && final.output.outcome === "clarify");
+  let path;
+  if (route === "chat" || route === "edit") {
+    path = ["user", "refine", "orchestrator", "selection"];
+    if (!(selection && selection.output && selection.output.clarify)) path.push(route === "edit" ? "edit" : "answer");
+    path.push("final");
+  } else if (route === "clarify") path = ["user", "refine", "orchestrator", "final"];
+  else path = ["user", "orchestrator", route === "reply" ? "reply" : "answer", "final"];
+  return { route, clarify, path, reason: orch.output.reason, mode: orch.input && orch.input.ui_mode };
 }
+
 /** Model calls: a failed attempt that Claude took over does not make the call fail. */
 function llmStatus(t) {
   const attempts = spansOf(t, "llm").filter((s) => s.fn === "aiService.generate");
@@ -554,7 +562,7 @@ function nodeLines(t, module) {
   }
   // What the module reads of the paper: the whole paper, or sections word for word (the abstract
   // always) and the rest as summaries; and the sections an answer asked for before answering.
-  const views = (module === "refine" || module === "answer") ? fns.filter((s) => s.fn === "paperView" && s.output) : [];
+  const views = (module === "edit" || module === "answer") ? fns.filter((s) => s.fn === "paperView" && s.output) : [];
   const asked = fns.find((s) => s.fn === "askForSections");
   if (asked) lines.unshift({ status: "route", text: `추가 요청 ${keyList(asked.input || [])} → 재호출` });
   if (views.length) {
@@ -581,10 +589,30 @@ function nodeLines(t, module) {
     const reads = `${covered ? `요약 턴 1~${covered}` : "요약 없음"} + 원문 ${turns.length ? `턴 ${turns.join(", ")}` : "없음"}`;
     lines.unshift({ status: history.clipped ? "error" : "route", text: reads + (history.clipped ? `  (${history.clipped.length}개 메시지 잘림)` : "") });
   }
+  if (module === "selection" && main && main.output) {
+    const pick = main.output;
+    if (pick.clarify) lines.unshift({ status: "route", text: "대상 불명확 → 되묻기" });
+    else {
+      lines.unshift({ status: "route", text: "참고 원문: " + (keyList(pick.reference || []) || "없음") });
+      if (pick.edit && pick.edit.length) lines.unshift({ status: "route", text: "수정 대상: " + keyList(pick.edit) });
+    }
+  }
+  if (module === "edit") {
+    const queued = fns.find((s) => s.fn === "queuePaperEdits");
+    const applied = fns.filter((s) => s.fn === "apply_paper_edits");
+    if (queued && queued.output) {
+      const count = applied.reduce((n, call) => n + (call.output && call.output.applied || 0), 0);
+      lines.unshift({ status: "route", text: "수정안 " + (queued.output.edits || []).length + "개 · " + (count ? "적용 " + count + "개" : "Diff 검토 대기") });
+    }
+    if (applied.length) {
+      const last = applied.at(-1);
+      lines.unshift({ status: last.status, text: last.output && last.output.applied ? "원문 적용 " + last.output.applied + "개" : last.error ? "원문 적용 실패" : "원문 검증·적용 중" });
+    }
+  }
   const r = module === "orchestrator" && routeOf(t);
   if (r) {
     if (r.reasonIssue) lines.unshift({ status: "error", text: r.reasonIssue === "arguments_unreadable" ? "⚠ 툴 인자 파싱 실패 (reason 없음)" : "⚠ reason 비어 있음" });
-    lines.unshift({ status: "route", text: "갈래 " + ROUTE_LABEL[r.clarify ? "clarify" : r.route] });
+    lines.unshift({ status: "route", text: (r.mode === "auto" ? "Auto 판단: " : "UI 고정: ") + ROUTE_LABEL[r.route] });
   }
   return lines;
 }
@@ -599,7 +627,7 @@ function nodeSvg(t, module, x, y, w, h) {
   const status = t ? moduleStatus(t, module) : "waiting";
   const dur = t ? moduleDuration(t, module) : null;
   // Summary module names need the title row; put status and duration below it.
-  const summaryHeader = module === "summary" || module === "sections";
+  const summaryHeader = module === "summary" || module === "sections" || module === "refine";
   const headerExtra = summaryHeader ? 16 : 0;
   const max = Math.floor((h - 40 - headerExtra) / 14);
   const lines = nodeLines(t, module).slice(0, max).map((l, i) =>
@@ -678,24 +706,13 @@ function renderSummaryGraph(t) {
 /** Fixed module positions: paper summaries supply the judge, and updates loop back after an answer. */
 function renderGraph(t) {
   if (isSummary(t)) return renderSummaryGraph(t);
-  const W = 280, COL = { reply: 20, answer: 360, refine: 700 };
-  const Y = { user: 10, orchestrator: 176, branch: 374, final: 578 };
-  const H = { user: 84, orchestrator: 140, branch: 144, final: 76, summary: 132, sections: 146 };
-  const sectionsRuns = t ? spansOf(t, "sections").filter((s) => s.fn === MAIN_FN.sections) : [];
-  const orchestratorRun = t && mainSpan(t, "orchestrator");
-  const updating = sectionsRuns.some((s) => orchestratorRun && s.start > orchestratorRun.start);
+  const W = 280;
   const at = {
-    user: [COL.answer, Y.user, H.user],
-    orchestrator: [COL.answer, Y.orchestrator, H.orchestrator],
-    reply: [COL.reply, Y.branch, H.branch],
-    answer: [COL.answer, Y.branch, H.branch],
-    refine: [COL.refine, Y.branch, H.branch],
-    final: [COL.answer, Y.final, H.final],
-    summary: [COL.refine, Y.final, H.summary],
-    sections: [COL.reply, Y.user, H.sections],
+    user: [360, 10, 84], refine: [360, 160, 128], orchestrator: [360, 350, 136],
+    selection: [360, 550, 150], answer: [20, 760, 154], edit: [700, 760, 154],
+    final: [360, 1000, 90], summary: [700, 990, 132], sections: [20, 10, 146],
   };
   const r = routeOf(t);
-  // An edge is on the turn's path when the route goes straight from one module to the other.
   const cls = (from, to) => {
     if (!r) return edgeClass(t, from, to);
     const i = r.path.indexOf(from);
@@ -704,43 +721,39 @@ function renderGraph(t) {
   const mid = (m) => at[m][0] + W / 2;
   const top = (m) => at[m][1];
   const bottom = (m) => at[m][1] + at[m][2];
-  const oBottom = bottom("orchestrator"), bTop = top("answer"), bBottom = bottom("answer"), fTop = top("final");
+  const sectionsRuns = t ? spansOf(t, "sections").filter((s) => s.fn === MAIN_FN.sections) : [];
+  const orch = t && mainSpan(t, "orchestrator");
+  const updated = sectionsRuns.some((s) => orch && s.start > orch.start);
+  const writeClass = !t ? "" : sectionsRuns.length ? moduleStatus(t, "sections") === "running" ? "active" : "done" : "skip";
+  const map = orch && orch.input && orch.input.paper_map;
+  const readClass = !t ? "" : map && map.summarized ? "done" : "skip";
   const edges = [
-    edgeSvg(cls("user", "orchestrator"), `M${mid("user")} ${bottom("user")} V${top("orchestrator") - 2}`, "question", mid("user") + 10, (bottom("user") + top("orchestrator")) / 2 + 4),
-    edgeSvg(cls("orchestrator", "reply"), `M${mid("orchestrator") - 70} ${oBottom} C${mid("orchestrator") - 70} ${oBottom + 40}, ${mid("reply")} ${bTop - 44}, ${mid("reply")} ${bTop - 2}`, "A reply_directly", mid("reply") + 20, oBottom + 34),
-    edgeSvg(cls("orchestrator", "answer"), `M${mid("orchestrator")} ${oBottom} V${bTop - 2}`, "B answer_question", mid("answer") + 10, oBottom + 44),
-    edgeSvg(cls("orchestrator", "refine"), `M${mid("orchestrator") + 70} ${oBottom} C${mid("orchestrator") + 70} ${oBottom + 40}, ${mid("refine")} ${bTop - 44}, ${mid("refine")} ${bTop - 2}`, "C refine_question", mid("refine") - 70, oBottom + 34),
-    edgeSvg(cls("refine", "answer"), `M${COL.refine} ${bTop + H.branch / 2} H${COL.answer + W + 2}`),
-    // The gap between the two is narrow; the label goes on two lines above the arrow.
-    `<text class="elabel" x="${COL.answer + W + 20}" y="${bTop + H.branch / 2 - 22}" text-anchor="middle">정제된</text>`,
-    `<text class="elabel" x="${COL.answer + W + 20}" y="${bTop + H.branch / 2 - 9}" text-anchor="middle">질문</text>`,
-    edgeSvg(cls("reply", "final"), `M${mid("reply")} ${bBottom} C${mid("reply")} ${bBottom + 44}, ${mid("final") - 60} ${fTop - 40}, ${mid("final") - 60} ${fTop - 2}`),
-    edgeSvg(cls("answer", "final"), `M${mid("answer")} ${bBottom} V${fTop - 2}`, "answer (streamed)", mid("answer") + 10, (bBottom + fTop) / 2 + 4),
-    edgeSvg(cls("refine", "final"), `M${mid("refine")} ${bBottom} C${mid("refine")} ${bBottom + 44}, ${mid("final") + 60} ${fTop - 40}, ${mid("final") + 60} ${fTop - 2}`, "되묻기", mid("refine") - 60, bBottom + 22),
+    edgeSvg(cls("user", "refine"), "M500 94 V158", "원래 요청 · UI Mode", 510, 125),
+    edgeSvg(cls("refine", "orchestrator"), "M500 288 V348", "정제 요청 + 원래 요청", 510, 322),
+    edgeSvg(cls("orchestrator", "selection"), "M500 486 V548", "Chat/Edit 경로 확정", 510, 522),
+    edgeSvg(cls("selection", "answer"), "M430 700 V728 H160 V758", "Chat", 220, 720),
+    edgeSvg(cls("selection", "edit"), "M570 700 V728 H840 V758", "Edit · 대상/참고 분리", 730, 720),
+    edgeSvg(cls("answer", "final"), "M160 914 V960 H430 V998", "질의응답", 170, 949),
+    edgeSvg(cls("edit", "final"), "M840 914 V960 H570 V998", "수정안 · Diff", 850, 949),
+    edgeSvg(cls("orchestrator", "final"), "M640 418 H674 V968 H610 V998", "의도 모호: 되묻기", 690, 500),
+    edgeSvg(cls("selection", "final"), "M360 625 H328 V968 H390 V998", "대상 모호", 310, 746, false, "end"),
+    edgeSvg(writeClass, "M160 156 V178", "저장", 174, 171),
+    edgeSvg(readClass, "M160 260 V418 H358", "논문 섹션 요약", 170, 342),
+    edgeSvg(readClass, "M300 220 H326 V625 H358", "선택용 지도", 318, 535, false, "end"),
+    edgeSvg("", "M700 224 H642", "대화", 670, 213, true, "middle"),
+    edgeSvg(t && spansOf(t, "summary").length ? edgeClass(t, "final", "summary") : t ? "skip" : "", "M640 1045 H698", "조건부 요약", 670, 1033, true, "middle"),
+    edgeSvg(updated ? "done" : t ? "skip" : "", "M360 1075 H8 V82 H18", "적용 후 · 변경 섹션 요약", 165, 1110, true, "middle"),
+    edgeSvg(t && spansOf(t, "summary").length ? "done" : t ? "skip" : "", "M980 1080 H994 V224 H982", "", 0, 0, true),
   ];
-  // Session summarization and paper updates are independent background work.
-  const sy = fTop + H.final / 2;
-  edges.push(
-    edgeSvg(t && spansOf(t, "summary").length ? edgeClass(t, "final", "summary") : t ? "skip" : "", `M${COL.answer + W} ${sy} H${COL.refine - 2}`, "요약 조건", COL.answer + W + 30, sy - 12, true, "middle"),
-  );
-  const fileY = top("orchestrator") + H.orchestrator / 2;
-  const paperStatus = t ? moduleStatus(t, "sections") : "waiting";
-  const writeClass = !t ? "" : sectionsRuns.length ? paperStatus === "running" ? "active" : paperStatus === "completed" ? "done" : "skip" : "skip";
-  const map = orchestratorRun && orchestratorRun.input && orchestratorRun.input.paper_map;
-  const readClass = !t ? "" : map && map.summarized ? moduleStatus(t, "orchestrator") === "running" ? "active" : "done" : "skip";
-  edges.push(
-    edgeSvg(writeClass, `M${mid("sections")} ${bottom("sections")} V${fileY - 44}`, "생성·갱신", mid("sections") + 10, fileY - 64),
-    edgeSvg(readClass, `M${COL.reply + W} ${fileY} H${COL.answer - 2}`, "논문 지도", COL.reply + W + 30, fileY - 12, false, "middle"),
-    edgeSvg(updating ? edgeClass(t, "final", "sections") : t ? "skip" : "", `M${COL.answer} ${sy} H8 V${top("sections") + H.sections / 2} H${COL.reply - 2}`, "변경·누락 시 갱신", mid("sections"), sy - 12, true),
-  );
-  const rowBottom = Math.max(bottom("final"), bottom("summary"));
-  const bar = gatewaySvg(t, 20, rowBottom + 24, 960);
-  graphSize(1000, rowBottom + 24 + bar.h + 8);
+  const bar = gatewaySvg(t, 20, 1150, 960);
+  graphSize(1000, 1150 + bar.h + 12);
   $("graph").innerHTML = [
-    MARKERS,
-    ...edges,
-    flowBox("architecture-paper-summary", "document", mid("sections"), fileY, W, 84, ["paper-summary.yaml", "논문 요약 저장 · 재사용"], "", "paperSummary"),
+    MARKERS, ...edges,
+    flowBox("architecture-paper-summary", "document", 160, 220, W, 80, ["paper-summary.yaml", "논문 요약 저장 · 재사용"], "", "paperSummary"),
+    flowBox("architecture-session-history", "document", 840, 224, W, 80, ["Session History", "세션 요약 + 최근 대화"], "", "sessionSummary"),
     ...[...CHAIN, "summary", "sections"].map((m) => nodeSvg(t, m, at[m][0], at[m][1], W, at[m][2])),
+    '<text class="elabel" x="840" y="932" text-anchor="middle">apply_paper_edits: 적용 버튼으로 실행</text>',
+    '<text class="elabel" x="500" y="1134" text-anchor="middle">Paper Orchestra: UI 고정 경로 / Auto만 intent LLM 호출</text>',
     bar.svg,
   ].join("");
 }
@@ -766,74 +779,91 @@ function flowEdge(path, label = "", x = 0, y = 0, background = false) {
 }
 
 function renderFlowChart() {
-  graphSize(1440, 2100);
+  graphSize(1800, 2800);
   const graph = $("graph");
   if (graph.dataset.diagram === "flowchart" && graph.dataset.flowSelection === selModule) return;
   graph.dataset.diagram = "flowchart";
   graph.dataset.flowSelection = selModule;
   graph.innerHTML = [
-    `<defs><marker id="flow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="var(--ink-2)"></path></marker></defs>`,
-    ...[[20, 410, "1 · 논문 요약 준비"], [445, 730, "2 · 질문 처리"], [1190, 865, "3 · 답변 후처리 · 두 분기는 독립적으로 실행"]].map(([y, h, title]) =>
-      `<rect class="flow-frame" x="30" y="${y}" width="1380" height="${h}" rx="16"></rect><text class="flow-heading" x="55" y="${y + 28}">${title}</text>`),
+    '<defs><marker id="flow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="var(--ink-2)"></path></marker></defs>',
+    ...[[20, 410, "1 · 논문 요약 준비"], [445, 1260, "2 · 공통 정제 → 모드별 경로 → 섹션 선택 → 실행"], [1730, 1020, "3 · 턴 종료 후 요약 / 사용자의 수정안 적용"]].map(([y, h, title]) =>
+      `<rect class="flow-frame" x="30" y="${y}" width="1740" height="${h}" rx="16"></rect><text class="flow-heading" x="55" y="${y + 28}">${title}</text>`),
+    flowEdge("M900 115 V155"),
+    flowEdge("M650 230 H455", "No", 550, 218),
+    flowEdge("M300 280 V330"),
+    flowEdge("M900 305 V330", "Yes", 933, 321),
+    flowEdge("M300 400 V435 H900 V475"),
+    flowEdge("M900 400 V475"),
+    flowEdge("M1320 520 H1080", "대화 정보", 1200, 508),
+    flowEdge("M900 565 V620"),
+    flowEdge("M700 690 H300 V800", "Chat", 500, 678),
+    flowEdge("M900 760 V800", "Edit", 930, 785),
+    flowEdge("M1100 690 H1500 V795", "Auto", 1300, 678),
+    flowEdge("M300 880 V960 H830 V1065"),
+    flowEdge("M900 880 V1065"),
+    flowEdge("M1500 885 V940"),
+    flowEdge("M1335 1000 H1160 V1120 H1100", "Yes · Chat/Edit", 1235, 988),
+    flowEdge("M1500 1060 V1420", "No", 1530, 1105),
+    flowEdge("M900 1175 V1220"),
+    flowEdge("M1100 1290 H1190 V1460 H1320", "No", 1140, 1278),
+    flowEdge("M900 1360 V1385 H300 V1410", "Yes · Chat", 530, 1373),
+    flowEdge("M900 1360 V1410", "Yes · Edit", 955, 1390),
+    flowEdge("M300 1510 V1570 H830 V1610"),
+    flowEdge("M900 1510 V1610"),
+    flowEdge("M1500 1500 V1570 H970 V1610"),
+    flowEdge("M830 1690 V1770 H300 V1825", "턴 종료 후 해시 확인", 495, 1758, true),
+    flowEdge("M900 1690 V1825", "Edit 제안", 950, 1805, true),
+    flowEdge("M970 1690 V1770 H1500 V1825", "세션 요약 확인", 1340, 1758, true),
+    flowEdge("M300 1975 V2045", "Yes", 335, 2010, true),
+    flowEdge("M50 1900 H25 V2670 H200", "No", 72, 1888, true),
+    flowEdge("M300 2115 V2180", "", 0, 0, true),
+    flowEdge("M300 2280 V2330", "", 0, 0, true),
+    flowEdge("M300 2410 V2643", "", 0, 0, true),
+    flowEdge("M900 1975 V2030", "Yes", 934, 2010),
+    flowEdge("M900 2190 V2300", "Yes", 934, 2240),
+    flowEdge("M1110 2110 H1175 V2610 H1070", "No", 1145, 2098),
+    flowEdge("M1090 1900 H1160 V2610 H1070", "No", 1125, 1888),
+    flowEdge("M720 2350 H640 V1900 H552", "적용 성공 → 해시 재확인", 640, 2280, true),
+    flowEdge("M900 2400 V2460"),
+    flowEdge("M1500 1975 V2075", "Yes", 1535, 2010, true),
+    flowEdge("M1750 1900 H1775 V2670 H1600", "No", 1725, 1888, true),
+    flowEdge("M1500 2185 V2260", "", 0, 0, true),
+    flowEdge("M1500 2340 V2643", "", 0, 0, true),
 
-    flowEdge("M720 115 V155"),
-    flowEdge("M470 230 H385", "No", 427, 217),
-    flowEdge("M230 280 V330"),
-    flowEdge("M720 305 V330", "Yes", 752, 323),
-    flowEdge("M230 400 V435 H720 V465"),
-    flowEdge("M720 400 V465"),
-    flowEdge("M980 510 H900", "대화 정보", 940, 496),
-    flowEdge("M720 555 V590"),
-    flowEdge("M540 660 H380", "잡담", 460, 647),
-    flowEdge("M900 660 H995", "모호한 질문", 947, 647),
-    flowEdge("M720 730 V920", "명확한 질문", 780, 800),
-    flowEdge("M1160 700 V765"),
-    flowEdge("M1010 825 H950 V970 H900", "Yes", 975, 812),
-    flowEdge("M1160 885 V930", "No", 1190, 911),
-    flowEdge("M230 700 V1130 H540"),
-    flowEdge("M720 1020 V1090"),
-    flowEdge("M1160 1010 V1130 H900"),
-
-    flowEdge("M650 1170 V1220 H350 V1250", "논문 요약 확인", 440, 1207, true),
-    flowEdge("M790 1170 V1220 H1090 V1245", "세션 요약 확인", 1010, 1207, true),
-    flowEdge("M350 1360 V1415", "Yes", 383, 1390, true),
-    flowEdge("M180 1305 H70 V2015 H250", "No", 145, 1292, true),
-    flowEdge("M350 1565 V1595", "Yes", 383, 1586, true),
-    flowEdge("M600 1490 H650 V2015 H450", "No", 624, 1477, true),
-    flowEdge("M350 1655 V1700", "", 0, 0, true),
-    flowEdge("M350 1800 V1840", "", 0, 0, true),
-    flowEdge("M350 1910 V1988", "", 0, 0, true),
-    flowEdge("M1090 1395 V1480", "Yes", 1124, 1420, true),
-    flowEdge("M1340 1320 H1380 V2015 H1190", "No", 1360, 1307, true),
-    flowEdge("M1090 1590 V1645", "", 0, 0, true),
-    flowEdge("M1090 1725 V1988", "", 0, 0, true),
-
-    flowBox("user", "terminal", 720, 85, 260, 60, ["User Input", "사용자 질문"], "user"),
-    flowBox("initial-summary-check", "decision", 720, 230, 500, 150, ["현재 섹션 해시와 일치하는", "저장 요약이 하나라도 있는가?"]),
-    flowBox("paper-initial", "module", 230, 230, 310, 100, ["Paper Summary Module", "최초 논문 요약 생성"], "sections"),
-    flowBox("paper-initial-save", "document", 230, 365, 340, 70, ["paper-summary.yaml", "논문 요약 저장"], "", "paperSummary"),
-    flowBox("paper-reuse", "document", 720, 365, 340, 70, ["저장된 논문 요약 재사용", "LLM 호출 없음"], "", "paperSummary"),
-    flowBox("conversation-data", "document", 1160, 510, 360, 80, ["저장된 세션 요약 + 최근 대화", "현재 질문과 함께 전달"], "", "sessionSummary"),
-    flowBox("orchestrator", "module", 720, 510, 360, 90, ["Paper Orchestra", "논문 지도 · 대화 정보로 판단"], "orchestrator"),
-    flowBox("route", "decision", 720, 660, 360, 140, ["어떤 처리 경로인가?", "오케스트레이터의 선택"]),
-    flowBox("reply", "module", 230, 660, 300, 80, ["Reply Module", "잡담 응답"], "reply"),
-    flowBox("refine", "module", 1160, 660, 330, 80, ["Refine Module", "질문 구체화"], "refine"),
-    flowBox("refined-check", "decision", 1160, 825, 300, 120, ["질문이", "구체화됐는가?"]),
-    flowBox("clarify", "process", 1160, 970, 330, 80, ["사용자에게 되묻기"]),
-    flowBox("answer", "module", 720, 970, 360, 100, ["Answer Module", "원문·요약을 조합해", "질문에 답변"], "answer"),
-    flowBox("final", "terminal", 720, 1130, 360, 80, ["Final Answer", "답변 완료 · 결과 기록"], "final"),
-    flowBox("paper-route-check", "decision", 350, 1305, 340, 110, ["논문 관련", "대화인가?"]),
-    flowBox("changed-hash-check", "decision", 350, 1490, 500, 150, ["현재 섹션 중 저장 요약과", "해시가 일치하지 않는", "섹션이 있는가?"]),
-    flowBox("changed-sections", "process", 350, 1625, 360, 60, ["변경·추가·누락된 섹션 식별"]),
-    flowBox("paper-update", "module", 350, 1750, 380, 100, ["Paper Summary Module", "해당 섹션만 재요약"], "sections"),
-    flowBox("paper-update-save", "document", 350, 1875, 360, 70, ["paper-summary.yaml 갱신", "다음 질문부터 재사용"], "", "paperSummary"),
-    flowBox("paper-end", "terminal", 350, 2015, 200, 54, ["논문 후처리 종료"]),
-    flowBox("session-fold-check", "decision", 1090, 1320, 500, 150, ["미요약 대화가 10턴 이상", "또는 40,000자 초과인가?"]),
-    flowBox("session-summary", "module", 1090, 1535, 390, 110, ["Session Summary Module", "최근 4턴을 남기고", "한 번에 최대 6턴씩 요약"], "summary"),
-    flowBox("session-save", "document", 1090, 1685, 360, 80, ["세션 JSON의 summary 갱신", "다음 질문부터 재사용"], "", "sessionSummary"),
-    flowBox("session-end", "terminal", 1090, 2015, 200, 54, ["세션 후처리 종료"]),
-    `<text class="flow-note" x="1055" y="1438" text-anchor="end">질문·답변 각각 최대 4,000자로 계산</text>`,
-    `<text class="flow-note" x="720" y="2080" text-anchor="middle">이 화면은 전체 분기 설명입니다. 실제 실행 여부와 오류는 Architecture에서 확인합니다.</text>`,
+    flowBox("user", "terminal", 900, 85, 280, 60, ["User Input + UI Mode"], "user"),
+    flowBox("initial-summary-check", "decision", 900, 230, 500, 150, ["현재 섹션 해시와 일치하는", "저장 요약이 하나라도 있는가?"]),
+    flowBox("paper-initial", "module", 300, 230, 310, 100, ["Paper Summary Module", "최초 논문 요약 생성"], "sections"),
+    flowBox("paper-initial-save", "document", 300, 365, 340, 70, ["paper-summary.yaml", "논문 요약 저장"], "", "paperSummary"),
+    flowBox("paper-reuse", "document", 900, 365, 340, 70, ["저장된 논문 요약 재사용", "LLM 호출 없음"], "", "paperSummary"),
+    flowBox("conversation-data", "document", 1500, 520, 360, 80, ["Session History", "저장된 세션 요약 + 최근 대화"], "", "sessionSummary"),
+    flowBox("refine", "module", 900, 520, 360, 90, ["Request Refinement Module", "문맥 복원 · 요청 문자열 출력"], "refine"),
+    flowBox("ui-mode", "decision", 900, 690, 400, 140, ["선택한 UI Mode는?"]),
+    flowBox("fixed-chat", "process", 300, 840, 300, 80, ["Chat 경로 확정", "코드로 지정 · intent LLM 없음"]),
+    flowBox("fixed-edit", "process", 900, 840, 300, 80, ["Edit 경로 확정", "코드로 지정 · intent LLM 없음"]),
+    flowBox("auto-router", "module", 1500, 840, 360, 90, ["Auto Router", "Chat / Edit 의도 판단"], "orchestrator"),
+    flowBox("auto-intent", "decision", 1500, 1000, 330, 120, ["Chat/Edit 의도가", "분명한가?"]),
+    flowBox("selection", "module", 900, 1120, 400, 110, ["Section Selection", "Chat: 원문이 필요한 섹션", "Edit: 수정 대상 + 참고 섹션"], "selection"),
+    flowBox("target-check", "decision", 900, 1290, 400, 140, ["필요한 대상과 요청이", "명확한가?"]),
+    flowBox("answer", "module", 300, 1460, 360, 100, ["Paper Chat Module", "선택한 원문 + 나머지 요약", "질의응답"], "answer"),
+    flowBox("edit", "module", 900, 1460, 360, 100, ["Paper Edit Module", "수정·참고 원문 + 논문 요약", "변경안을 tool 인자로 반환"], "edit"),
+    flowBox("clarify", "process", 1500, 1460, 360, 80, ["사용자에게 되묻기"]),
+    flowBox("final", "terminal", 900, 1650, 360, 80, ["Final Answer", "Chat 답변 / Edit 수정안 Diff"], "final"),
+    flowBox("changed-hash-check", "decision", 300, 1900, 500, 150, ["현재 섹션 중 저장 요약과", "해시가 일치하지 않는", "섹션이 있는가?"]),
+    flowBox("apply-check", "decision", 900, 1900, 380, 150, ["사용자가 수정안의", "적용 버튼을 눌렀는가?"]),
+    flowBox("session-fold-check", "decision", 1500, 1900, 500, 150, ["미요약 대화가 10턴 이상", "또는 40,000자 초과인가?"]),
+    flowBox("changed-sections", "process", 300, 2080, 360, 70, ["변경·추가·누락된 섹션 식별"]),
+    flowBox("paper-update", "module", 300, 2230, 380, 100, ["Paper Summary Module", "해당 섹션만 재요약"], "sections"),
+    flowBox("paper-update-save", "document", 300, 2370, 360, 80, ["paper-summary.yaml 갱신", "다음 요청부터 재사용"], "", "paperSummary"),
+    flowBox("apply-validate", "decision", 900, 2110, 420, 160, ["현재 원문이 유일하게 일치하고", "수정 구간이", "겹치지 않는가?"]),
+    flowBox("apply-tool", "module", 900, 2350, 360, 100, ["apply_paper_edits", "검증을 통과한 원문만 교체"], "edit"),
+    flowBox("applied", "terminal", 900, 2490, 300, 60, ["적용 완료"]),
+    flowBox("pending", "terminal", 900, 2610, 340, 60, ["대기 / 거절 / 원문 검증 실패"]),
+    flowBox("session-summary", "module", 1500, 2130, 390, 110, ["Session Summary Module", "최근 4턴을 남기고", "한 번에 최대 6턴씩 요약"], "summary"),
+    flowBox("session-save", "document", 1500, 2300, 360, 80, ["세션 JSON의 summary 갱신", "다음 요청부터 재사용"], "", "sessionSummary"),
+    flowBox("paper-end", "terminal", 300, 2670, 200, 54, ["논문 후처리 종료"]),
+    flowBox("session-end", "terminal", 1500, 2670, 200, 54, ["세션 후처리 종료"]),
+    '<text class="flow-note" x="1500" y="2230" text-anchor="middle">질문·답변 각각 최대 4,000자로 계산</text>',
+    '<text class="flow-note" x="900" y="2780" text-anchor="middle">턴 종료 후 요약과 수동 적용은 독립 경로입니다. 실제 호출·검증·적용 결과는 Architecture에서 확인합니다.</text>',
   ].join("");
 }
 
@@ -897,7 +927,7 @@ function renderInspector(t) {
     const callees = s.children.map((c) => t.spans.get(c)).filter(Boolean).map((c) => c.fn);
     const main = s.fn === MAIN_FN[selModule];
     const r = routeOf(t);
-    const path = r ? r.path : ["user", "orchestrator"];
+    const path = r ? r.path : ["user", "refine", "orchestrator"];
     const after = path.includes(selModule) ? path[path.indexOf(selModule) + 1] : null;
     const next = main && after && MODULES[after].title;
     const data = s.data.map((d, i) => `<div class="blk"><div class="lbl">중간값: ${esc(d.label)} <span class="dim">${clock(d.ts)}</span></div>${valueHtml(s.id + ":d" + i, d.value, `${s.fn}: ${d.label}`)}</div>`).join("");
