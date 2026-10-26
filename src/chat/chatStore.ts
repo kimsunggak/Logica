@@ -15,7 +15,8 @@ import { AIError } from "../ai/errors";
 import type { RunControl } from "../ai/gateway";
 import { CHAT_MODELS } from "../ai/models/modelConfig";
 import { aiService, newRequestId } from "../ai/service";
-import { lineOf, locateEdit, type ProposedEdit } from "../ai/agent/edits";
+import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
+import { preparePaperEdits, validEditPath } from "./paper/editTool";
 import { deleteSession, listSessions, loadSession, newSessionId, saveSession, SESSION_VERSION, type SessionSummary } from "./chatHistory";
 import { runChatTurn, type Outcome, type Paper, type Route, type Stage, type Turn } from "./orchestrator";
 import { emptyReport, hasSummaries, loadReport, saveReport, summariesFor, unitsToSummarize, withSummaries, type PaperReport } from "./paper/report";
@@ -523,23 +524,77 @@ export function splitBlocks(content: string): Block[] {
 
 function setEditState(messageId: string, index: number, state: EditState) {
   useChat.setState((s) => ({
-    messages: s.messages.map((m) => (m.id === messageId ? { ...m, editStates: { ...m.editStates, [index]: state } } : m)),
+    messages: s.messages.map((m) => (m.id === messageId && !m.editStates?.[index] ? { ...m, editStates: { ...m.editStates, [index]: state } } : m)),
   }));
 }
 
-/** Apply one proposed edit to its file (opened in the background if needed). */
-async function applyEdit(edit: ProposedEdit): Promise<{ path: string; line: number } | null> {
-  if (!editorSession.has(edit.path) && !(await openFile(edit.path, { activate: false }))) return null;
-  const text = editorSession.textOf(edit.path);
-  const at = text === undefined ? null : locateEdit(text, edit.original);
-  if (!text || !at) return null;
-  editorSession.applyEdit(edit.path, at.from, at.to, edit.revised);
-  return { path: edit.path, line: lineOf(text, at.from) };
+/** Only proposals actually saved on a completed Edit response may execute. */
+function messageEdits(message: ChatMessage): ProposedEdit[] {
+  if (message.status !== "done" || message.truncated || message.mode === "chat" || message.route === "chat") return [];
+  if (message.mode) return message.route === "edit" && message.editToolCallId ? message.edits ?? [] : [];
+  // Existing version 1/2 sessions used fenced edit blocks.
+  return splitBlocks(message.content).flatMap((block) => {
+    const edit = block.kind === "code" && block.lang === "edit" ? parseEditBody(block.meta ?? "", block.text) : null;
+    return edit ? [edit] : [];
+  });
+}
+
+/** Execute the accepted apply_paper_edits arguments in the current project. */
+async function executePaperEditTool(messageId: string, entries: { index: number; edit: ProposedEdit }[]): Promise<{ path: string; line: number } | null> {
+  const before = useChat.getState();
+  const project = useProject.getState().root;
+  const message = before.messages.find((m) => m.id === messageId);
+  if (!project || before.root !== project || !message || !entries.length || new Set(entries.map((e) => e.index)).size !== entries.length) return null;
+  const current = () => useChat.getState().root === project && useProject.getState().root === project && useChat.getState().sessionId === before.sessionId;
+  const authorized = () => {
+    const latest = useChat.getState().messages.find((m) => m.id === messageId);
+    if (!latest) return false;
+    const saved = messageEdits(latest);
+    return entries.every(({ index, edit }) => {
+      const original = saved[index];
+      return !latest.editStates?.[index] && original && original.path === edit.path && original.original === edit.original && original.revised === edit.revised;
+    });
+  };
+  if (!authorized()) return null;
+  const span = startSpan(messageId, null, "edit", "apply_paper_edits", () => ({ call_id: message.editToolCallId ?? "legacy", edits: entries.map((e) => e.edit) }));
+  try {
+    const known = currentTexts();
+    for (const { edit } of entries) {
+      if (!validEditPath(edit.path) || !known.has(edit.path) || !current()) throw new Error(t("agent.failed"));
+      if (!editorSession.has(edit.path) && !(await openFile(edit.path, { activate: false }))) throw new Error(t("agent.failed"));
+    }
+    if (!current() || !authorized()) {
+      endSpan(span, "edit", { applied: 0, reason: "project, session or pending proposal changed" });
+      return null;
+    }
+    const texts = new Map(entries.map(({ edit }) => [edit.path, editorSession.textOf(edit.path) ?? ""]));
+    const edits = entries.map(({ edit }) => {
+      if (message.mode) return edit;
+      const text = texts.get(edit.path)!;
+      const at = locateEdit(text, edit.original);
+      return at ? { ...edit, original: text.slice(at.from, at.to) } : edit;
+    });
+    const replacements = preparePaperEdits(edits, texts);
+    step(messageId, span, "edit", "validatePaperEdits", { edits: entries.length }, { valid: !!replacements });
+    if (!replacements) throw new Error(t("agent.failed"));
+    const first = replacements[0];
+    const location = { path: first.path, line: lineOf(texts.get(first.path)!, first.from) };
+    // All files and anchors have passed validation. Offsets descend within each file.
+    for (const edit of replacements) editorSession.applyEdit(edit.path, edit.from, edit.to, edit.revised);
+    for (const { index } of entries) setEditState(messageId, index, "applied");
+    endSpan(span, "edit", { applied: entries.length, files: [...new Set(replacements.map((e) => e.path))] });
+    // Summarize actual source changes, including unsaved editor buffers.
+    scheduleSectionSummaries({ traceId: messageId, root: span });
+    return location;
+  } catch (err) {
+    failSpan(span, "edit", err);
+    if (current()) for (const { index } of entries) setEditState(messageId, index, "failed");
+    return null;
+  }
 }
 
 export async function applyChatEdit(messageId: string, index: number, edit: ProposedEdit) {
-  const done = await applyEdit(edit);
-  setEditState(messageId, index, done ? "applied" : "failed");
+  const done = await executePaperEditTool(messageId, [{ index, edit }]);
   if (done) await navigateTo(done.path, done.line);
 }
 
@@ -547,18 +602,10 @@ export function rejectChatEdit(messageId: string, index: number) {
   setEditState(messageId, index, "rejected");
 }
 
-/** Apply every edit of an answer that is still pending, in order. */
+/** Preflight the entire pending batch before applying its replacements. */
 export async function applyAllChatEdits(messageId: string, edits: { index: number; edit: ProposedEdit }[]) {
-  let applied = 0;
-  let failed = 0;
-  for (const { index, edit } of edits) {
-    const done = await applyEdit(edit);
-    setEditState(messageId, index, done ? "applied" : "failed");
-    if (done) applied++;
-    else failed++;
-  }
-  if (applied) notify("success", t("agent.appliedCount", { count: applied }));
-  if (failed) notify("error", t("agent.failedCount", { count: failed }));
+  const done = await executePaperEditTool(messageId, edits);
+  notify(done ? "success" : "error", t(done ? "agent.appliedCount" : "agent.failedCount", { count: edits.length }));
 }
 
 export function rejectAllChatEdits(messageId: string, indexes: number[]) {

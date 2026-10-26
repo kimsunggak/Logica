@@ -57,6 +57,7 @@ function MarkdownBlock(props: ChatMarkdownProps) {
 function EditCard({ messageId, index, edit, state, exact = false }: { messageId: string; index: number; edit: ProposedEdit; state?: EditState; exact?: boolean }) {
   const t = useT();
   const bibEntries = useProject((s) => s.bibEntries);
+  useProject((s) => s.doc); // Recheck diff anchors when the author's source changes.
   const issues = useMemo(
     () => validateRewrite(edit.original, edit.revised, { bibKeys: new Set(bibEntries.map((e) => e.key)) }),
     [edit, bibEntries],
