@@ -10,6 +10,8 @@ import { buildReplyPrompt } from "./reply";
 import { buildSectionSummaryPrompt } from "./sectionSummary";
 import { buildSummaryPrompt } from "./summary";
 import { buildInlineEditPrompt } from "./rewrite";
+import { buildSelectPrompt } from "./select";
+import { buildEditPrompt } from "./edit";
 
 export interface PromptPayload {
   system: string;
@@ -33,7 +35,9 @@ const BUILDERS: Record<AITask, (request: AIRequest) => PromptPayload> = {
   judge: buildJudgePrompt,
   reply: buildReplyPrompt,
   refine: buildRefinePrompt,
+  select: buildSelectPrompt,
   answer: buildAnswerPrompt,
+  edit: buildEditPrompt,
   summary: buildSummaryPrompt,
   sections: buildSectionSummaryPrompt,
 };

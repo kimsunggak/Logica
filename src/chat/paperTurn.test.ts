@@ -30,7 +30,7 @@ describe("reading the paper by sections, through the demo backend", () => {
     try {
       // The first question: the paper is summarized before the judge runs.
       await sendChatMessage("What does Table 1 report?");
-      expect(tasks()).toEqual(["sections", "judge", "answer"]);
+      expect(tasks()).toEqual(["sections", "refine", "judge", "select", "answer"]);
       const report = await loadReport(ROOT);
       expect(Object.keys(report.summaries)).toHaveLength(17);
       const first = generate.mock.calls.find(([, r]) => r.task === "answer")![1];
@@ -44,7 +44,7 @@ describe("reading the paper by sections, through the demo backend", () => {
 
       generate.mockClear();
       await sendChatMessage("Explain the Uncertainty Estimation section");
-      expect(tasks()).toEqual(["judge", "answer"]);
+      expect(tasks()).toEqual(["refine", "judge", "select", "answer"]);
       const answer = generate.mock.calls.find(([, r]) => r.task === "answer")![1];
       const read = Object.fromEntries(answer.paperView!.sections.map((s) => [s.key, s.content]));
       expect(read).toMatchObject({ abstract: "full", "3.2": "full", "3.3": "summary", "1": "summary" });
@@ -58,7 +58,7 @@ describe("reading the paper by sections, through the demo backend", () => {
       generate.mockClear();
       await sendChatMessage("What does Table 1 report?");
       // The edited section is summarized after the turn, in the background.
-      expect(tasks().filter((t) => t !== "sections")).toEqual(["judge", "answer"]);
+      expect(tasks().filter((t) => t !== "sections")).toEqual(["refine", "judge", "select", "answer"]);
       const edited = generate.mock.calls.find(([, r]) => r.task === "answer")![1];
       expect(Object.fromEntries(edited.paperView!.sections.map((s) => [s.key, s.content]))).toMatchObject({ "3.3": "full", "3.2": "summary" });
       await summaryIdle();

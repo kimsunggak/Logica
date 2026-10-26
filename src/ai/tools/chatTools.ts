@@ -1,57 +1,60 @@
-/**
- * Tools the Paper Orchestra's judge model calls, one per route. Each tool
- * is a module that makes one model call of its own; the judge never writes
- * text for the user and never sees the paper's text, only its map. With the
- * answer and refine routes it names the sections to read word for word.
- */
-import type { ToolDefinition } from "../types";
+/** Intent routing, source selection, and source editing are separate tools. */
+import type { ExecutionMode, ToolDefinition } from "../types";
 
-export const REPLY_DIRECTLY = "reply_directly";
-export const REFINE_QUESTION = "refine_question";
-export const ANSWER_QUESTION = "answer_question";
-/** The `sections` value that asks for the whole paper. */
 export const ALL_SECTIONS = "all";
+export const ROUTE_CHAT = "route_chat";
+export const ROUTE_EDIT = "route_edit";
+export const CLARIFY_REQUEST = "clarify_request";
+export const SELECT_CHAT_SECTIONS = "select_chat_sections";
+export const SELECT_EDIT_SECTIONS = "select_edit_sections";
+export const APPLY_PAPER_EDITS = "apply_paper_edits";
 
-const REASON = (why: string) => ({ type: "string", description: `${why} One sentence, in the language of the user's message.` });
+const reason = { type: "string", description: "One sentence explaining this choice, in the user's language." };
+const keys = (description: string) => ({ type: "array", items: { type: "string" }, description });
+const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 
-/** The reply route takes the reason for choosing it, shown in the runtime debugger. */
-function reason(why: string): Record<string, unknown> {
-  return { type: "object", properties: { reason: REASON(why) }, required: ["reason"], additionalProperties: false };
-}
+export const CLARIFY_TOOL: ToolDefinition = {
+  name: CLARIFY_REQUEST,
+  description: "Ask one concise question when the request, target, or desired change cannot be resolved from the conversation. Do not guess.",
+  parameters: object({ question: { type: "string", description: "The question to show the user, in their language." } }),
+};
 
-/** The paper routes also take the sections to read word for word. */
-function paperRoute(why: string): Record<string, unknown> {
-  return {
-    type: "object",
-    properties: {
-      reason: REASON(why),
-      sections: {
-        type: "array",
-        items: { type: "string" },
-        description: `Keys from <paper_map> of the sections to read word for word; the others are read as their summaries. ["${ALL_SECTIONS}"] for the whole paper. Empty when the summaries are enough, or when there is no map or no summary yet.`,
-      },
-    },
-    required: ["reason", "sections"],
-    additionalProperties: false,
-  };
-}
-
+/** Auto alone classifies intent. These tools do not select sections. */
 export const CHAT_TOOLS: ToolDefinition[] = [
-  {
-    name: REPLY_DIRECTLY,
-    description: "Let the Reply Module answer small talk, thanks, a greeting, or a message that is not about the paper or writing it. It does not read the paper.",
-    parameters: reason("Why the message is not a question or request about the paper."),
-  },
-  {
-    name: ANSWER_QUESTION,
-    description:
-      "Answer a clear question, or carry out a clear edit request, about the paper, from the sections you list word for word and the rest as summaries. Edits are proposed for the author to review.",
-    parameters: paperRoute("What the message points at and what it asks for, so that it can be answered as written without refining it first."),
-  },
-  {
-    name: REFINE_QUESTION,
-    description:
-      "Rewrite an abstract, vague or broad message about the paper into one clear question, with the sections you list word for word and the rest as summaries, and then answer that question.",
-    parameters: paperRoute("What is abstract, vague, broad or ambiguous about the message, so that it must be rewritten with the paper before answering."),
-  },
+  { name: ROUTE_CHAT, description: "Discuss, explain, evaluate or answer a question without changing the paper. Includes greetings and general guidance.", parameters: object({ reason }) },
+  { name: ROUTE_EDIT, description: "The user explicitly requests changes to their manuscript. A question about a possible change is discussion, not permission to edit.", parameters: object({ reason }) },
+  CLARIFY_TOOL,
 ];
+
+export function sectionTools(mode: ExecutionMode): ToolDefinition[] {
+  return [mode === "edit" ? {
+    name: SELECT_EDIT_SECTIONS,
+    description: "Select the sections to modify and the additional sections to read word for word as references. Use keys from paper_map.",
+    parameters: object({
+      reason,
+      edit_sections: keys('Sections to modify, including any affected subsections. Must not be empty. ["all"] means the whole paper.'),
+      reference_sections: keys('Additional sections needed word for word for terminology, facts or consistency. [] if unnecessary; ["all"] for all.'),
+    }),
+  } : {
+    name: SELECT_CHAT_SECTIONS,
+    description: "Select sections whose exact source is needed to answer. The remaining sections are provided as summaries.",
+    parameters: object({ reason, sections: keys('Keys to read word for word. [] when summaries suffice or for small talk. ["all"] for the whole paper.') }),
+  }, CLARIFY_TOOL];
+}
+
+export const EDIT_TOOLS: ToolDefinition[] = [{
+  name: APPLY_PAPER_EDITS,
+  description: "Propose exact replacements in the editable paper sources. The app shows a diff and executes these replacements when the author applies them. One call contains every change, including changes in multiple files.",
+  parameters: object({
+    summary: { type: "string", description: "Briefly explain the proposed changes in the user's language. They are awaiting application." },
+    edits: {
+      type: "array",
+      minItems: 1,
+      items: object({
+        path: { type: "string", description: "Exact project-relative path from an editable source block." },
+        original: { type: "string", description: "Exact, unique text copied from that editable source; include enough context to locate it." },
+        revised: { type: "string", description: "The complete replacement for original. An empty string deletes original." },
+      }),
+    },
+  }),
+}, CLARIFY_TOOL];

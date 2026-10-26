@@ -34,10 +34,12 @@ export const MAX_OUTPUT_TOKENS = {
   judge: 4096,
   // A one or two sentence reply to small talk.
   reply: 4096,
-  // One rewritten question as JSON.
+  // One self-contained request as plain text.
   refine: 8192,
-  // Answers may carry edits for several places and files.
+  select: 4096,
+  // Paper Chat answers; editing has its own task and tool call.
   answer: 16384,
+  edit: 24576,
   // One tool call with the changes to the session summary.
   summary: 4096,
   // One tool call with a few sentences per section of a batch.
@@ -62,8 +64,10 @@ export const CHAT_MODELS: Record<ChatTask, { primary: ModelChoice; fallback: Mod
     fallback: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" },
   },
   reply: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
-  refine: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
+  refine: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
+  select: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
   answer: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
+  edit: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
   // Runs in the background once ten turns are not in the session summary, or they run long.
   summary: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
   // Runs in the background after a turn that read the paper, for sections without a summary.

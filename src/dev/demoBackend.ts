@@ -178,46 +178,16 @@ function between(text: string, tag: string): string | undefined {
   return m?.[1];
 }
 
-function editBlock(path: string, original: string, revised: string): string {
-  return `\`\`\`edit ${path}\n<<<<<<< ORIGINAL\n${original}\n=======\n${revised}\n>>>>>>> REVISED\n\`\`\``;
-}
-
-/** The paper text in a prompt: whole files, or the sections sent word for word. */
-function paperTexts(prompt: string): { path: string; text: string }[] {
-  return [...prompt.matchAll(/<(?:file path|source file)="([^"]+)"[^>]*>\n([\s\S]*?)\n<\/(?:file|source)>/g)].map((m) => ({ path: m[1], text: m[2] }));
-}
-
-/** Edit request: edit blocks for a sentence quoted in the request, or for every file on a paper-wide request. */
-function simulateAgent(userMessage: string, instruction: string): string {
-  const files = paperTexts(userMessage);
-  const blocks: string[] = [];
-  const quoted = /["“]([^"”]{10,})["”]/.exec(instruction)?.[1];
-  if (/whole|entire|across|all|전체|모든|통일/i.test(instruction)) {
-    for (const file of files) {
-      const line = file.text
-        .split("\n")
-        .find((l) => l.length > 40 && !/^\s*[\\%]/.test(l) && demoRewrite(l, instruction) !== l.trim());
-      if (line && blocks.length < 4) blocks.push(editBlock(file.path, line.trim(), demoRewrite(line, instruction)));
-    }
-  } else if (quoted) {
-    const file = files.find((f) => f.text.includes(quoted));
-    if (file) blocks.push(editBlock(file.path, quoted, demoRewrite(quoted, instruction)));
-  }
-  if (blocks.length === 0) return "Say which part to change (quote the sentence or name the section), and I will suggest an edit for it.";
-  return `I tightened the wording and kept citations, labels and LaTeX commands unchanged.\n\n${blocks.join("\n\n")}`;
-}
-
 /** A demo model reply: text, or a function call. */
 type DemoReply = { text: string } | { tool: { name: string; args: Record<string, unknown> } };
 
 const EDIT_REQUEST = /rewrite|shorten|tighten|fix|improve|unify|make|change|remove|add|translate|수정|고쳐|줄여|바꿔|다듬|통일|추가|삭제|번역/i;
 const SMALL_TALK = /^\s*(hi|hello|hey|thanks|thank you|ok|okay|안녕|고마워|고맙|감사|좋아|알겠어)/i;
-const VAGUE = /핵심|요약|전체|전반|무슨 내용|어때|왜|이거|그거|summar|overall|main idea|key point|gist|why/i;
 const hangul = (text: string) => /[가-힣]/.test(text);
 
 /** Sections of the paper map whose title the question names, such as "Section 3" or "the Method". */
 function namedSections(last: string, question: string): string[] {
-  const map = /<paper_map summaries="(?!none)[^"]*">\n([\s\S]*?)\n<\/paper_map>/.exec(last)?.[1] ?? "";
+  const map = /<paper_map summaries="[^"]*">\n([\s\S]*?)\n<\/paper_map>/.exec(last)?.[1] ?? "";
   const asked = question.toLowerCase();
   const keys: string[] = [];
   for (const m of map.matchAll(/^\s*\[([^\]]+)\] ([^(\n]+?) \(/gm)) {
@@ -226,17 +196,45 @@ function namedSections(last: string, question: string): string[] {
   return keys;
 }
 
-/** Paper Orchestra's judge: one tool per route, with the reason for it and the sections to read. */
+/** Browser demo only; production intent classification is performed by the model. */
 function simulateJudge(last: string): DemoReply {
   const question = between(last, "user_message") ?? "";
-  if (SMALL_TALK.test(question) && question.length < 40) {
-    return { tool: { name: "reply_directly", args: { reason: "The message is small talk, not a question about the paper." } } };
-  }
+  const edit = EDIT_REQUEST.test(question) && !/\?|않|말고|what|why|would|should/i.test(question);
+  return { tool: { name: edit ? "route_edit" : "route_chat", args: { reason: edit ? "The user requests manuscript changes." : "The user requests discussion or an answer." } } };
+}
+
+function demoClarify(question: string): DemoReply {
+  return { tool: { name: "clarify_request", args: { question: hangul(question) ? "어느 부분을 말씀하시는 건가요? 섹션이나 문장을 알려 주세요." : "Which part do you mean? Name the section or quote the sentence." } } };
+}
+
+function simulateSelection(last: string, edit: boolean): DemoReply {
+  const question = between(last, "user_message") ?? "";
+  if (/^(이거|그거|this|that)\s*\??$/i.test(question)) return demoClarify(question);
   const sections = namedSections(last, question);
-  if (VAGUE.test(question) && !EDIT_REQUEST.test(question)) {
-    return { tool: { name: "refine_question", args: { reason: "The message is broad; refine it with the paper first.", sections } } };
+  if (edit) {
+    if (!sections.length && !/whole|entire|across|전체|통일/i.test(question)) return demoClarify(question);
+    return { tool: { name: "select_edit_sections", args: { reason: "Read the requested edit targets and preserve the rest.", edit_sections: sections.length ? sections : ["all"], reference_sections: [] } } };
   }
-  return { tool: { name: "answer_question", args: { reason: "The message says what it is about.", sections } } };
+  return { tool: { name: "select_chat_sections", args: { reason: "Read the sections named by the question.", sections } } };
+}
+
+function simulatePaperEdit(all: string, last: string): DemoReply {
+  const question = between(last, "user_message") ?? "";
+  const keys = (between(last, "editable_sections") ?? "").split(",").map((key) => key.trim());
+  const edits: { path: string; original: string; revised: string }[] = [];
+  const blocks = [...all.matchAll(/<section key="([^"]+)" title="[^"]*" content="full">\n([\s\S]*?)\n<\/section>/g)];
+  for (const block of blocks) {
+    if (!keys.includes("all") && !keys.some((key) => block[1] === key || block[1].startsWith(key + "."))) continue;
+    for (const source of block[2].matchAll(/<source file="([^"]+)" lines="[^"]*">\n([\s\S]*?)\n<\/source>/g)) {
+      const original = source[2].split("\n").find((line) => line.length > 40 && !/^\s*[\\%]/.test(line));
+      if (original) {
+        const revised = demoRewrite(original, question);
+        if (revised !== original) edits.push({ path: source[1], original, revised });
+      }
+    }
+  }
+  if (!edits.length) return demoClarify(question);
+  return { tool: { name: "apply_paper_edits", args: { summary: hangul(question) ? "요청하신 부분의 수정안입니다. diff를 확인하고 적용해 주세요." : "Proposed changes are ready for review. Apply the diff to update the paper.", edits } } };
 }
 
 /** Paper Summary Module: the first sentence of each section, as plain text. */
@@ -249,25 +247,15 @@ function simulateSectionSummaries(last: string): DemoReply {
   return { tool: { name: "write_section_summaries", args: { summaries } } };
 }
 
-/** Refine Module: restate the question with the paper's title, or ask back. */
-function simulateRefine(all: string, last: string): string {
-  const question = (between(last, "user_message") ?? "").trim();
-  if (/^(이거|그거|this|that)\s*\??$/i.test(question)) {
-    return JSON.stringify({ clarify: hangul(question) ? "어느 부분을 말씀하시는 건가요? 섹션이나 문장을 알려 주세요." : "Which part do you mean? Name the section or quote the sentence." });
-  }
-  const title = /\\title\{([^}]*)\}/.exec(all)?.[1]?.trim() ?? "this paper";
-  const refined = hangul(question)
-    ? `논문 "${title}" 기준: ${question} (제안한 방법의 핵심 아이디어, 푸는 문제, 기존 방법과의 차이를 중심으로)`
-    : `In the paper "${title}": ${question} (focus on the proposed method's key idea, the problem it solves, and how it differs from prior work)`;
-  return JSON.stringify({ refined_question: refined });
+/** Keep demo refinement literal; reference resolution is tested with scripted models. */
+function simulateRefine(last: string): string {
+  return (between(last, "user_message") ?? "").trim();
 }
 
 /** Answer Module: edit blocks for an edit request, otherwise a short demo answer. */
 function simulateAnswerModule(all: string, last: string): string {
   const question = between(last, "user_message") ?? "";
-  if (EDIT_REQUEST.test(question)) {
-    return simulateAgent(all, question);
-  }
+  if (SMALL_TALK.test(question) && question.length < 40) return hangul(question) ? "천만에요! 논문에 대해 궁금한 점을 물어보세요." : "You're welcome! Ask me anything about the paper.";
   const refined = between(last, "refined_question");
   const files = [...all.matchAll(/<file path="([^"]+)">/g)].map((m) => m[1]);
   const full = [...all.matchAll(/<section key="([^"]+)" title="[^"]*" content="full">/g)].map((m) => m[1]);
@@ -324,13 +312,17 @@ function simulateReply(body: Record<string, any>, messages: { content: string }[
   const tools: string[] = Array.isArray(body.tools) ? body.tools.map((t: { name?: string }) => t.name ?? "") : [];
   if (tools.includes("update_summary")) return simulateSummary(last);
   if (tools.includes("write_section_summaries")) return simulateSectionSummaries(last);
-  if (tools.length) return simulateJudge(last);
+  if (tools.includes("route_chat")) return simulateJudge(last);
+  if (tools.includes("select_chat_sections")) return simulateSelection(last, false);
+  if (tools.includes("select_edit_sections")) return simulateSelection(last, true);
+  if (tools.includes("apply_paper_edits")) return simulatePaperEdit(all, last);
   if (last.includes("<task>\nReply to the user's message.")) {
     const question = between(last, "user_message") ?? "";
     return { text: hangul(question) ? "천만에요! 논문에 대해 궁금한 점을 물어보세요." : "You're welcome! Ask me anything about the paper." };
   }
-  if (last.includes('"refined_question":"..."')) return { text: simulateRefine(all, last) };
-  if (last.includes("You are the Answer Module")) return { text: simulateAnswerModule(all, last) };
+  const system = String(body.instructions ?? (Array.isArray(body.system) ? body.system.map((b: { text: string }) => b.text).join("\n") : body.system) ?? "");
+  if (system.includes("Request Refinement Module")) return { text: simulateRefine(last) };
+  if (last.includes("You are the Paper Chat Module")) return { text: simulateAnswerModule(all, last) };
   return { text: simulateAnswer(last) };
 }
 

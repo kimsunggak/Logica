@@ -247,7 +247,7 @@ export async function sendChatMessage(text: string): Promise<void> {
     // Stopped and failed turns count too: they are turns left unanswered.
     scheduleSummary({ traceId: requestId, root });
     // A turn that may have read the paper: summarize the sections edited since.
-    if (route !== "reply") scheduleSectionSummaries({ traceId: requestId, root });
+    if (route) scheduleSectionSummaries({ traceId: requestId, root });
   }
 }
 

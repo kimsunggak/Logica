@@ -26,8 +26,14 @@ const reply = (provider: ProviderId, request: AIRequest, text: string): AIRespon
 });
 const judge = (provider: ProviderId, request: AIRequest): AIResponse => ({
   ...reply(provider, request, ""),
-  toolCalls: [{ id: "tool", name: "answer_question", arguments: { reason: "Read section 3.2", sections: ["3.2"] } }],
+  toolCalls: [{ id: "tool", name: "route_chat", arguments: { reason: "Discuss the method" } }],
 });
+function preparation(provider: ProviderId, request: AIRequest): AIResponse | undefined {
+  if (request.task === "refine") return reply(provider, request, request.instruction);
+  if (request.task === "judge") return judge(provider, request);
+  if (request.task === "select") return { ...reply(provider, request, ""), toolCalls: [{ id: "select", name: "select_chat_sections", arguments: { reason: "Read method", sections: ["3.2"] } }] };
+  return undefined;
+}
 const fail = () => new AIError("stream_interrupted", "stream cut off", { provider: "openai" });
 
 function run(control: RunControl = { stopped: false, activeRequest: null }) {
@@ -46,7 +52,8 @@ beforeEach(() => { generate.mockReset(); });
 describe("fallback before visible output", () => {
   it.each(["[[need", "[[need_sections: 4.3]]"])("retries a failed Answer while %s is hidden", async (buffered) => {
     generate.mockImplementation(async (provider: ProviderId, request: AIRequest, handlers?: StreamHandlers) => {
-      if (request.task === "judge") return judge(provider, request);
+      const prepared = preparation(provider, request);
+      if (prepared) return prepared;
       expect(request.mayAskForSections).toBe(true);
       if (provider === "openai") {
         handlers?.onDelta?.(buffered, buffered);
@@ -58,12 +65,13 @@ describe("fallback before visible output", () => {
     const r = run();
     expect(await r.result).toMatchObject({ content: "Recovered answer.", fallbackFrom: { provider: "openai" } });
     expect(r.displayed).toEqual(["Recovered answer."]);
-    expect(generate.mock.calls.map(([provider]) => provider)).toEqual(["anthropic", "openai", "anthropic"]);
+    expect(generate.mock.calls.map(([provider]) => provider)).toEqual(["openai", "anthropic", "openai", "openai", "anthropic"]);
   });
 
   it("clears the failed attempt's buffer when fallback completes without streamed text", async () => {
     generate.mockImplementation(async (provider: ProviderId, request: AIRequest, handlers?: StreamHandlers) => {
-      if (request.task === "judge") return judge(provider, request);
+      const prepared = preparation(provider, request);
+      if (prepared) return prepared;
       if (provider === "openai") {
         handlers?.onDelta?.("[[need", "[[need");
         throw fail();
@@ -78,7 +86,8 @@ describe("fallback before visible output", () => {
 
   it("still hides a fallback's section request and reads those sections before answering", async () => {
     generate.mockImplementation(async (provider: ProviderId, request: AIRequest, handlers?: StreamHandlers) => {
-      if (request.task === "judge") return judge(provider, request);
+      const prepared = preparation(provider, request);
+      if (prepared) return prepared;
       if (request.mayAskForSections) {
         if (provider === "openai") {
           handlers?.onDelta?.("[[need", "[[need");
@@ -95,25 +104,27 @@ describe("fallback before visible output", () => {
     const r = run();
     expect((await r.result).content).toBe("Answer with section 4.3.");
     expect(r.displayed).toEqual(["Answer with section 4.3."]);
-    expect(generate.mock.calls.map(([provider]) => provider)).toEqual(["anthropic", "openai", "anthropic", "openai"]);
+    expect(generate.mock.calls.map(([provider]) => provider)).toEqual(["openai", "anthropic", "openai", "openai", "anthropic", "openai"]);
   });
 
   it("does not retry once Answer text has reached the screen", async () => {
     generate.mockImplementation(async (provider: ProviderId, request: AIRequest, handlers?: StreamHandlers) => {
-      if (request.task === "judge") return judge(provider, request);
+      const prepared = preparation(provider, request);
+      if (prepared) return prepared;
       handlers?.onDelta?.("Visible answer.", "Visible answer.");
       throw fail();
     });
     const r = run();
     await expect(r.result).rejects.toMatchObject({ kind: "stream_interrupted" });
     expect(r.displayed).toEqual(["Visible answer."]);
-    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate).toHaveBeenCalledTimes(4);
   });
 
   it("does not retry when the user cancels while output is buffered", async () => {
     const control: RunControl = { stopped: false, activeRequest: null };
     generate.mockImplementation(async (provider: ProviderId, request: AIRequest, handlers?: StreamHandlers) => {
-      if (request.task === "judge") return judge(provider, request);
+      const prepared = preparation(provider, request);
+      if (prepared) return prepared;
       handlers?.onDelta?.("[[need", "[[need");
       control.stopped = true;
       throw fail();
@@ -121,6 +132,6 @@ describe("fallback before visible output", () => {
     const r = run(control);
     await expect(r.result).rejects.toMatchObject({ kind: "cancelled" });
     expect(r.displayed).toEqual([]);
-    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate).toHaveBeenCalledTimes(4);
   });
 });
