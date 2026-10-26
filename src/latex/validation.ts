@@ -92,6 +92,8 @@ const diffList = (a: Set<string>, b: Set<string>) => [...a].filter((x) => !b.has
 export interface ValidationOptions {
   /** Known BibTeX keys; unknown new citation keys are reported. */
   bibKeys?: Set<string>;
+  /** A tool replacement may deliberately delete its original text. */
+  allowEmpty?: boolean;
 }
 
 export function validateRewrite(
@@ -100,7 +102,7 @@ export function validateRewrite(
   options: ValidationOptions = {},
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!rewritten.trim()) {
+  if (!rewritten.trim() && !options.allowEmpty) {
     return [{ severity: "error", message: t("val.empty") }];
   }
   const o = stripComments(original);

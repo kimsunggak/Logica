@@ -15,7 +15,7 @@ describe("paperUnits", () => {
 
   it("splits the sample paper into the abstract, sections and subsections, in reading order", () => {
     expect(FRONT).toBe("abstract");
-    expect(units.map((u) => u.key)).toEqual([FRONT, "1", "1.1", "1.2", "1.3", "2", "2.1", "2.2", "3", "3.1", "3.2", "3.3", "4", "4.1", "4.2", "4.3", "5"]);
+    expect(units.map((u) => u.key)).toEqual(["metadata", FRONT, "1", "1.1", "1.2", "1.3", "2", "2.1", "2.2", "3", "3.1", "3.2", "3.3", "4", "4.1", "4.2", "4.3", "5"]);
     expect(unit(FRONT).title).toBe("Abstract");
     expect(unit("3.2")).toMatchObject({ title: "Uncertainty Estimation", depth: 1, parentKey: "3" });
     expect(unit("3")).toMatchObject({ title: "Method", depth: 0 });

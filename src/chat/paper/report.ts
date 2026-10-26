@@ -6,7 +6,8 @@
  *
  *   title: …
  *   sections:
- *     - key: abstract        title block and abstract
+ *     - key: metadata        title/author fields extracted by code
+ *     - key: abstract        body front matter and abstract
  *     - key: "1"             Introduction, with its subsections under it
  *       subsections:
  *         - key: "1.1"
@@ -20,6 +21,7 @@
 import { Document, parse } from "yaml";
 import { call } from "../../lib/backend";
 import type { SectionUnit } from "./sections";
+import { METADATA } from "./metadata";
 
 export const REPORT_VERSION = 1;
 
@@ -42,14 +44,15 @@ export function summariesFor(units: SectionUnit[], report: PaperReport): Map<str
   const found = new Map<string, string>();
   for (const unit of units) {
     const entry = report.summaries[unit.hash];
-    if (entry) found.set(unit.key, entry.summary);
+    if (unit.summary !== undefined || entry) found.set(unit.key, unit.summary ?? entry.summary);
   }
   return found;
 }
 
 /** Whether any section of the paper has a summary: false until the paper is first summarized. */
 export function hasSummaries(units: SectionUnit[], report: PaperReport): boolean {
-  return units.some((unit) => report.summaries[unit.hash]);
+  const body = units.filter((unit) => unit.key !== METADATA);
+  return (body.length ? body : units).some((unit) => report.summaries[unit.hash]);
 }
 
 /** The units the report has no summary for. */
@@ -63,6 +66,7 @@ export function withSummaries(report: PaperReport, added: { hash: string; title:
   for (const entry of added) all[entry.hash] = { title: entry.title, summary: entry.summary };
   const summaries: Record<string, SectionSummary> = {};
   for (const unit of units) if (all[unit.hash]) summaries[unit.hash] = all[unit.hash];
+  for (const unit of units) if (unit.summary !== undefined) summaries[unit.hash] = { title: unit.title, summary: unit.summary };
   return { summaries };
 }
 
@@ -77,7 +81,7 @@ interface DocEntry {
 
 /** The report as the YAML document saved for the paper: its sections in reading order. */
 export function reportYaml(report: PaperReport, units: SectionUnit[], title?: string, now = new Date()): string {
-  const entry = (unit: SectionUnit): DocEntry => ({ key: unit.key, title: unit.title, hash: unit.hash, summary: report.summaries[unit.hash]?.summary ?? null });
+  const entry = (unit: SectionUnit): DocEntry => ({ key: unit.key, title: unit.title, hash: unit.hash, summary: unit.summary ?? report.summaries[unit.hash]?.summary ?? null });
   const sections: DocEntry[] = [];
   const parents = new Map<string, DocEntry>();
   for (const unit of units) {
@@ -92,9 +96,10 @@ export function reportYaml(report: PaperReport, units: SectionUnit[], title?: st
   const doc = new Document({ version: REPORT_VERSION, ...(title ? { title } : {}), updated: now.toISOString(), sections });
   doc.commentBefore = [
     " LOGICA 논문 요약: 섹션마다 3~4줄, 논문의 읽는 순서대로.",
+    " metadata는 제목·저자 선언에서 코드로 추출한 정보입니다. 별도 LLM 요약을 하지 않습니다.",
     " Paper Orchestra는 각 섹션의 요약을 읽고, 질문에 필요한 섹션을 선택합니다.",
     " 답변 모델에는 선택한 섹션의 원문과 나머지 섹션의 요약을 보냅니다.",
-    " hash는 섹션 본문의 해시입니다. 본문을 고치면 달라지고, 그 섹션은 다시 요약됩니다.",
+    " hash는 각 영역 원문의 해시입니다. 원문을 고치면 해당 영역의 정보나 요약을 갱신합니다.",
   ].join("\n");
   return doc.toString({ lineWidth: 0, blockQuote: "literal" });
 }

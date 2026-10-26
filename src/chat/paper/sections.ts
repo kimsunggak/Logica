@@ -1,8 +1,9 @@
 /**
- * The paper as section units (L0): what the judge picks from and what the
- * Refine and Answer modules read, each unit word for word or as its summary.
+ * The paper as section units (L0): what source selection picks from and what the
+ * Chat and Edit modules read, each unit word for word or as its summary.
  *
- *   abstract  title block and abstract, read word for word in every turn
+ *   metadata  title/author declarations, described directly without an LLM
+ *   abstract  body front matter and abstract, read word for word in every turn
  *   3, 3.2    each section and subsection: its own text, without its subsections
  *
  * Deeper headings stay in their subsection. A unit's hash is the key of its
@@ -12,12 +13,13 @@
 import { giOf, type PaperDocument } from "../../latex/parser/documentModel";
 import { countWords, maskComments } from "../../latex/parser/text";
 import type { SourceRange } from "../../ai/types";
+import { METADATA, paperMetadata } from "./metadata";
 
-/** The key of the front matter unit: the title block and the abstract. */
+/** The body front matter, including maketitle and the abstract. */
 export const FRONT = "abstract";
 
 export interface SectionUnit {
-  /** Its name in this turn's prompts: the section number ("3.2"), `abstract`, or "u1" for an unnumbered heading. */
+  /** The section number ("3.2"), `metadata`, `abstract`, or "u1" for an unnumbered heading. */
   key: string;
   title: string;
   /** 0 for the front matter and top-level sections, 1 for subsections. */
@@ -34,6 +36,8 @@ export interface SectionUnit {
   bodyWords: number;
   /** `\label` keys defined in it. */
   labels: string[];
+  /** Metadata is extracted directly and never sent to a summary model. */
+  summary?: string;
 }
 
 export interface PaperUnits {
@@ -95,7 +99,8 @@ export function macrosOf(preamble: string): string {
 
 /**
  * Split the paper into section units. Units cover the body from
- * `\begin{document}` to `\end{document}`; the preamble only gives its macros.
+ * `\begin{document}` to `\end{document}`. Title/author declarations form a
+ * separate metadata unit; the preamble also supplies macro definitions.
  */
 export function paperUnits(doc: PaperDocument, files: Map<string, string>): PaperUnits {
   const main = doc.mainFile;
@@ -133,6 +138,12 @@ export function paperUnits(doc: PaperDocument, files: Map<string, string>): Pape
   const labelGis = doc.labels.map((l) => ({ key: l.key, gi: giOf(doc, l.filePath, l.line) }));
 
   const units: SectionUnit[] = [];
+  const metadata = paperMetadata(doc, files);
+  if (metadata) {
+    const text = unitText(metadata);
+    units.push({ key: METADATA, title: "Title and Authors", depth: 0, sources: metadata.sources, summary: metadata.summary,
+      hash: textHash(text), chars: text.length, words: countWords(text), bodyWords: 0, labels: [] });
+  }
   const used = new Set<string>();
   const unique = (key: string) => {
     let name = key;

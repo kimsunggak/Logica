@@ -101,11 +101,11 @@ export async function summarizeSections(units: SectionUnit[], options: SectionSu
     () => ({ sections: units.map((u) => ({ key: u.key, title: u.title, chars: u.chars })) }),
     async (span) => {
       const summarized: SummarizedSection[] = units
-        .filter((u) => u.bodyWords < SHORT_WORDS)
-        .map((u) => ({ key: u.key, hash: u.hash, title: u.title, summary: ownWords(u) }));
+        .filter((u) => u.summary !== undefined || u.bodyWords < SHORT_WORDS)
+        .map((u) => ({ key: u.key, hash: u.hash, title: u.title, summary: u.summary ?? ownWords(u) }));
       const missing: string[] = [];
       let failure: unknown = null;
-      const batches = batchesOf(units.filter((u) => u.bodyWords >= SHORT_WORDS));
+      const batches = batchesOf(units.filter((u) => u.summary === undefined && u.bodyWords >= SHORT_WORDS));
       for (const [i, batch] of batches.entries()) {
         try {
           const result = await call(

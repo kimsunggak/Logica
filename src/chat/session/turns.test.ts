@@ -35,6 +35,15 @@ describe("turnsOf", () => {
   it("marks a turn stopped before any text", () => {
     expect(turnsOf([q("x"), a("", { status: "cancelled" })])[0].answer).toBe("[answer stopped by the user]");
   });
+
+  it("keeps proposed source changes and their application status in history", () => {
+    const edit = { path: "method.tex", original: "Old text.", revised: "New text." };
+    const answer = turnsOf([q("Shorten method"), a("Proposed changes.", { edits: [edit] })])[0].answer;
+    expect(answer).toContain("pending application");
+    expect(answer).toContain("ORIGINAL:\nOld text.");
+    expect(answer).toContain("REVISED:\nNew text.");
+    expect(turnsOf([q("Shorten method"), a("Proposed changes.", { edits: [edit], editStates: { 0: "applied" } })])[0].answer).toContain("paper edit 1: applied");
+  });
 });
 
 describe("capText", () => {

@@ -1,7 +1,7 @@
 /**
  * LLM Gateway: every model call of a chat turn goes through here.
  *
- *   Paper Orchestra, Refine Module, Answer Module → callModel → aiService → Rust
+ *   Refinement, Auto Router, Section Selection, Chat/Edit → callModel → aiService → Rust
  *
  * It picks the model for the call's task (`CHAT_MODELS`) and, when the primary
  * call fails before any text reached the screen, sends the same request to

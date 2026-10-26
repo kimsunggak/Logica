@@ -29,14 +29,10 @@ export interface AIMessage {
   content: string;
 }
 
-/**
- * Chat is run by the Paper Orchestra: `judge` picks the route of a message
- * and the sections to read by calling a tool, `reply` answers small talk,
- * `refine` rewrites an abstract question into a clear one, and `answer`
- * answers from the paper. `summary` folds older turns into the session
- * summary, and `sections` summarizes the paper's sections for the paper map.
- */
-export type AITask = "inline-edit" | "judge" | "reply" | "refine" | "answer" | "summary" | "sections";
+/** UI purpose; common refinement precedes fixed routing or Auto classification. */
+export type ChatMode = "auto" | "chat" | "edit";
+export type ExecutionMode = Exclude<ChatMode, "auto">;
+export type AITask = "inline-edit" | "judge" | "reply" | "refine" | "select" | "answer" | "edit" | "summary" | "sections";
 
 /** The model calls of a chat turn. */
 export type ChatTask = Exclude<AITask, "inline-edit">;
@@ -80,7 +76,7 @@ export interface SourceRange {
   text: string;
 }
 
-/** A section of the paper map: what the judge sees of it. */
+/** A section of the paper map: what routing and source selection see of it. */
 export interface MapEntry {
   key: string;
   title: string;
@@ -94,7 +90,7 @@ export interface MapEntry {
   always?: boolean;
 }
 
-/** A section as the Refine and Answer modules read it: word for word, as its summary, or left out. */
+/** A section as the Chat and Edit modules read it: word for word, as its summary, or left out. */
 export type ViewSection = { key: string; title: string; depth: number } & (
   | { content: "full"; sources: SourceRange[] }
   | { content: "summary"; summary: string }
@@ -119,6 +115,8 @@ export interface AIRequest {
   id: string;
   task: AITask;
   instruction: string;
+  uiMode?: ChatMode;
+  executionMode?: ExecutionMode;
   selectedText?: string;
   context: AIContext;
   /** Earlier chat turns sent word for word (L2). */
@@ -127,21 +125,23 @@ export interface AIRequest {
   sessionSummary?: string;
   /** The turns to fold into the session summary (summary only). */
   foldTurns?: FoldTurn[];
-  /** The paper's source files (refine and answer, size-limited), when the whole paper is read. */
+  /** The paper's source files (Chat and Edit, size-limited), when the whole paper is read. */
   projectFiles?: ProjectFile[];
   /** Paper files left out of `projectFiles` to stay within the budget. */
   omittedFiles?: string[];
-  /** The paper section by section (refine and answer), in place of `projectFiles`. */
+  /** The paper section by section (Chat and Edit), in place of `projectFiles`. */
   paperView?: PaperView;
-  /** The sections the judge picks from, with their summaries (judge only). */
+  /** The sections routing and source selection read, with their summaries (Auto Router and section selection). */
   paperMap?: MapEntry[];
   /** The answer may ask for sections it has only as summaries (answer only). */
   mayAskForSections?: boolean;
   /** The sections to summarize (sections only). */
   sectionsToSummarize?: SectionToSummarize[];
-  /** The question as rewritten by the Refine Module (answer only). */
+  /** The question as rewritten by the Refine Module (routing and execution). */
   refinedQuestion?: string;
-  /** Functions the model must choose one of (judge, summary and sections). */
+  /** Sections this edit may change; reference sections are read-only. */
+  editSections?: string[];
+  /** Functions offered to routing, selection, edit and summary models. */
   tools?: ToolDefinition[];
   model: string;
   /** Reasoning effort, mapped to each provider’s API format. */

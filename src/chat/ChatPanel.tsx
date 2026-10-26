@@ -2,6 +2,8 @@ import { Check, CheckCheck, FileText, History, MessageSquarePlus, Send, Square, 
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
 import { CHAT_MODELS } from "../ai/models/modelConfig";
+import type { ChatMode } from "../ai/types";
+import { locateExact } from "./paper/editTool";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
 import { DiffView } from "../editor/inlineEdit/DiffView";
 import { validateRewrite } from "../latex/validation";
@@ -21,6 +23,7 @@ import {
   rejectAllChatEdits,
   rejectChatEdit,
   sendChatMessage,
+  setChatMode,
   splitBlocks,
   stopChat,
   useChat,
@@ -51,15 +54,16 @@ function MarkdownBlock(props: ChatMarkdownProps) {
 }
 
 /** One proposed change: file, location, diff, checks, and Apply / Reject. */
-function EditCard({ messageId, index, edit, state }: { messageId: string; index: number; edit: ProposedEdit; state?: EditState }) {
+function EditCard({ messageId, index, edit, state, exact = false }: { messageId: string; index: number; edit: ProposedEdit; state?: EditState; exact?: boolean }) {
   const t = useT();
   const bibEntries = useProject((s) => s.bibEntries);
+  useProject((s) => s.doc); // Recheck diff anchors when the author's source changes.
   const issues = useMemo(
-    () => validateRewrite(edit.original, edit.revised, { bibKeys: new Set(bibEntries.map((e) => e.key)) }),
-    [edit, bibEntries],
+    () => validateRewrite(edit.original, edit.revised, { bibKeys: new Set(bibEntries.map((e) => e.key)), allowEmpty: exact }),
+    [edit, bibEntries, exact],
   );
   const text = currentTexts().get(edit.path);
-  const at = state ? null : text === undefined ? null : locateEdit(text, edit.original);
+  const at = state ? null : text === undefined ? null : (exact ? locateExact : locateEdit)(text, edit.original);
   const line = at && text !== undefined ? lineOf(text, at.from) : null;
   const errors = issues.filter((i) => i.severity === "error");
   return (
@@ -106,6 +110,7 @@ function EditCard({ messageId, index, edit, state }: { messageId: string; index:
         <div className="flex items-center gap-1.5 border-t border-slate-200 px-2 py-1 dark:border-slate-700">
           <button
             className={`${errors.length ? "btn-danger" : "btn-primary"} h-6 text-[11.5px]`}
+            disabled={!at}
             onClick={() => void applyChatEdit(messageId, index, edit)}
             data-testid="agent-apply"
           >
@@ -123,7 +128,7 @@ function EditCard({ messageId, index, edit, state }: { messageId: string; index:
 /** The question as rewritten by the Refine Module before answering. */
 function RefinedLine({ message }: { message: ChatMessage }) {
   const t = useT();
-  if (!message.refined) return null;
+  if (!message.refined || message.refined === message.instruction) return null;
   return (
     <div className="flex items-baseline gap-1.5 text-[11.5px] text-slate-500" data-testid="chat-refined">
       <span className="shrink-0 rounded bg-slate-100 px-1.5 py-px text-[10.5px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
@@ -143,30 +148,32 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   const done = message.status === "done";
   // Edit blocks become reviewable cards once the answer is complete.
   const edits = new Map<number, { index: number; edit: ProposedEdit }>();
-  if (done) {
+  if (done && !message.truncated && !message.mode) {
     blocks.forEach((block, i) => {
       const edit = block.kind === "code" && block.lang === "edit" ? parseEditBody(block.meta ?? "", block.text) : null;
       if (edit) edits.set(i, { index: edits.size, edit });
     });
   }
-  const pending = [...edits.values()].filter(({ index }) => !message.editStates?.[index]);
+  const toolEdits = done && !message.truncated && message.route === "edit" && message.mode !== "chat" ? message.edits ?? [] : [];
+  const allEdits = toolEdits.length ? toolEdits.map((edit, index) => ({ index, edit })) : [...edits.values()];
+  const pending = allEdits.filter(({ index }) => !message.editStates?.[index]);
   const streaming = message.status === "streaming";
   return (
     <div className="space-y-2">
-      {(message.stage === "paper" || message.stage === "judge" || message.stage === "refine") && (
+      {(message.stage === "paper" || message.stage === "judge" || message.stage === "refine" || message.stage === "select") && (
         <div className="text-[11.5px] text-slate-500" data-testid="chat-stage">
-          {t(message.stage === "paper" ? "chat.stagePaper" : message.stage === "judge" ? "chat.stageJudge" : "chat.stageRefine")}
+          {t(message.stage === "paper" ? "chat.stagePaper" : message.stage === "judge" ? "chat.stageJudge" : message.stage === "select" ? "chat.stageSelect" : "chat.stageRefine")}
         </div>
       )}
       <RefinedLine message={message} />
-      {(message.stage === "answer" || message.stage === "reply") && !message.content && (
+      {(message.stage === "answer" || message.stage === "reply" || message.stage === "edit") && !message.content && (
         <div className="text-[11.5px] text-slate-500" data-testid="chat-stage">
-          {t(message.stage === "answer" ? "chat.stageAnswer" : "chat.stageReply")}
+          {t(message.stage === "edit" ? "chat.stageEdit" : message.stage === "answer" ? "chat.stageAnswer" : "chat.stageReply")}
         </div>
       )}
-      {edits.size > 1 && (
+      {allEdits.length > 1 && (
         <div className="flex items-center gap-1.5 text-[11.5px] text-slate-500" data-testid="agent-edits-bar">
-          <span>{t("agent.edits", { count: edits.size })}</span>
+          <span>{t("agent.edits", { count: allEdits.length })}</span>
           {pending.length > 0 && (
             <>
               <button
@@ -205,6 +212,9 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
           />
         ),
       )}
+      {toolEdits.map((edit, index) => (
+        <EditCard key={`tool-${index}`} messageId={message.id} index={index} edit={edit} state={message.editStates?.[index]} exact />
+      ))}
       {message.status === "streaming" && <span className="inline-block h-3 w-1.5 animate-pulse bg-slate-400" />}
       {message.status === "cancelled" && <div className="text-[11.5px] text-slate-400">{t("chat.stopped")}</div>}
       {message.fallbackFrom && message.status === "done" && (
@@ -301,7 +311,9 @@ export function ChatPanel() {
   const t = useT();
   const messages = useChat((s) => s.messages);
   const running = useChat((s) => s.runningId !== null);
-  const models = t("chat.modelLabel", { primary: CHAT_MODELS.answer.primary.model, fallback: CHAT_MODELS.answer.fallback.model });
+  const mode = useChat((s) => s.mode);
+  const config = mode === "edit" ? CHAT_MODELS.edit : CHAT_MODELS.answer;
+  const models = t("chat.modelLabel", { primary: config.primary.model, fallback: config.fallback.model });
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const chatFontSize = useSettings((s) => s.editor.chatFontSize);
@@ -356,6 +368,7 @@ export function ChatPanel() {
         {messages.map((message) =>
           message.role === "user" ? (
             <div key={message.id} className="ml-6">
+              <div className="mb-0.5 text-right text-[10px] text-slate-400">{message.mode === "chat" ? "Chat" : message.mode === "edit" ? "Edit" : "Auto"}</div>
               <div className="flex items-start justify-end gap-1.5">
                 <div className="min-w-0 rounded-lg bg-sky-50 px-2.5 py-1.5 leading-normal whitespace-pre-wrap text-slate-800 dark:bg-sky-950/50 dark:text-slate-100">
                   {message.content}
@@ -368,6 +381,7 @@ export function ChatPanel() {
           ) : (
             <div key={message.id} data-testid="chat-assistant" data-route={message.route}>
               <div className="mb-0.5 text-[10.5px] text-slate-400">
+                {(message.route === "chat" || message.route === "edit") && <span className="mr-1.5" data-testid="chat-resolved-mode">{message.route === "edit" ? "Edit" : "Chat"}</span>}
                 {message.provider ? PROVIDER_LABELS[message.provider] : ""} {message.model ? `(${message.model})` : ""}
               </div>
               <AssistantMessage message={message} />
@@ -376,11 +390,25 @@ export function ChatPanel() {
         )}
       </div>
       <div className="shrink-0 border-t border-slate-200 p-2 dark:border-slate-800">
+        <div className="flex items-end gap-1.5">
+        <select
+          value={mode}
+          onChange={(e) => setChatMode(e.target.value as ChatMode)}
+          disabled={running}
+          aria-label={t("chat.mode")}
+          title={t(mode === "chat" ? "chat.modeChat" : mode === "edit" ? "chat.modeEdit" : "chat.modeAuto")}
+          className="input h-8 w-[76px] shrink-0 px-1.5 text-[12px]"
+          data-testid="chat-mode"
+        >
+          <option value="chat">Chat</option>
+          <option value="edit">Edit</option>
+          <option value="auto">Auto</option>
+        </select>
         <textarea
           ref={inputRef}
           data-testid="chat-input"
-          className="input h-auto min-h-[60px] w-full resize-none py-1.5 leading-snug"
-          placeholder={t("chat.placeholder")}
+          className="input h-auto min-h-[60px] min-w-0 flex-1 resize-none py-1.5 leading-snug"
+          placeholder={t(mode === "chat" ? "chat.placeholderChat" : mode === "edit" ? "chat.placeholderEdit" : "chat.placeholder")}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -390,8 +418,9 @@ export function ChatPanel() {
             }
           }}
         />
+        </div>
         <div className="mt-1.5 flex items-center">
-          <span className="text-[11px] text-slate-400">{t("chat.footer")}</span>
+          <span className="min-w-0 text-[11px] text-slate-400">{t(mode === "chat" ? "chat.modeChat" : "chat.footer")}</span>
           {running ? (
             <button className="btn ml-auto" onClick={stopChat} data-testid="chat-stop">
               <Square size={11} /> {t("chat.stop")}

@@ -1,15 +1,8 @@
 /**
- * The part of the prompt the Refine and Answer modules share.
- *
- * Both requests start with the same system prompt, the paper (L0), the
- * session summary (L1) and the recent turns (L2), so the provider's prompt
- * cache can reuse that prefix for the second call (and for the next question
- * while the paper is unchanged). Only the last message differs: the
- * question and the module's own task (L3).
- *
- * The paper is the whole paper file by file until the paper report has
- * summaries of it; then it is the paper section by section, the sections the
- * judge chose word for word and the others as their summaries.
+ * Paper source and session context shared by Chat/Edit prompt builders.
+ * Selected sections are sent in full and others as summaries, or as complete
+ * files when section summaries are unavailable. Each executor adds its own
+ * system instructions and the original/refined request in the final message.
  */
 import type { AIRequest, PaperView } from "../types";
 import { tag } from "./context";

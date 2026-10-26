@@ -1,21 +1,16 @@
 /**
- * Chat about the current paper.
- *
- * This store holds the conversation and its session summary; each question
- * is run by the Paper Orchestra (`./orchestrator.ts`), which decides
- * whether to reply directly, answer, or refine the question first, and
- * reports every step to the localhost runtime debugger in development. After
- * a turn the Session Summary Module (`./session/summarizer.ts`) folds older turns
- * into the summary, and after a turn that read the paper the Paper Summary Module
- * (`./paper/sectionSummarizer.ts`) summarizes the sections the paper
- * report has no summary for, both in the background.
+ * Conversation state, frozen UI modes, queued paper edit tool calls and saved sessions.
+ * Paper Orchestra runs common refinement, routing, source selection and Chat/Edit.
+ * Session and paper summaries run independently in the background; accepted source
+ * edits use the editor's normal save and undo workflow and refresh paper summaries.
  */
 import { create } from "zustand";
 import { AIError } from "../ai/errors";
 import type { RunControl } from "../ai/gateway";
 import { CHAT_MODELS } from "../ai/models/modelConfig";
 import { aiService, newRequestId } from "../ai/service";
-import { lineOf, locateEdit, type ProposedEdit } from "../ai/agent/edits";
+import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
+import { preparePaperEdits, validEditPath } from "./paper/editTool";
 import { deleteSession, listSessions, loadSession, newSessionId, saveSession, SESSION_VERSION, type SessionSummary } from "./chatHistory";
 import { runChatTurn, type Outcome, type Paper, type Route, type Stage, type Turn } from "./orchestrator";
 import { emptyReport, hasSummaries, loadReport, saveReport, summariesFor, unitsToSummarize, withSummaries, type PaperReport } from "./paper/report";
@@ -25,7 +20,7 @@ import { foldTurns, moduleChars, turnsToFold, unsummarized } from "./session/sum
 import { readSummary, type ConversationSummary } from "./session/summary";
 import { turnsOf } from "./session/turns";
 import { endSpan, failSpan, setDebugProject, startSpan, step, type Span } from "../debug/trace";
-import type { ProjectFile, ProviderId } from "../ai/types";
+import type { ChatMode, ProjectFile, ProviderId } from "../ai/types";
 import { editorSession } from "../editor/editorSession";
 import { buildPaperDocument, outlineText } from "../latex/parser/documentModel";
 import { currentTexts, navigateTo, openFile } from "../project/projectActions";
@@ -36,6 +31,8 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** UI purpose frozen when this turn was sent. Old messages default to Auto. */
+  mode?: ChatMode;
   status: "done" | "streaming" | "error" | "cancelled";
   /** The model that wrote the answer (the one running while it streams). */
   provider?: ProviderId;
@@ -44,6 +41,9 @@ export interface ChatMessage {
   instruction?: string;
   /** Outcome of each proposed edit block, by its index in the answer. */
   editStates?: Record<number, EditState>;
+  /** Validated arguments of the queued apply_paper_edits tool call. */
+  edits?: ProposedEdit[];
+  editToolCallId?: string;
   /** Step of the turn running for this answer. */
   stage?: Stage;
   /** How the turn ended: direct reply, answer, or a question back. */
@@ -59,6 +59,7 @@ export interface ChatMessage {
 export type EditState = "applied" | "rejected" | "failed";
 
 interface ChatState {
+  mode: ChatMode;
   messages: ChatMessage[];
   runningId: string | null;
   /** Project the conversation belongs to, and the session being shown. */
@@ -72,6 +73,7 @@ interface ChatState {
 }
 
 export const useChat = create<ChatState>()(() => ({
+  mode: "auto",
   messages: [],
   runningId: null,
   root: null,
@@ -126,7 +128,16 @@ function paperOf(report: PaperReport): Paper {
 async function summarizeFirst(project: string, report: PaperReport, run: { traceId: string; root: Span; control: RunControl; onStart: () => void }): Promise<PaperReport> {
   const { tex, doc } = paperNow();
   const { units } = paperUnits(doc, tex);
-  if (!units.length || hasSummaries(units, report)) return report;
+  if (!units.length) return report;
+  if (hasSummaries(units, report)) {
+    const next = withSummaries(report, [], units);
+    const metadataChanged = units.some((unit) => unit.summary !== undefined && report.summaries[unit.hash]?.summary !== unit.summary);
+    if (metadataChanged || Object.keys(next.summaries).length !== Object.keys(report.summaries).length) {
+      await saveReport(project, next, units, doc.title);
+      return next;
+    }
+    return report;
+  }
   // A run in the background may be writing the first summaries already.
   if (sectioning) {
     await sectioning.done;
@@ -159,37 +170,45 @@ function updateMessage(id: string, patch: Partial<ChatMessage>) {
 /** The turn running now, so it can be stopped. */
 let running: RunControl | null = null;
 
+export function setChatMode(mode: ChatMode) {
+  if (mode === "auto" || mode === "chat" || mode === "edit") useChat.setState({ mode });
+}
+
 export async function sendChatMessage(text: string): Promise<void> {
   const instruction = text.trim();
   if (!instruction || useChat.getState().runningId) return;
+  const { mode, root: projectRoot, sessionId } = useChat.getState();
   // Only the question goes; the editor's open file, selection and cursor
   // often have nothing to do with what is asked.
   const requestId = newRequestId();
   const turn: Turn = {
     id: requestId,
     instruction,
+    mode,
     turns: turnsOf(useChat.getState().messages),
     summary: useChat.getState().summary,
   };
 
-  const first = CHAT_MODELS.judge.primary;
-  const userMessage: ChatMessage = { id: `${requestId}-u`, role: "user", content: instruction, status: "done" };
+  const first = CHAT_MODELS.refine.primary;
+  const userMessage: ChatMessage = { id: `${requestId}-u`, role: "user", content: instruction, status: "done", mode };
   const assistantMessage: ChatMessage = {
     id: requestId,
     role: "assistant",
     content: "",
+    mode,
     status: "streaming",
     provider: first.provider,
     model: first.model,
     instruction,
-    stage: "judge",
+    stage: "refine",
   };
   useChat.setState((s) => ({ messages: [...s.messages, userMessage, assistantMessage], runningId: requestId }));
 
   // One trace per question; its id is the answer's message id.
-  const root = startSpan(requestId, null, "pipeline", "sendChatMessage", () => ({ question: instruction, models: CHAT_MODELS }));
+  const root = startSpan(requestId, null, "pipeline", "sendChatMessage", () => ({ question: instruction, ui_mode: mode, models: CHAT_MODELS }));
   step(requestId, root, "user", "receiveUserInput", instruction, () => ({
     question: instruction,
+    ui_mode: mode,
     session_turns: turn.turns.length,
     summary_covered_turns: turn.summary?.coveredTurns ?? 0,
     // How close the earlier turns are to the Session Summary Module's length limit.
@@ -221,6 +240,8 @@ export async function sendChatMessage(text: string): Promise<void> {
       status: "done",
       stage: undefined,
       route: result.outcome,
+      edits: result.edits,
+      editToolCallId: result.editToolCallId,
       provider: result.choice.provider,
       model: result.choice.model,
       fallbackFrom: result.fallbackFrom?.model,
@@ -233,7 +254,8 @@ export async function sendChatMessage(text: string): Promise<void> {
       fallback_from: result.fallbackFrom?.model ?? null,
       finishReason: result.finishReason,
       usage: result.usage,
-      edit_blocks: splitBlocks(content).filter((b) => b.kind === "code" && b.lang === "edit").length,
+      proposed_edits: result.edits?.length ?? 0,
+      ui_mode: mode,
     }));
     endSpan(root, "pipeline", { status: "done", route: result.route, outcome: result.outcome });
   } catch (err) {
@@ -243,11 +265,13 @@ export async function sendChatMessage(text: string): Promise<void> {
     failSpan(root, "pipeline", error);
   } finally {
     if (running === control) running = null;
-    useChat.setState({ runningId: null });
+    if (useChat.getState().runningId === requestId) useChat.setState({ runningId: null });
     // Stopped and failed turns count too: they are turns left unanswered.
-    scheduleSummary({ traceId: requestId, root });
-    // A turn that may have read the paper: summarize the sections edited since.
-    if (route !== "reply") scheduleSectionSummaries({ traceId: requestId, root });
+    if (useChat.getState().root === projectRoot && useChat.getState().sessionId === sessionId) {
+      scheduleSummary({ traceId: requestId, root });
+      // A turn that may have read the paper: summarize the sections edited since.
+      if (route) scheduleSectionSummaries({ traceId: requestId, root });
+    }
   }
 }
 
@@ -355,7 +379,12 @@ export function scheduleSectionSummaries(after?: { traceId: string; root: Span }
       summarized: sections - todo.length,
       to_summarize: todo.map((u) => u.key),
     }));
-    if (!todo.length || !current()) return;
+    if (!current()) return;
+    if (!todo.length) {
+      const next = withSummaries(report, [], units);
+      if (Object.keys(next.summaries).length !== Object.keys(report.summaries).length) await saveReport(project, next, units, doc.title);
+      return;
+    }
     const result = await summarizeSections(todo, {
       traceId: trace.traceId,
       parent: trace.root,
@@ -396,7 +425,7 @@ export async function openChatsFor(root: string | null): Promise<void> {
   stopSummary();
   stopSectionSummaries();
   clearTimeout(saveTimer);
-  useChat.setState({ root, messages: [], summary: null, sessions: [], sessionId: newSessionId(), createdAt: Date.now() });
+  useChat.setState({ root, mode: "auto", messages: [], summary: null, sessions: [], sessionId: newSessionId(), createdAt: Date.now() });
   if (!root) return;
   const sessions = await listSessions(root).catch(() => [] as SessionSummary[]);
   if (useChat.getState().root !== root) return;
@@ -420,12 +449,23 @@ export async function switchChatSession(id: string): Promise<void> {
   flushSave();
   const file = await loadSession<ChatMessage>(root, id).catch(() => null);
   if (!file || useChat.getState().root !== root) return;
-  // An answer that was still streaming when the app closed is shown as stopped.
-  const messages = file.messages.map((m) => (m.status === "streaming" ? { ...m, status: "cancelled" as const, stage: undefined } : m));
+  const messages = file.messages.map((saved) => {
+    // An answer that was still streaming when the app closed is shown as stopped.
+    const message = saved.status === "streaming" ? { ...saved, status: "cancelled" as const, stage: undefined } : saved;
+    if (!message.edits) return message;
+    // Older proposals may have been generated from unopened CRLF files.
+    // Keep them compatible with the LF source used by file reads and CodeMirror.
+    return { ...message, edits: message.edits.map((edit) => ({
+      ...edit,
+      original: edit.original.replace(/\r\n?/g, "\n"),
+      revised: edit.revised.replace(/\r\n?/g, "\n"),
+    })) };
+  });
   // A summary of more turns than the session has does not belong to it.
   const summary = readSummary(file.summary);
   const fits = summary && summary.coveredTurns <= turnsOf(messages).length ? summary : null;
-  useChat.setState({ messages, summary: fits, sessionId: id, createdAt: file.createdAt });
+  const mode = file.mode === "chat" || file.mode === "edit" ? file.mode : "auto";
+  useChat.setState({ messages, mode, summary: fits, sessionId: id, createdAt: file.createdAt });
 }
 
 export async function deleteChatSession(id: string): Promise<void> {
@@ -455,10 +495,10 @@ function sessionTitle(messages: ChatMessage[]): string {
 /** Write the shown conversation now (when it has messages and no answer is streaming). */
 function flushSave() {
   clearTimeout(saveTimer);
-  const { root, sessionId, createdAt, messages, summary, runningId, sessions } = useChat.getState();
+  const { root, sessionId, createdAt, messages, summary, runningId, sessions, mode } = useChat.getState();
   if (!root || messages.length === 0 || runningId) return;
   const updatedAt = Date.now();
-  void saveSession(root, sessionId, { version: SESSION_VERSION, createdAt, updatedAt, messages, ...(summary ? { summary } : {}) }).catch(() => {
+  void saveSession(root, sessionId, { version: SESSION_VERSION, createdAt, updatedAt, mode, messages, ...(summary ? { summary } : {}) }).catch(() => {
     // Saving is best effort; the conversation stays usable in memory.
   });
   const entry: SessionSummary = { id: sessionId, title: sessionTitle(messages), createdAt, updatedAt, messageCount: messages.length };
@@ -468,7 +508,7 @@ function flushSave() {
 // Save shortly after the conversation changes (new message, finished answer, applied edit, new summary).
 useChat.subscribe((state, prev) => {
   if (state.root !== prev.root || state.sessionId !== prev.sessionId) setDebugProject(state.root, state.sessionId);
-  if (state.messages === prev.messages && state.runningId === prev.runningId && state.summary === prev.summary) return;
+  if (state.messages === prev.messages && state.runningId === prev.runningId && state.summary === prev.summary && state.mode === prev.mode) return;
   if (state.sessionId !== prev.sessionId || state.root !== prev.root) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flushSave, SAVE_DELAY_MS);
@@ -502,23 +542,77 @@ export function splitBlocks(content: string): Block[] {
 
 function setEditState(messageId: string, index: number, state: EditState) {
   useChat.setState((s) => ({
-    messages: s.messages.map((m) => (m.id === messageId ? { ...m, editStates: { ...m.editStates, [index]: state } } : m)),
+    messages: s.messages.map((m) => (m.id === messageId && !m.editStates?.[index] ? { ...m, editStates: { ...m.editStates, [index]: state } } : m)),
   }));
 }
 
-/** Apply one proposed edit to its file (opened in the background if needed). */
-async function applyEdit(edit: ProposedEdit): Promise<{ path: string; line: number } | null> {
-  if (!editorSession.has(edit.path) && !(await openFile(edit.path, { activate: false }))) return null;
-  const text = editorSession.textOf(edit.path);
-  const at = text === undefined ? null : locateEdit(text, edit.original);
-  if (!text || !at) return null;
-  editorSession.applyEdit(edit.path, at.from, at.to, edit.revised);
-  return { path: edit.path, line: lineOf(text, at.from) };
+/** Only proposals actually saved on a completed Edit response may execute. */
+function messageEdits(message: ChatMessage): ProposedEdit[] {
+  if (message.status !== "done" || message.truncated || message.mode === "chat" || message.route === "chat") return [];
+  if (message.mode) return message.route === "edit" && message.editToolCallId ? message.edits ?? [] : [];
+  // Existing version 1/2 sessions used fenced edit blocks.
+  return splitBlocks(message.content).flatMap((block) => {
+    const edit = block.kind === "code" && block.lang === "edit" ? parseEditBody(block.meta ?? "", block.text) : null;
+    return edit ? [edit] : [];
+  });
+}
+
+/** Execute the accepted apply_paper_edits arguments in the current project. */
+async function executePaperEditTool(messageId: string, entries: { index: number; edit: ProposedEdit }[]): Promise<{ path: string; line: number } | null> {
+  const before = useChat.getState();
+  const project = useProject.getState().root;
+  const message = before.messages.find((m) => m.id === messageId);
+  if (!project || before.root !== project || !message || !entries.length || new Set(entries.map((e) => e.index)).size !== entries.length) return null;
+  const current = () => useChat.getState().root === project && useProject.getState().root === project && useChat.getState().sessionId === before.sessionId;
+  const authorized = () => {
+    const latest = useChat.getState().messages.find((m) => m.id === messageId);
+    if (!latest) return false;
+    const saved = messageEdits(latest);
+    return entries.every(({ index, edit }) => {
+      const original = saved[index];
+      return !latest.editStates?.[index] && original && original.path === edit.path && original.original === edit.original && original.revised === edit.revised;
+    });
+  };
+  if (!authorized()) return null;
+  const span = startSpan(messageId, null, "edit", "apply_paper_edits", () => ({ call_id: message.editToolCallId ?? "legacy", edits: entries.map((e) => e.edit) }));
+  try {
+    const known = currentTexts();
+    for (const { edit } of entries) {
+      if (!validEditPath(edit.path) || !known.has(edit.path) || !current()) throw new Error(t("agent.failed"));
+      if (!editorSession.has(edit.path) && !(await openFile(edit.path, { activate: false }))) throw new Error(t("agent.failed"));
+    }
+    if (!current() || !authorized()) {
+      endSpan(span, "edit", { applied: 0, reason: "project, session or pending proposal changed" });
+      return null;
+    }
+    const texts = new Map(entries.map(({ edit }) => [edit.path, editorSession.textOf(edit.path) ?? ""]));
+    const edits = entries.map(({ edit }) => {
+      if (message.mode) return edit;
+      const text = texts.get(edit.path)!;
+      const at = locateEdit(text, edit.original);
+      return at ? { ...edit, original: text.slice(at.from, at.to) } : edit;
+    });
+    const replacements = preparePaperEdits(edits, texts);
+    step(messageId, span, "edit", "validatePaperEdits", { edits: entries.length }, { valid: !!replacements });
+    if (!replacements) throw new Error(t("agent.failed"));
+    const first = replacements[0];
+    const location = { path: first.path, line: lineOf(texts.get(first.path)!, first.from) };
+    // All files and anchors have passed validation. Offsets descend within each file.
+    for (const edit of replacements) editorSession.applyEdit(edit.path, edit.from, edit.to, edit.revised);
+    for (const { index } of entries) setEditState(messageId, index, "applied");
+    endSpan(span, "edit", { applied: entries.length, files: [...new Set(replacements.map((e) => e.path))] });
+    // Summarize actual source changes, including unsaved editor buffers.
+    scheduleSectionSummaries({ traceId: messageId, root: span });
+    return location;
+  } catch (err) {
+    failSpan(span, "edit", err);
+    if (current()) for (const { index } of entries) setEditState(messageId, index, "failed");
+    return null;
+  }
 }
 
 export async function applyChatEdit(messageId: string, index: number, edit: ProposedEdit) {
-  const done = await applyEdit(edit);
-  setEditState(messageId, index, done ? "applied" : "failed");
+  const done = await executePaperEditTool(messageId, [{ index, edit }]);
   if (done) await navigateTo(done.path, done.line);
 }
 
@@ -526,18 +620,10 @@ export function rejectChatEdit(messageId: string, index: number) {
   setEditState(messageId, index, "rejected");
 }
 
-/** Apply every edit of an answer that is still pending, in order. */
+/** Preflight the entire pending batch before applying its replacements. */
 export async function applyAllChatEdits(messageId: string, edits: { index: number; edit: ProposedEdit }[]) {
-  let applied = 0;
-  let failed = 0;
-  for (const { index, edit } of edits) {
-    const done = await applyEdit(edit);
-    setEditState(messageId, index, done ? "applied" : "failed");
-    if (done) applied++;
-    else failed++;
-  }
-  if (applied) notify("success", t("agent.appliedCount", { count: applied }));
-  if (failed) notify("error", t("agent.failedCount", { count: failed }));
+  const done = await executePaperEditTool(messageId, edits);
+  notify(done ? "success" : "error", t(done ? "agent.appliedCount" : "agent.failedCount", { count: edits.length }));
 }
 
 export function rejectAllChatEdits(messageId: string, indexes: number[]) {

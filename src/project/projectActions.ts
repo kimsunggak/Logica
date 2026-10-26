@@ -195,6 +195,7 @@ export async function openFile(
     let lossy = false;
     try {
       const file = await readTextFile(root, path);
+      if (useProject.getState().root !== root) return false;
       content = file.content;
       mtime = file.mtime;
       lossy = file.lossy;
