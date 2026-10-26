@@ -126,6 +126,7 @@ svg text { font-family: var(--sans); fill: var(--ink); }
 .edge.done { stroke: var(--ok); }
 .edge.active { stroke: var(--run); stroke-width: 2.2; stroke-dasharray: 6 5; animation: flow .7s linear infinite; }
 .edge.call { stroke-dasharray: 3 4; }
+.edge.background { stroke-dasharray: 7 5; }
 .edge.skip { stroke-dasharray: 2 5; opacity: .35; }
 .edge.call.active { stroke: var(--llm); stroke-dasharray: 6 5; }
 @keyframes flow { to { stroke-dashoffset: -11; } }
@@ -246,7 +247,7 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
       <span><i style="border-color:var(--ok)"></i>completed</span>
       <span><i style="border-color:var(--err);background:var(--err-soft)"></i>error</span>
       <span><i style="border-color:var(--wait);border-style:dotted;opacity:.5"></i>skipped (이 갈래에서 건너뜀)</span>
-      <span><i style="border-color:var(--wait);border-style:dashed;background:var(--soft);opacity:.55"></i>inactive (요약 조건 전)</span>
+      <span><i style="border-color:var(--wait);border-style:dashed;background:var(--soft);opacity:.55"></i>inactive (이번 턴 요약 실행 없음)</span>
       <span><i style="border-color:var(--llm)"></i>LLM 호출 (Gateway + Rust)</span>
       <span><i style="border-color:var(--ink-2);background:var(--soft);border-radius:999px"></i>디버깅 모듈 (결과 기록만 함)</span>
     </div>
@@ -437,23 +438,31 @@ function summaryIdle(t) {
 const FOLD_AT = 10;
 const FOLD_CHARS = 40000;
 
-/**
- * The Paper Summary Module in a turn's graph before it reports: after a
- * turn that read the paper it checks which sections have no summary yet.
- */
+/** A section check is not a summary run; keep it inactive when nothing needs updating. */
 function sectionsIdle(t) {
+  const check = spansOf(t, "sections").find((s) => s.fn === "checkSectionSummaries");
+  if (check && check.output) {
+    const count = check.output.to_summarize.length;
+    return count
+      ? { status: "waiting", lines: [`변경·누락 ${count}개 섹션 갱신 대기`] }
+      : { status: "inactive", lines: ["이번 턴 요약 실행 없음", "모든 섹션 요약이 최신 상태"] };
+  }
+  const orch = mainSpan(t, "orchestrator");
+  const map = orch && orch.input && orch.input.paper_map;
   const root = rootOf(t);
-  if (!root || root.status === "running") return { status: "waiting", lines: ["턴이 끝나면 섹션 요약 확인"] };
+  if (!orch && (!root || root.status === "running")) return { status: "waiting", lines: ["최초 요약 생성 또는 기존 요약 확인 대기"] };
+  const lines = ["이번 턴 요약 실행 없음", map && map.summarized ? "저장된 논문 요약 사용" : "판단에 사용한 섹션 요약 없음"];
+  if (root && root.status === "running") return { status: "inactive", lines: [...lines, "답변 후 변경·누락 섹션 확인"] };
   const r = routeOf(t);
-  if (r && r.route === "reply") return { status: "inactive", lines: ["논문을 읽지 않은 턴", "섹션 요약 확인 안 함"] };
-  return { status: "inactive", lines: ["섹션 요약 확인 전"] };
+  if (r && r.route === "reply") return { status: "inactive", lines: [...lines, "잡담 경로: 답변 후 갱신 확인 생략"] };
+  return { status: "inactive", lines: [...lines, "변경·누락 섹션 확인 전"] };
 }
 
 function moduleStatus(t, module) {
   if (module === "llm") return llmStatus(t);
   const list = spansOf(t, module);
   if (module === "summary" && !list.length && !isSummary(t)) return summaryIdle(t).status;
-  if (module === "sections" && !list.length) return sectionsIdle(t).status;
+  if (module === "sections" && !mainSpan(t, "sections")) return sectionsIdle(t).status;
   const r = routeOf(t);
   if (!list.length && r && !r.path.includes(module)) return "skipped";
   if (!list.length) return "waiting";
@@ -520,15 +529,19 @@ function nodeLines(t, module) {
     }));
   }
   if (module === "summary" && !fns.length && t && !isSummary(t)) return summaryIdle(t).lines.map((text) => ({ status: "wait", text }));
-  if (module === "sections" && !fns.length && t) return sectionsIdle(t).lines.map((text) => ({ status: "wait", text }));
+  if (module === "sections" && t && !mainSpan(t, "sections")) return sectionsIdle(t).lines.map((text) => ({ status: "wait", text }));
   const lines = fns.map((s) => ({ status: s.status, text: (s.source === "rust" ? "rust  " : "") + s.fn + time(s) }));
-  const main = t && mainSpan(t, module);
+  const main = t && (module === "sections" ? fns.filter((s) => s.fn === MAIN_FN.sections).at(-1) : mainSpan(t, module));
   if (module === "summary" && main && main.output) {
     lines.unshift({ status: "route", text: `턴 1~${main.output.covered_turns} 요약됨, 변경 ${main.output.ops}개, 무시 ${main.output.ignored}개` });
   }
   if (module === "sections") {
     const check = fns.find((s) => s.fn === "checkSectionSummaries");
     const head = [];
+    const runs = fns.filter((s) => s.fn === MAIN_FN.sections);
+    const latest = runs.at(-1);
+    const orch = t && mainSpan(t, "orchestrator");
+    if (latest) head.push({ status: "route", text: !orch || latest.start <= orch.start ? "최초 논문 요약 생성" : "변경·누락 섹션 요약 갱신" });
     if (check && check.output) {
       const c = check.output;
       head.push({ status: "route", text: `요약 ${c.summarized}/${c.sections}개 있음${c.to_summarize.length ? `, ${c.to_summarize.length}개 요약` : ", 모두 최신"}` });
@@ -614,9 +627,9 @@ function edgeClass(t, from, to) {
 /** Arrowheads for the three edge states; a skipped edge fades with its path. */
 const MARKERS = `<defs>${["", "done", "active"].map((c) =>
   `<marker id="ah-${c || "wait"}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah ${c}" d="M0,0 L10,5 L0,10 z"></path></marker>`).join("")}</defs>`;
-const edgeSvg = (c, d, label, lx, ly) =>
-  `<path class="edge ${c}" d="${d}" marker-end="url(#ah-${c === "done" || c === "active" ? c : "wait"})"></path>` +
-  (label ? `<text class="elabel" x="${lx}" y="${ly}">${esc(label)}</text>` : "");
+const edgeSvg = (c, d, label, lx, ly, background = false, anchor = "start") =>
+  `<path class="edge ${c}${background ? " background" : ""}" d="${d}" marker-end="url(#ah-${c === "done" || c === "active" ? c : "wait"})"></path>` +
+  (label ? `<text class="elabel" x="${lx}" y="${ly}" text-anchor="${anchor}">${esc(label)}</text>` : "");
 
 /**
  * The LLM Gateway as a bar under the graph: every model call of the turn in
@@ -662,20 +675,15 @@ function renderSummaryGraph(t) {
   ].join("");
 }
 
-/**
- * One turn, top to bottom. The judge hands the turn to one of three modules,
- * so they sit side by side; only the Refine Module goes on to another one
- * (the Answer Module, beside it). The model calls are listed in the bar below.
- */
+/** Fixed module positions: paper summaries supply the judge, and updates loop back after an answer. */
 function renderGraph(t) {
   if (isSummary(t)) return renderSummaryGraph(t);
-  const W = 240, COL = { reply: 20, answer: 300, refine: 580 };
-  const Y = { user: 10, orchestrator: 126, branch: 300, final: 486 };
-  const H = { user: 84, orchestrator: 116, branch: 130, final: 76, summary: 104 };
-  // The first question about a paper summarizes it before the judge runs; later ones after the turn.
-  const sectionsRun = t && mainSpan(t, "sections");
+  const W = 280, COL = { reply: 20, answer: 360, refine: 700 };
+  const Y = { user: 10, orchestrator: 176, branch: 374, final: 578 };
+  const H = { user: 84, orchestrator: 140, branch: 144, final: 76, summary: 132, sections: 146 };
+  const sectionsRuns = t ? spansOf(t, "sections").filter((s) => s.fn === MAIN_FN.sections) : [];
   const orchestratorRun = t && mainSpan(t, "orchestrator");
-  const sectionsFirst = Boolean(sectionsRun && (!orchestratorRun || sectionsRun.start <= orchestratorRun.start));
+  const updating = sectionsRuns.some((s) => orchestratorRun && s.start > orchestratorRun.start);
   const at = {
     user: [COL.answer, Y.user, H.user],
     orchestrator: [COL.answer, Y.orchestrator, H.orchestrator],
@@ -684,7 +692,7 @@ function renderGraph(t) {
     refine: [COL.refine, Y.branch, H.branch],
     final: [COL.answer, Y.final, H.final],
     summary: [COL.refine, Y.final, H.summary],
-    sections: [COL.reply, sectionsFirst ? Y.user : Y.final, H.summary],
+    sections: [COL.reply, Y.user, H.sections],
   };
   const r = routeOf(t);
   // An edge is on the turn's path when the route goes straight from one module to the other.
@@ -710,33 +718,28 @@ function renderGraph(t) {
     edgeSvg(cls("answer", "final"), `M${mid("answer")} ${bBottom} V${fTop - 2}`, "answer (streamed)", mid("answer") + 10, (bBottom + fTop) / 2 + 4),
     edgeSvg(cls("refine", "final"), `M${mid("refine")} ${bBottom} C${mid("refine")} ${bBottom + 44}, ${mid("final") + 60} ${fTop - 40}, ${mid("final") + 60} ${fTop - 2}`, "되묻기", mid("refine") - 60, bBottom + 22),
   ];
-  // The summary runs after the turn ends, in the background.
+  // Session summarization and paper updates are independent background work.
   const sy = fTop + H.final / 2;
   edges.push(
-    edgeSvg(t && spansOf(t, "summary").length ? edgeClass(t, "final", "summary") : "skip", `M${COL.answer + W} ${sy} H${COL.refine - 2}`),
-    `<text class="elabel" x="${COL.answer + W + 20}" y="${sy - 9}" text-anchor="middle">이후</text>`,
+    edgeSvg(t && spansOf(t, "summary").length ? edgeClass(t, "final", "summary") : t ? "skip" : "", `M${COL.answer + W} ${sy} H${COL.refine - 2}`, "요약 조건", COL.answer + W + 30, sy - 12, true, "middle"),
   );
-  if (sectionsFirst) {
-    // Before the judge: the question starts it, and the judge reads the map it wrote.
-    const uy = top("user") + H.user / 2;
-    edges.push(
-      edgeSvg(edgeClass(t, "user", "sections"), `M${COL.answer} ${uy} H${COL.reply + W + 2}`),
-      `<text class="elabel" x="${COL.answer - 20}" y="${uy - 22}" text-anchor="middle">첫</text>`,
-      `<text class="elabel" x="${COL.answer - 20}" y="${uy - 9}" text-anchor="middle">질문</text>`,
-      edgeSvg(edgeClass(t, "sections", "orchestrator"), `M${mid("sections")} ${bottom("sections")} C${mid("sections")} ${bottom("sections") + 50}, ${COL.answer - 60} ${top("orchestrator") + H.orchestrator / 2}, ${COL.answer - 2} ${top("orchestrator") + H.orchestrator / 2}`, "논문 지도", mid("sections") + 10, bottom("sections") + 40),
-    );
-  } else {
-    edges.push(
-      edgeSvg(t && spansOf(t, "sections").length ? edgeClass(t, "final", "sections") : "skip", `M${COL.answer} ${sy} H${COL.reply + W + 2}`),
-      `<text class="elabel" x="${COL.answer - 20}" y="${sy - 9}" text-anchor="middle">이후</text>`,
-    );
-  }
-  const rowBottom = Math.max(bottom("final"), bottom("summary"), sectionsFirst ? 0 : bottom("sections"));
-  const bar = gatewaySvg(t, 20, rowBottom + 24, 800);
-  graphSize(840, rowBottom + 24 + bar.h + 8);
+  const fileY = top("orchestrator") + H.orchestrator / 2;
+  const paperStatus = t ? moduleStatus(t, "sections") : "waiting";
+  const writeClass = !t ? "" : sectionsRuns.length ? paperStatus === "running" ? "active" : paperStatus === "completed" ? "done" : "skip" : "skip";
+  const map = orchestratorRun && orchestratorRun.input && orchestratorRun.input.paper_map;
+  const readClass = !t ? "" : map && map.summarized ? moduleStatus(t, "orchestrator") === "running" ? "active" : "done" : "skip";
+  edges.push(
+    edgeSvg(writeClass, `M${mid("sections")} ${bottom("sections")} V${fileY - 44}`, "생성·갱신", mid("sections") + 10, fileY - 64),
+    edgeSvg(readClass, `M${COL.reply + W} ${fileY} H${COL.answer - 2}`, "논문 지도", COL.reply + W + 30, fileY - 12, false, "middle"),
+    edgeSvg(updating ? edgeClass(t, "final", "sections") : t ? "skip" : "", `M${COL.answer} ${sy} H8 V${top("sections") + H.sections / 2} H${COL.reply - 2}`, "변경·누락 시 갱신", mid("sections"), sy - 12, true),
+  );
+  const rowBottom = Math.max(bottom("final"), bottom("summary"));
+  const bar = gatewaySvg(t, 20, rowBottom + 24, 960);
+  graphSize(1000, rowBottom + 24 + bar.h + 8);
   $("graph").innerHTML = [
     MARKERS,
     ...edges,
+    flowBox("architecture-paper-summary", "document", mid("sections"), fileY, W, 84, ["paper-summary.yaml", "논문 요약 저장 · 재사용"], "", "paperSummary"),
     ...[...CHAIN, "summary", "sections"].map((m) => nodeSvg(t, m, at[m][0], at[m][1], W, at[m][2])),
     bar.svg,
   ].join("");
