@@ -4,6 +4,7 @@ import { editorSession } from "../editor/editorSession";
 import { useProject } from "../project/projectStore";
 import { applyAllChatEdits, applyChatEdit, rejectChatEdit, summaryIdle, useChat, type ChatMessage } from "./chatStore";
 import { call } from "../lib/backend";
+import { textHash } from "./paper/sections";
 
 const { files, open, navigate } = vi.hoisted(() => ({ files: new Map<string, string>(), open: vi.fn(), navigate: vi.fn() }));
 vi.mock("../project/projectActions", () => ({
@@ -60,7 +61,7 @@ describe("accepted apply_paper_edits execution", () => {
 
   it("applies an anchor repeated in another section to the section it was copied from", async () => {
     files.set("main.tex", "\\section{A}\nShared ending.\n\\section{B}\nShared ending.\n");
-    const edit: ProposedEdit = { path: "main.tex", original: "Shared ending.", revised: "New ending.", lines: { from: 3, to: 4 } };
+    const edit: ProposedEdit = { path: "main.tex", original: "Shared ending.", revised: "New ending.", lines: { from: 3, to: 4, hash: textHash("\\section{B}\nShared ending.") } };
     useChat.setState({ messages: [proposal([edit])] });
     await applyChatEdit("answer", 0, edit);
     expect(editorSession.textOf("main.tex")).toBe("\\section{A}\nShared ending.\n\\section{B}\nNew ending.\n");

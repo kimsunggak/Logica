@@ -20,10 +20,11 @@ export interface ProposedEdit {
   original: string;
   revised: string;
   /**
-   * Lines (1-based, inclusive) of the source block ORIGINAL was copied from.
-   * The same text can appear elsewhere in the file; this tells them apart.
+   * Lines (1-based, inclusive) of the source block ORIGINAL was copied from,
+   * with the hash of that block's text. The same text can appear elsewhere in
+   * the file; this tells them apart while the block is unchanged.
    */
-  lines?: { from: number; to: number };
+  lines?: { from: number; to: number; hash: string };
 }
 
 const BODY = /^<{7} ?ORIGINAL[^\n]*\n([\s\S]*?)\n?={7}[^\n]*\n([\s\S]*?)\n?>{7} ?REVISED[^\n]*\s*$/;

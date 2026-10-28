@@ -5,6 +5,7 @@ import { ALL_SECTIONS, APPLY_PAPER_EDITS } from "../../ai/tools/chatTools";
 import type { AIResponse, SourceRange } from "../../ai/types";
 import { t } from "../../i18n";
 import type { Paper, Scope } from "./scope";
+import { textHash } from "./sections";
 
 export interface EditProposal {
   callId: string;
@@ -19,7 +20,9 @@ export function validEditPath(path: string): boolean {
 /**
  * Exact matching for tool edits: a changed or ambiguous anchor must be
  * regenerated. When the text also appears elsewhere in the file, `lines` (the
- * source block it was copied from) decides which occurrence is meant.
+ * source block it was copied from) decides which occurrence is meant, but only
+ * while those lines still hold that block: lines added or removed above it
+ * would otherwise point at another occurrence.
  */
 export function locateExact(text: string, original: string, lines?: ProposedEdit["lines"]): { from: number; to: number } | null {
   if (!original) return null;
@@ -28,7 +31,8 @@ export function locateExact(text: string, original: string, lines?: ProposedEdit
   let from = hits.length === 1 ? hits[0] : undefined;
   if (hits.length > 1 && lines) {
     const block = lineSpan(text, lines);
-    const inside = block ? hits.filter((at) => at >= block.from && at + original.length <= block.to) : [];
+    const same = block && textHash(text.slice(block.from, block.to)) === lines.hash;
+    const inside = same ? hits.filter((at) => at >= block.from && at + original.length <= block.to) : [];
     if (inside.length === 1) from = inside[0];
   }
   return from === undefined ? null : { from, to: from + original.length };
@@ -36,6 +40,7 @@ export function locateExact(text: string, original: string, lines?: ProposedEdit
 
 /** Offsets of lines `from`..`to` (1-based, inclusive), without the line break that ends them. */
 function lineSpan(text: string, lines: { from: number; to: number }): { from: number; to: number } | null {
+  if (lines.from < 1 || lines.to < lines.from) return null;
   let start = 0;
   for (let line = 1; line < lines.from; line++) {
     const next = text.indexOf("\n", start);
@@ -89,7 +94,8 @@ export function readEditProposal(response: AIResponse, sources: SourceRange[]): 
     if (typeof path !== "string" || !validEditPath(path) || typeof original !== "string" || !original.trim() || typeof revised !== "string" || original === revised) throw invalid();
     const matches = sources.filter((s) => s.path === path && locateExact(s.text, original));
     if (matches.length !== 1) throw invalid();
-    return { path, original, revised, lines: { from: matches[0].fromLine, to: matches[0].toLine } };
+    const [source] = matches;
+    return { path, original, revised, lines: { from: source.fromLine, to: source.toLine, hash: textHash(source.text) } };
   });
   return { callId: call.id, summary: summary.trim(), edits: parsed };
 }

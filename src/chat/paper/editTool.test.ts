@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AIResponse, SourceRange } from "../../ai/types";
 import { locateExact, preparePaperEdits, readEditProposal, validEditPath } from "./editTool";
+import { textHash } from "./sections";
 
 const sources: SourceRange[] = [{ path: "sections/method.tex", fromLine: 4, toLine: 5, text: "A long explanation.\nAnother paragraph." }];
 const edit = { path: sources[0].path, original: "A long explanation.", revised: "A concise explanation." };
@@ -11,7 +12,7 @@ const response = (edits: unknown): AIResponse => ({
 
 describe("editing tool arguments", () => {
   it("reads a queued tool proposal without applying it", () => {
-    expect(readEditProposal(response([edit]), sources)).toEqual({ callId: "tool-1", summary: "Proposed changes.", edits: [{ ...edit, lines: { from: 4, to: 5 } }] });
+    expect(readEditProposal(response([edit]), sources)).toEqual({ callId: "tool-1", summary: "Proposed changes.", edits: [{ ...edit, lines: { from: 4, to: 5, hash: textHash(sources[0].text) } }] });
   });
   it.each(["/tmp/a.tex", "../a.tex", "sections/../a.tex", "C:\\a.tex", "main.bib", "./main.tex", "a//b.tex"])("rejects invalid source path %s", (path) => {
     expect(validEditPath(path)).toBe(false);
@@ -38,18 +39,26 @@ describe("an anchor that also appears outside its section", () => {
   const file = "\\section{A}\n\\begin{itemize}\n\\item a\n\\end{itemize}\n\\section{B}\n\\begin{itemize}\n\\item b\n\\end{itemize}\n";
   const sectionB: SourceRange = { path: "main.tex", fromLine: 5, toLine: 8, text: file.split("\n").slice(4, 8).join("\n") };
 
+  const lines = { from: 5, to: 8, hash: textHash(sectionB.text) };
+
   it("applies to the occurrence in the section the model was given", () => {
     const proposal = readEditProposal(response([{ path: "main.tex", original: "\\end{itemize}", revised: "\\item c\n\\end{itemize}" }]), [sectionB]);
-    expect(proposal.edits[0].lines).toEqual({ from: 5, to: 8 });
+    expect(proposal.edits[0].lines).toEqual(lines);
     const [change] = preparePaperEdits(proposal.edits, new Map([["main.tex", file]]))!;
     expect(file.slice(0, change.from) + change.revised + file.slice(change.to)).toBe(file.replace("\\item b\n", "\\item b\n\\item c\n"));
   });
   it("stays ambiguous without the section, or twice inside it", () => {
     expect(locateExact(file, "\\end{itemize}")).toBeNull();
-    expect(locateExact(file, "itemize}", { from: 5, to: 8 })).toBeNull();
+    expect(locateExact(file, "itemize}", lines)).toBeNull();
+  });
+  it("refuses a repeated anchor once lines above it moved the section", () => {
+    // Four new lines put the first section's anchor inside the saved line range.
+    expect(locateExact("1\n2\n3\n4\n" + file, "\\end{itemize}", lines)).toBeNull();
+    // The same happens when the section itself was changed.
+    expect(locateExact(file.replace("\\item b", "\\item B"), "\\end{itemize}", lines)).toBeNull();
   });
   it("finds a text unique in the file even after its section moved", () => {
-    expect(locateExact(file, "\\item b", { from: 1, to: 2 })).toEqual({ from: file.indexOf("\\item b"), to: file.indexOf("\\item b") + 7 });
+    expect(locateExact("1\n2\n3\n4\n" + file, "\\item b", lines)).not.toBeNull();
   });
 });
 
