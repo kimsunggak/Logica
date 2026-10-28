@@ -714,11 +714,15 @@ async function executePaperEditTool(messageId: string, entries: { index: number;
   };
   if (!authorized()) return null;
   const span = startSpan(messageId, null, "edit", "apply_paper_edits", () => ({ call_id: message.editToolCallId ?? "legacy", edits: entries.map((e) => e.edit) }));
+  // Until validation names the proposals that cannot apply, an error fails the whole batch.
+  let failed = entries;
   try {
     const known = currentTexts();
+    const openable = (path: string) => validEditPath(path) && known.has(path);
+    // A file that cannot be opened fails only its own proposals, in validation below.
     for (const { edit } of entries) {
-      if (!validEditPath(edit.path) || !known.has(edit.path) || !current()) throw new Error(t("agent.failed"));
-      if (!editorSession.has(edit.path) && !(await openFile(edit.path, { activate: false }))) throw new Error(t("agent.failed"));
+      if (!current()) break;
+      if (openable(edit.path) && !editorSession.has(edit.path)) await openFile(edit.path, { activate: false });
     }
     if (!current() || !authorized()) {
       endSpan(span, "edit", { applied: 0, reason: "project, session or pending proposal changed" });
@@ -731,17 +735,19 @@ async function executePaperEditTool(messageId: string, entries: { index: number;
       endSpan(span, "edit", { applied: 0, reason: "file is not UTF-8 (read-only)" });
       return null;
     }
-    const texts = new Map(entries.map(({ edit }) => [edit.path, editorSession.textOf(edit.path) ?? ""]));
+    const texts = new Map(entries.filter(({ edit }) => openable(edit.path) && editorSession.has(edit.path)).map(({ edit }) => [edit.path, editorSession.textOf(edit.path) ?? ""]));
     const edits = entries.map(({ edit }) => {
-      if (message.mode) return edit;
-      const text = texts.get(edit.path)!;
+      const text = texts.get(edit.path);
+      if (message.mode || text === undefined) return edit;
       const at = locateEdit(text, edit.original);
       return at ? { ...edit, original: text.slice(at.from, at.to) } : edit;
     });
     // Tool edits apply where their highlight is now, wherever the text has moved.
     const ranges = message.mode ? entries.map(({ index, edit }) => highlighted(messageId, index, edit)) : undefined;
     const replacements = preparePaperEdits(edits, texts, ranges);
-    step(messageId, span, "edit", "validatePaperEdits", { edits: entries.length }, { valid: !!replacements });
+    // Only the proposals that cannot apply on their own fail; the others stay pending.
+    if (!replacements) failed = entries.filter((_, i) => !preparePaperEdits([edits[i]], texts, ranges && [ranges[i]]));
+    step(messageId, span, "edit", "validatePaperEdits", { edits: entries.length }, replacements ? { valid: true } : { valid: false, failed: failed.map((e) => e.index) });
     if (!replacements) throw new Error(t("agent.failed"));
     const first = replacements[0];
     const location = { path: first.path, line: lineOf(texts.get(first.path)!, first.from) };
@@ -754,7 +760,7 @@ async function executePaperEditTool(messageId: string, entries: { index: number;
     return location;
   } catch (err) {
     failSpan(span, "edit", err);
-    if (current()) for (const { index } of entries) setEditState(messageId, index, "failed");
+    if (current()) for (const { index } of failed) setEditState(messageId, index, "failed");
     return null;
   }
 }
@@ -771,6 +777,9 @@ export function rejectChatEdit(messageId: string, index: number) {
 /** Preflight the entire pending batch before applying its replacements. */
 export async function applyAllChatEdits(messageId: string, edits: { index: number; edit: ProposedEdit }[]) {
   const done = await executePaperEditTool(messageId, edits);
+  const states = useChat.getState().messages.find((m) => m.id === messageId)?.editStates;
+  const failed = edits.filter(({ index }) => states?.[index] === "failed").length;
+  if (!done && failed && failed < edits.length) return notify("error", t("agent.failedSome", { count: failed }));
   notify(done ? "success" : "error", t(done ? "agent.appliedCount" : "agent.failedCount", { count: edits.length }));
 }
 
