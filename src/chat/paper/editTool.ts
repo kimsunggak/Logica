@@ -16,12 +16,39 @@ export function validEditPath(path: string): boolean {
   return !!path && !/[\\:\u0000]/.test(path) && !path.startsWith("/") && path.split("/").every((part) => !!part && part !== "." && part !== "..") && path.endsWith(".tex");
 }
 
-/** Exact matching for tool edits: a changed or ambiguous anchor must be regenerated. */
-export function locateExact(text: string, original: string): { from: number; to: number } | null {
+/**
+ * Exact matching for tool edits: a changed or ambiguous anchor must be
+ * regenerated. When the text also appears elsewhere in the file, `lines` (the
+ * source block it was copied from) decides which occurrence is meant.
+ */
+export function locateExact(text: string, original: string, lines?: ProposedEdit["lines"]): { from: number; to: number } | null {
   if (!original) return null;
-  const from = text.indexOf(original);
-  if (from < 0 || text.indexOf(original, from + 1) >= 0) return null;
-  return { from, to: from + original.length };
+  const hits: number[] = [];
+  for (let at = text.indexOf(original); at >= 0; at = text.indexOf(original, at + 1)) hits.push(at);
+  let from = hits.length === 1 ? hits[0] : undefined;
+  if (hits.length > 1 && lines) {
+    const block = lineSpan(text, lines);
+    const inside = block ? hits.filter((at) => at >= block.from && at + original.length <= block.to) : [];
+    if (inside.length === 1) from = inside[0];
+  }
+  return from === undefined ? null : { from, to: from + original.length };
+}
+
+/** Offsets of lines `from`..`to` (1-based, inclusive), without the line break that ends them. */
+function lineSpan(text: string, lines: { from: number; to: number }): { from: number; to: number } | null {
+  let start = 0;
+  for (let line = 1; line < lines.from; line++) {
+    const next = text.indexOf("\n", start);
+    if (next < 0) return null;
+    start = next + 1;
+  }
+  let end = start;
+  for (let line = lines.from; line <= lines.to; line++) {
+    const next = text.indexOf("\n", end);
+    if (next < 0) return { from: start, to: text.length };
+    end = line === lines.to ? next : next + 1;
+  }
+  return { from: start, to: end };
 }
 
 /** All selected edit and reference sections must actually have been sent in full. */
@@ -62,7 +89,7 @@ export function readEditProposal(response: AIResponse, sources: SourceRange[]): 
     if (typeof path !== "string" || !validEditPath(path) || typeof original !== "string" || !original.trim() || typeof revised !== "string" || original === revised) throw invalid();
     const matches = sources.filter((s) => s.path === path && locateExact(s.text, original));
     if (matches.length !== 1) throw invalid();
-    return { path, original, revised };
+    return { path, original, revised, lines: { from: matches[0].fromLine, to: matches[0].toLine } };
   });
   return { callId: call.id, summary: summary.trim(), edits: parsed };
 }
@@ -79,7 +106,7 @@ export function preparePaperEdits(edits: ProposedEdit[], texts: ReadonlyMap<stri
   for (const edit of edits) {
     if (!validEditPath(edit.path) || typeof edit.original !== "string" || typeof edit.revised !== "string") return null;
     const text = texts.get(edit.path);
-    const at = text === undefined ? null : locateExact(text, edit.original);
+    const at = text === undefined ? null : locateExact(text, edit.original, edit.lines);
     if (!at || replacements.some((r) => r.path === edit.path && r.from < at.to && at.from < r.to)) return null;
     replacements.push({ ...edit, ...at });
   }

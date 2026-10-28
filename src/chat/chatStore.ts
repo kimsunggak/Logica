@@ -570,7 +570,8 @@ async function executePaperEditTool(messageId: string, entries: { index: number;
     const saved = messageEdits(latest);
     return entries.every(({ index, edit }) => {
       const original = saved[index];
-      return !latest.editStates?.[index] && original && original.path === edit.path && original.original === edit.original && original.revised === edit.revised;
+      return !latest.editStates?.[index] && original && original.path === edit.path && original.original === edit.original && original.revised === edit.revised
+        && original.lines?.from === edit.lines?.from && original.lines?.to === edit.lines?.to;
     });
   };
   if (!authorized()) return null;

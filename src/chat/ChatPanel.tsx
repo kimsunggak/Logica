@@ -63,7 +63,7 @@ function EditCard({ messageId, index, edit, state, exact = false }: { messageId:
     [edit, bibEntries, exact],
   );
   const text = currentTexts().get(edit.path);
-  const at = state ? null : text === undefined ? null : (exact ? locateExact : locateEdit)(text, edit.original);
+  const at = state || text === undefined ? null : exact ? locateExact(text, edit.original, edit.lines) : locateEdit(text, edit.original);
   const line = at && text !== undefined ? lineOf(text, at.from) : null;
   const errors = issues.filter((i) => i.severity === "error");
   return (

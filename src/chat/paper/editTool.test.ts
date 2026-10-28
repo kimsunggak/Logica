@@ -11,7 +11,7 @@ const response = (edits: unknown): AIResponse => ({
 
 describe("editing tool arguments", () => {
   it("reads a queued tool proposal without applying it", () => {
-    expect(readEditProposal(response([edit]), sources)).toEqual({ callId: "tool-1", summary: "Proposed changes.", edits: [edit] });
+    expect(readEditProposal(response([edit]), sources)).toEqual({ callId: "tool-1", summary: "Proposed changes.", edits: [{ ...edit, lines: { from: 4, to: 5 } }] });
   });
   it.each(["/tmp/a.tex", "../a.tex", "sections/../a.tex", "C:\\a.tex", "main.bib", "./main.tex", "a//b.tex"])("rejects invalid source path %s", (path) => {
     expect(validEditPath(path)).toBe(false);
@@ -31,6 +31,25 @@ describe("editing tool arguments", () => {
     expect(() => readEditProposal(invalid, sources)).toThrow();
     expect(() => readEditProposal({ ...response([edit]), finishReason: "length" }, sources)).toThrow();
     expect(() => readEditProposal({ ...response([edit]), toolCalls: [...response([edit]).toolCalls!, ...response([edit]).toolCalls!] }, sources)).toThrow();
+  });
+});
+
+describe("an anchor that also appears outside its section", () => {
+  const file = "\\section{A}\n\\begin{itemize}\n\\item a\n\\end{itemize}\n\\section{B}\n\\begin{itemize}\n\\item b\n\\end{itemize}\n";
+  const sectionB: SourceRange = { path: "main.tex", fromLine: 5, toLine: 8, text: file.split("\n").slice(4, 8).join("\n") };
+
+  it("applies to the occurrence in the section the model was given", () => {
+    const proposal = readEditProposal(response([{ path: "main.tex", original: "\\end{itemize}", revised: "\\item c\n\\end{itemize}" }]), [sectionB]);
+    expect(proposal.edits[0].lines).toEqual({ from: 5, to: 8 });
+    const [change] = preparePaperEdits(proposal.edits, new Map([["main.tex", file]]))!;
+    expect(file.slice(0, change.from) + change.revised + file.slice(change.to)).toBe(file.replace("\\item b\n", "\\item b\n\\item c\n"));
+  });
+  it("stays ambiguous without the section, or twice inside it", () => {
+    expect(locateExact(file, "\\end{itemize}")).toBeNull();
+    expect(locateExact(file, "itemize}", { from: 5, to: 8 })).toBeNull();
+  });
+  it("finds a text unique in the file even after its section moved", () => {
+    expect(locateExact(file, "\\item b", { from: 1, to: 2 })).toEqual({ from: file.indexOf("\\item b"), to: file.indexOf("\\item b") + 7 });
   });
 });
 

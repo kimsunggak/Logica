@@ -58,6 +58,22 @@ describe("accepted apply_paper_edits execution", () => {
     expect(useChat.getState().messages[0].editStates).toEqual({ 0: "applied", 1: "applied", 2: "applied" });
   });
 
+  it("applies an anchor repeated in another section to the section it was copied from", async () => {
+    files.set("main.tex", "\\section{A}\nShared ending.\n\\section{B}\nShared ending.\n");
+    const edit: ProposedEdit = { path: "main.tex", original: "Shared ending.", revised: "New ending.", lines: { from: 3, to: 4 } };
+    useChat.setState({ messages: [proposal([edit])] });
+    await applyChatEdit("answer", 0, edit);
+    expect(editorSession.textOf("main.tex")).toBe("\\section{A}\nShared ending.\n\\section{B}\nNew ending.\n");
+    expect(useChat.getState().messages[0].editStates).toEqual({ 0: "applied" });
+  });
+
+  it("keeps a proposal for a file that is not UTF-8 pending without changing the file", async () => {
+    editorSession.open("main.tex", original, undefined, { readOnly: true });
+    await applyChatEdit("answer", 0, first);
+    expect(editorSession.textOf("main.tex")).toBe(original);
+    expect(useChat.getState().messages[0].editStates).toBeUndefined();
+  });
+
   it("leaves the entire batch untouched if one anchor has changed", async () => {
     const changed = { ...second, original: "Outdated second sentence." };
     useChat.setState({ messages: [proposal([first, changed])] });
