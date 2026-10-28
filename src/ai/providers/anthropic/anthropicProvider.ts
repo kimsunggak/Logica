@@ -62,8 +62,9 @@ export class AnthropicProvider implements AIProvider {
         ? {
             // strict: inputs are sampled to match the schema.
             tools: request.tools.map((tool) => ({ name: tool.name, description: tool.description, strict: true, input_schema: tool.parameters })),
-            // Thinking only allows "auto"; without it a tool call is required.
-            tool_choice: { type: request.reasoningEffort ? "auto" : "any", disable_parallel_tool_use: true },
+            // Current Claude models reject a forced tool_choice ("any"/"tool") with a 400.
+            // The prompts ask for exactly one call; strict schemas keep its input valid.
+            tool_choice: { type: "auto", disable_parallel_tool_use: true },
           }
         : {}),
     };

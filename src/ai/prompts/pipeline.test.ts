@@ -86,7 +86,7 @@ describe("separate prompt responsibilities", () => {
     expect(openai.tool_choice).toBe("required");
     expect(openai.parallel_tool_calls).toBe(false);
     expect((openai.tools as { strict: boolean }[]).every((t) => t.strict)).toBe(true);
-    expect(anthropic.tool_choice).toMatchObject({ type: "any", disable_parallel_tool_use: true });
+    expect(anthropic.tool_choice).toMatchObject({ type: "auto", disable_parallel_tool_use: true });
   });
 
   it("keeps the inline selection rule specific to inline editing", () => {
