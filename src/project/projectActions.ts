@@ -619,8 +619,8 @@ export async function convertToUtf8(path: string): Promise<void> {
   try {
     const file = await convertTextFileToUtf8(root, path);
     if (useProject.getState().root !== root) return;
-    editorSession.replaceDocument(path, file.content);
-    editorSession.setReadOnly(path, false);
+    // A fresh history: undoing must never bring the decoded text back into an editable buffer.
+    editorSession.resetDocument(path, file.content);
     diskTexts.set(path, file.content);
     diskMtimes.set(path, file.mtime);
     updateOpenFile(path, { mtime: file.mtime, external: undefined, dirty: false, lossy: false });

@@ -1,3 +1,4 @@
+import { history, undoDepth } from "@codemirror/commands";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { editorSession } from "../editor/editorSession";
 import { call, confirmDialog } from "../lib/backend";
@@ -19,6 +20,7 @@ beforeEach(() => {
     throw new Error(`unexpected command ${command}`);
   }) as typeof call);
   vi.mocked(confirmDialog).mockClear();
+  editorSession.setBaseExtensions([history()]);
   for (const path of editorSession.openPaths()) editorSession.close(path);
   useProject.setState({ ...initialProjectState, root: ROOT });
 });
@@ -40,6 +42,8 @@ describe("files that are not UTF-8", () => {
     expect(call).toHaveBeenCalledWith("convert_text_file_to_utf8", { root: ROOT, path: PATH });
     expect(editorSession.textOf(PATH)).toBe("\\section{서론}\n");
     expect(editorSession.isReadOnly(PATH)).toBe(false);
+    // Undo cannot bring back the text with replacement characters.
+    expect(undoDepth(editorSession.stateOf(PATH)!)).toBe(0);
     expect(openFileMeta(PATH)).toMatchObject({ lossy: false, dirty: false, mtime: 2 });
     expect(editorSession.applyEdit(PATH, 0, 0, "% ")).toBe(true);
     expect(await saveFile(PATH)).toBe(true);

@@ -61,4 +61,11 @@ describe("editorSession", () => {
     editorSession.activate("legacy.tex");
     expect(view.state.readOnly).toBe(true);
   });
+
+  it("resets a file to new, editable text in the active view", () => {
+    editorSession.resetDocument("legacy.tex", "converted");
+    expect(view.state.doc.toString()).toBe("converted");
+    expect(editorSession.isReadOnly("legacy.tex")).toBe(false);
+    expect(editorSession.isDirty("legacy.tex")).toBe(false);
+  });
 });

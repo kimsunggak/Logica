@@ -199,6 +199,20 @@ class EditorSession {
     this.markSaved(path);
   }
 
+  /**
+   * Replace a file's content with a fresh state: unlike `replaceDocument`,
+   * the old text cannot be undone back into the buffer.
+   */
+  resetDocument(path: string, text: string) {
+    const state = this.stateOf(path);
+    if (!state) return;
+    const head = Math.min(state.selection.main.head, text.length);
+    this.states.delete(path);
+    this.open(path, text, { anchor: head, head });
+    if (path === this.activePath && this.view) this.view.setState(this.states.get(path)!);
+    this.updateDirty(path, this.states.get(path)!.doc);
+  }
+
   /** Dispatch state effects to any open file (active or in the background). */
   dispatchEffects(path: string, effects: StateEffect<unknown>[]) {
     if (path === this.activePath && this.view) this.view.dispatch({ effects });
