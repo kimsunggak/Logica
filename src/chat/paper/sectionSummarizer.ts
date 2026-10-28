@@ -1,5 +1,5 @@
 /**
- * Section Summary Module: summarizes the sections of the paper that the
+ * Paper Summary Module: summarizes the sections of the paper that the
  * paper summary has no summary for, from the abstract on, in reading order.
  *
  *   first question about a paper   every section, before the judge runs
@@ -78,7 +78,7 @@ function ownWords(unit: SectionUnit): string {
 function readSummaries(response: AIResponse, batch: SectionUnit[]): SummarizedSection[] {
   const toolCall = response.toolCalls?.find((c) => c.name === WRITE_SECTION_SUMMARIES);
   if (!toolCall || toolCall.argumentsError) {
-    throw new AIError("unknown", toolCall ? "The Section Summary Module sent unreadable summaries" : "The Section Summary Module did not call write_section_summaries");
+    throw new AIError("unknown", toolCall ? "The Paper Summary Module sent unreadable summaries" : "The Paper Summary Module did not call write_section_summaries");
   }
   const written = new Map<string, string>();
   const entries = Array.isArray(toolCall.arguments.summaries) ? toolCall.arguments.summaries : [];
@@ -90,22 +90,22 @@ function readSummaries(response: AIResponse, batch: SectionUnit[]): SummarizedSe
   return batch.filter((u) => written.has(u.key)).map((u) => ({ key: u.key, hash: u.hash, title: u.title, summary: written.get(u.key)! }));
 }
 
-/** Summarize `units` with the Section Summary Module, one call per batch. */
+/** Summarize `units` with the Paper Summary Module, one call per batch. */
 export async function summarizeSections(units: SectionUnit[], options: SectionSummaryOptions): Promise<SectionSummaryResult> {
   const call = options.call ?? callModel;
   return traced(
     options.traceId,
     options.parent ?? null,
     "sections",
-    "runSectionSummaryModule",
+    "runPaperSummaryModule",
     () => ({ sections: units.map((u) => ({ key: u.key, title: u.title, chars: u.chars })) }),
     async (span) => {
       const summarized: SummarizedSection[] = units
-        .filter((u) => u.bodyWords < SHORT_WORDS)
-        .map((u) => ({ key: u.key, hash: u.hash, title: u.title, summary: ownWords(u) }));
+        .filter((u) => u.summary !== undefined || u.bodyWords < SHORT_WORDS)
+        .map((u) => ({ key: u.key, hash: u.hash, title: u.title, summary: u.summary ?? ownWords(u) }));
       const missing: string[] = [];
       let failure: unknown = null;
-      const batches = batchesOf(units.filter((u) => u.bodyWords >= SHORT_WORDS));
+      const batches = batchesOf(units.filter((u) => u.summary === undefined && u.bodyWords >= SHORT_WORDS));
       for (const [i, batch] of batches.entries()) {
         try {
           const result = await call(

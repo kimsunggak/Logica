@@ -77,6 +77,10 @@ export function openInlineEdit(): boolean {
   const view = editorSession.getView();
   const snapshot = editorSession.selection();
   if (!view || !snapshot) return false;
+  if (view.state.readOnly) {
+    notify("info", t("project.lossyReadOnly", { path: snapshot.path }));
+    return true;
+  }
   let { from, to } = snapshot;
   if (from === to) {
     const range = paragraphContext(snapshot.docText, from, to).currentRange;

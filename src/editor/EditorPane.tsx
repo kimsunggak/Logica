@@ -2,7 +2,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { AlertTriangle, FileText, X } from "lucide-react";
 import { useEffect, useRef } from "react";
-import { closeFile, openFile, resolveExternalChange } from "../project/projectActions";
+import { closeFile, convertToUtf8, openFile, resolveExternalChange } from "../project/projectActions";
 import { useT } from "../i18n";
 import { useProject } from "../project/projectStore";
 import { CompileLog } from "../components/CompileLog";
@@ -95,6 +95,26 @@ function ExternalChangeBanner() {
   );
 }
 
+/** A file that is not UTF-8 is read-only until it is converted. */
+function EncodingBanner() {
+  const t = useT();
+  const activePath = useProject((s) => s.activePath);
+  const lossy = useProject((s) => s.openFiles.find((f) => f.path === s.activePath)?.lossy);
+  if (!activePath || !lossy) return null;
+  return (
+    <div
+      className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-[12px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200"
+      data-testid="encoding-banner"
+    >
+      <AlertTriangle size={14} className="shrink-0" />
+      <span className="min-w-0 flex-[1_1_12rem]">{t("editor.notUtf8")}</span>
+      <button className="btn h-6" onClick={() => void convertToUtf8(activePath)}>
+        {t("editor.convertUtf8")}
+      </button>
+    </div>
+  );
+}
+
 export function EditorPane() {
   const t = useT();
   const hostRef = useRef<HTMLDivElement>(null);
@@ -117,6 +137,7 @@ export function EditorPane() {
     <div className="flex h-full min-w-0 flex-col">
       <EditorTabs />
       <ExternalChangeBanner />
+      <EncodingBanner />
       <div ref={areaRef} className="relative min-h-0 flex-1">
         <div ref={hostRef} className={`absolute inset-0 ${activePath ? "" : "invisible"}`} data-testid="editor-host" />
         {!activePath && (

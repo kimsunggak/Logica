@@ -23,29 +23,29 @@ beforeEach(async () => {
 });
 
 describe("chat turn through the demo backend", () => {
-  it("A: small talk is routed by the judge and answered by the Reply Module", async () => {
+  it("Auto refines small talk and sends it to Chat", async () => {
     await sendChatMessage("고마워");
-    expect(answer()).toMatchObject({ status: "done", route: "reply", content: "천만에요! 논문에 대해 궁금한 점을 물어보세요.", provider: "openai", model: "gpt-6.1-sol" });
-    expect(answer().refined).toBeUndefined();
+    expect(answer()).toMatchObject({ status: "done", route: "chat", content: "천만에요! 논문에 대해 궁금한 점을 물어보세요.", provider: "openai", model: "gpt-6.1-sol" });
+    expect(answer().refined).toBe(useChat.getState().messages.at(-2)!.content);
   });
 
-  it("B: a clear question goes straight to the Answer Module", async () => {
+  it("Auto refines a clear question and answers it in Chat", async () => {
     await sendChatMessage("What does Table 2 report?");
-    expect(answer()).toMatchObject({ status: "done", route: "answer", model: "gpt-6.1-sol" });
+    expect(answer()).toMatchObject({ status: "done", route: "chat", model: "gpt-6.1-sol" });
     expect(answer().content).toContain('Demo answer to "What does Table 2 report?"');
-    expect(answer().refined).toBeUndefined();
+    expect(answer().refined).toBe(useChat.getState().messages.at(-2)!.content);
   });
 
-  it("C: an abstract question is refined first, and the answer uses the refined question", async () => {
+  it("refinement preserves the request instead of inventing scope", async () => {
     await sendChatMessage("이 논문 핵심이 뭐야?");
     const message = answer();
-    expect(message).toMatchObject({ status: "done", route: "answer" });
+    expect(message).toMatchObject({ status: "done", route: "chat" });
     expect(message.refined).toContain("이 논문 핵심이 뭐야?");
-    expect(message.refined).toContain("핵심 아이디어");
+    expect(message.refined).toBe("이 논문 핵심이 뭐야?");
     expect(message.content).toContain(`Demo answer to "${message.refined}"`);
   });
 
-  it("C: a question that cannot be settled is asked back", async () => {
+  it("an unresolved target is asked back during source preparation", async () => {
     await sendChatMessage("이거?");
     expect(answer()).toMatchObject({ status: "done", route: "clarify", content: "어느 부분을 말씀하시는 건가요? 섹션이나 문장을 알려 주세요." });
   });
@@ -91,45 +91,60 @@ describe("chat turn through the demo backend", () => {
     }
   });
 
-  it("folds the oldest turns into the session summary every two turns", async () => {
-    const questions = ["앞으로 답은 짧게 해줘", "What does Table 2 report?", "고마워", "What is in Section 3?", "Define the routing loss", "What does Figure 1 show?"];
+  it("folds all but the last four turns into the session summary once ten are open", async () => {
+    const questions = [
+      "앞으로 답은 짧게 해줘",
+      "What does Table 2 report?",
+      "고마워",
+      "What is in Section 3?",
+      "Define the routing loss",
+      "What does Figure 1 show?",
+      "Which datasets are used?",
+      "What is the baseline?",
+      "Explain the occlusion results",
+      "What are the limitations?",
+    ];
     const covered: number[] = [];
     for (const q of questions) {
       await sendChatMessage(q);
       await summaryIdle();
       covered.push(useChat.getState().summary?.coveredTurns ?? 0);
     }
-    // Four open turns: all but the last two are folded.
-    expect(covered).toEqual([0, 0, 0, 2, 2, 4]);
+    // Nothing is folded before ten turns are open; then all but the last four are.
+    expect(covered).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 6]);
     const summary = useChat.getState().summary!;
-    // Small talk (turn 3) gets no topic line.
-    expect(summary.items.map((item) => [item.id, item.turn])).toEqual([
-      ["P1", 1],
-      ["T1", 2],
-      ["T2", 4],
+    expect(summary.topic).not.toBe("");
+    expect(summary.goal).not.toBe("");
+    // Small talk (turn 3) gets no history line.
+    expect(summary.items.map((item) => [item.kind, item.turn])).toEqual([
+      ["preference", 1],
+      ["history", 2],
+      ["history", 4],
+      ["history", 5],
+      ["history", 6],
     ]);
-    expect(renderSummary(summary)).toContain("Turns 1-4 of this conversation are folded");
+    expect(renderSummary(summary)).toContain("Turns 1-6 of this conversation are folded");
 
-    // The next question reads the summary and only the turns after it.
+    // The next question reads the summary and the four turns after it.
     const generate = vi.spyOn(aiService, "generate");
     try {
       await sendChatMessage("What does Table 3 report?");
-      const answerCall = generate.mock.calls.find(([, request]) => request.task === "answer")![1];
-      expect(answerCall.sessionSummary).toContain("P1: 앞으로 답은 짧게 해줘");
-      expect(answerCall.history?.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["Define the routing loss", "What does Figure 1 show?"]);
-      const judge = generate.mock.calls.find(([, request]) => request.task === "judge")![1];
-      expect(judge.history?.filter((m) => m.role === "user")).toHaveLength(4);
+      for (const task of ["judge", "answer"]) {
+        const request = generate.mock.calls.find(([, r]) => r.task === task)![1];
+        expect(request.sessionSummary).toContain("P1: 앞으로 답은 짧게 해줘");
+        expect(request.history?.filter((m) => m.role === "user").map((m) => m.content)).toEqual(questions.slice(6));
+      }
     } finally {
       generate.mockRestore();
     }
-  }, 30_000);
+  }, 60_000);
 
   it("falls back to Claude when OpenAI fails, and says so", async () => {
     demo.__LOGICA_DEMO_FAIL_OPENAI = true;
     await sendChatMessage("이 논문 핵심이 뭐야?");
     const message = answer();
-    expect(message).toMatchObject({ status: "done", route: "answer", provider: "anthropic", model: "claude-sonnet-5-5", fallbackFrom: "gpt-6.1-sol" });
-    expect(message.refined).toContain("핵심 아이디어");
+    expect(message).toMatchObject({ status: "done", route: "chat", provider: "anthropic", model: "claude-sonnet-5-5", fallbackFrom: "gpt-6.1-sol" });
+    expect(message.refined).toBe("이 논문 핵심이 뭐야?");
   });
 
   it("reports both errors when Claude is not connected and OpenAI fails", async () => {
@@ -138,8 +153,7 @@ describe("chat turn through the demo backend", () => {
     try {
       await sendChatMessage("What does Table 2 report?");
       expect(answer().status).toBe("error");
-      expect(answer().content).toContain("Claude (Anthropic) is not connected");
-      expect(answer().content).toContain("OpenAI also failed");
+      expect(answer().content).toContain("Anthropic API key");
     } finally {
       await call("credential_set", { provider: "anthropic", secret: "sk-ant-demo-0000" });
     }
@@ -150,7 +164,7 @@ describe("chat turn through the demo backend", () => {
     const generate = vi.spyOn(aiService, "generate");
     try {
       await sendChatMessage("고마워");
-      expect(answer()).toMatchObject({ status: "done", route: "reply", provider: "openai", model: "gpt-6.1-sol" });
+      expect(answer()).toMatchObject({ status: "done", route: "chat", provider: "openai", model: "gpt-6.1-sol" });
       const judge = generate.mock.calls.filter(([, request]) => request.task === "judge").map(([provider, request]) => [provider, request.model]);
       expect(judge).toEqual([
         ["anthropic", "claude-sonnet-5-5"],

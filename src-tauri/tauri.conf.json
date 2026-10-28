@@ -39,7 +39,8 @@
     "category": "Productivity",
     "externalBin": ["binaries/tectonic"],
     "resources": {
-      "licenses/tectonic-LICENSE.txt": "licenses/tectonic-LICENSE.txt"
+      "licenses/tectonic-LICENSE.txt": "licenses/tectonic-LICENSE.txt",
+      "licenses/cvpr-author-kit-NOTICE.txt": "licenses/cvpr-author-kit-NOTICE.txt"
     },
     "shortDescription": "AI-native LaTeX writing workspace",
     "icon": [

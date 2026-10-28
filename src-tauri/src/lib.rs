@@ -45,6 +45,7 @@ pub fn run() {
             project::list_project_files,
             project::read_text_file,
             project::write_text_file,
+            project::convert_text_file_to_utf8,
             project::stat_files,
             project::read_binary_file,
             project::path_exists,
@@ -72,6 +73,7 @@ pub fn run() {
             app_state::load_app_state,
             app_state::save_app_state,
             debug_trace::debug_trace,
+            debug_trace::debug_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running LOGICA");

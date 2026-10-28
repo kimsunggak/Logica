@@ -17,7 +17,7 @@ import { call, isDesktop } from "../lib/backend";
  * Gateway, Rust), and the background modules that run after a turn:
  * `summary` (session summary) and `sections` (section summaries).
  */
-export type TraceModule = "pipeline" | "user" | "orchestrator" | "reply" | "refine" | "answer" | "llm" | "final" | "summary" | "sections";
+export type TraceModule = "pipeline" | "user" | "orchestrator" | "reply" | "refine" | "selection" | "answer" | "edit" | "llm" | "final" | "summary" | "sections";
 export type TraceStatus = "running" | "completed" | "error";
 
 export interface Span {
@@ -35,6 +35,13 @@ let counter = 0;
 
 export function tracing(): boolean {
   return ENABLED;
+}
+
+/** Keep saved-file inspection on the project and conversation shown in the app. */
+export function setDebugProject(root: string | null, sessionId: string | null): void {
+  if (ENABLED) void call("debug_project", { root, sessionId }).catch(() => {
+    // Debugger inspection must never prevent opening a project.
+  });
 }
 
 const SECRET_KEY = /(token$|secret|password|api[-_]?key|credential|cookie|^authorization$)/i;

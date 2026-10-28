@@ -1,34 +1,20 @@
-/**
- * Refine Module prompt: rewrite an abstract message into one clear question
- * using the paper, or ask the user back when it cannot be settled. When the
- * paper comes section by section, it also settles which sections the answer
- * reads word for word.
- */
+/** Common preprocessing: resolve conversational references, preserving intent. */
 import type { AIRequest } from "../types";
-import { ALL_SECTIONS } from "../tools/chatTools";
 import { tag } from "./context";
 import type { PromptPayload } from "./index";
-import { paperPrompt } from "./paper";
-
-const REFINE_RULES = [
-  "You are the Refine Module. Do not answer the user's message.",
-  "Rewrite it as one clear, self-contained question or request about this paper, so that someone who sees only the paper and your rewrite knows exactly what to answer or change.",
-  '- Resolve words such as "this", "that", "it" or "here" from the conversation.',
-  "- Name the exact section, figure, table, equation, term or claim the message is about, using the paper.",
-  "- Keep the user's intent and scope. Do not add requests the user did not make, and do not drop any they made.",
-  "- Write in the language of the user's message.",
-  "If the message has several plausible readings that the paper and the conversation cannot settle, ask the user one short question instead.",
-];
-
-const FILES_TASK = [...REFINE_RULES, 'Reply with JSON only, no prose and no code fence: {"refined_question":"..."} or {"clarify":"..."}'].join("\n");
-
-const SECTIONS_TASK = [
-  ...REFINE_RULES,
-  `In sections, list the keys of the sections the answer must read word for word, now that the question is clear: the parts it is about, every section an edit would change, and sections whose exact wording, numbers, equations or tables the answer needs. The others are given as their summaries. Use ["${ALL_SECTIONS}"] when the answer needs the whole paper.`,
-  'Reply with JSON only, no prose and no code fence: {"refined_question":"...","sections":["..."]} or {"clarify":"..."}',
-].join("\n");
+import { conversationBlock, SESSION_RULES, summaryBlock } from "./session";
 
 export function buildRefinePrompt(request: AIRequest): PromptPayload {
-  const task = request.paperView ? SECTIONS_TASK : FILES_TASK;
-  return paperPrompt(request, [tag("user_message", request.instruction), tag("task", task)]);
+  return {
+    system: [
+      "You are the Request Refinement Module of LOGICA.",
+      "Rewrite the user's message as a self-contained request using the session summary and recent conversation to resolve omitted context and references.",
+      "Preserve intent, question versus command, negation, uncertainty, conditions, and scope. A question evaluating a proposed change must stay a question; it is not an instruction to apply the change.",
+      "Use only context established in the conversation. If a reference remains ambiguous, preserve that ambiguity rather than inventing a target or a desired action.",
+      "Keep a message that is already explicit unchanged. Do not answer it, classify its intent, select paper sections, or ask a new question.",
+      "Return only the rewritten request as plain text, in the user's language. No JSON, explanation, or code fence.",
+      SESSION_RULES,
+    ].join("\n"),
+    messages: [{ role: "user", content: [summaryBlock(request), conversationBlock(request), tag("user_message", request.instruction)].filter(Boolean).join("\n\n") }],
+  };
 }

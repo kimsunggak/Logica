@@ -1,13 +1,14 @@
 import { Bot, Download, FilePlus, FileText, FolderOpen, House, Loader2, Play, Save, Settings } from "lucide-react";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
 import { pickProjectFolder } from "../lib/backend";
-import { closeProject, compileProject, exportPdf, newPaper, openProject, saveAll } from "../project/projectActions";
+import { closeProject, compileProject, exportPdf, openProject, saveAll } from "../project/projectActions";
 import { useProject } from "../project/projectStore";
 import { isConnected, isKnown, useConnections } from "../settings/connectionStore";
 import { useSettings } from "../settings/settingsStore";
 import { useWorkspace } from "../storage/workspaceStore";
 import { LANGUAGES, useT } from "../i18n";
 import type { ReactNode } from "react";
+import { NewPaperMenu } from "./NewPaperMenu";
 import { ProviderSelect } from "./ProviderSelect";
 import { openSettings } from "./uiStore";
 
@@ -129,13 +130,20 @@ export function TopBar() {
             testId="open-project"
             onClick={() => void chooseAndOpenProject()}
           />
-          <BarButton
-            icon={<FilePlus />}
-            label={t("top.newPaper")}
-            collapse="early"
-            title={t("top.newPaperTitle")}
-            testId="new-paper"
-            onClick={() => void newPaper()}
+          <NewPaperMenu
+            className="shrink-0"
+            menuClassName="top-8 left-0 w-64"
+            trigger={({ open, toggle }) => (
+              <BarButton
+                icon={<FilePlus />}
+                label={t("top.newPaper")}
+                collapse="early"
+                title={t("top.newPaperTitle")}
+                active={open}
+                testId="new-paper"
+                onClick={toggle}
+              />
+            )}
           />
           <span className="min-w-0 max-w-[220px] truncate px-1 text-[length:var(--ui-font)] text-slate-500" title={root}>
             {name}

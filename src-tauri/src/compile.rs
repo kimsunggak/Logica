@@ -391,6 +391,8 @@ async fn compile(request: CompileRequest) -> CmdResult<CompileResult> {
     let mut combined_output = String::new();
     let mut success = true;
     let mut timed_out = false;
+    // latexmk leaves a PDF that is already up to date untouched; its success means it is current.
+    let mut pdf_current = false;
 
     let run = |program: PathBuf, args: Vec<String>| {
         let cwd = cwd.clone();
@@ -416,6 +418,7 @@ async fn compile(request: CompileRequest) -> CmdResult<CompileResult> {
                     success &= engine_passes(&engine, &file_name, &stem, &cwd, &path_var, deadline, &mut combined_output).await?;
                 } else {
                     success &= out.success;
+                    pdf_current = out.success;
                 }
             }
             "tectonic" => {
@@ -473,8 +476,8 @@ async fn compile(request: CompileRequest) -> CmdResult<CompileResult> {
 
     let pdf = cwd.join(format!("{stem}.pdf"));
     let (pdf_path, pdf_mtime) = match std::fs::metadata(&pdf) {
-        // Only report a PDF that this run produced or refreshed.
-        Ok(meta) if mtime_ms(&meta) + 2000 >= started_wall => {
+        // Only report a PDF that this run produced or refreshed, or that latexmk found up to date.
+        Ok(meta) if pdf_current || mtime_ms(&meta) + 2000 >= started_wall => {
             let rel = pdf
                 .strip_prefix(&root)
                 .ok()
@@ -663,6 +666,27 @@ mod tests {
         assert!(!result.success);
         assert!(result.log.contains("sections/method.tex:"), "{}", result.log);
         assert!(result.log.contains("Undefined control sequence"));
+    }
+
+    /// latexmk exits successfully without rewriting a PDF that is already up to date.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_up_to_date_latexmk_run_reports_the_existing_pdf() {
+        let root = std::env::temp_dir().join(format!("logica-uptodate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("main.tex"), "\\documentclass{article}").unwrap();
+        let pdf = std::fs::File::create(root.join("main.pdf")).unwrap();
+        pdf.set_modified(SystemTime::now() - Duration::from_secs(3600)).unwrap();
+        // Stand-ins for latexmk that exit like it does, without touching the PDF.
+        for (tool, current) in [("true", true), ("false", false)] {
+            let mut req = request(&root, "latexmk");
+            req.compiler_path = Some(find_tool(tool, None, &search_path()).unwrap().to_string_lossy().into_owned());
+            let result = compile(req).await.unwrap();
+            assert_eq!(result.success, current, "{}", result.output);
+            assert_eq!(result.pdf_path.as_deref(), current.then_some("main.pdf"));
+        }
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[tokio::test]

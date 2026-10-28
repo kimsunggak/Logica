@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="800" viewBox="0 0 1440 800" font-family="Pretendard, 'Noto Sans KR', sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="812" viewBox="0 0 1440 812" font-family="Pretendard, 'Noto Sans KR', sans-serif">
 <defs><style>
 .title{font-size:18px;font-weight:700;fill:#2b3240}
 .sub{font-size:12.5px;fill:#6b7385}
@@ -14,11 +14,11 @@
 .mono{font-size:11px;fill:#3d4556}
 .foot{font-size:12px;fill:#4a5263}
 </style></defs>
-<rect width="1440" height="800" fill="#ffffff"/>
+<rect width="1440" height="812" fill="#ffffff"/>
 <rect x="40" y="24" width="1360" height="720" rx="16" fill="#fbfcfe" stroke="#c4cad6" stroke-width="1.5"/>
 <g transform="translate(64,44)" fill="none" stroke="#5d6678" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2h13l7 7v22H7z"/><path d="M20 2v7h7"/><path d="M11 15h12M11 20h12M11 25h8"/></g>
 <text x="104" y="64" class="title">세션 요약 (session summary)</text>
-<text x="104" y="86" class="sub">대화가 길어지면 오래된 턴을 아래 항목으로 줄여, 판단과 모든 모듈에 최근 턴 원문과 함께 보냅니다.</text>
+<text x="104" y="86" class="sub">요약 안 된 턴이 10개가 되거나 4만 자를 넘으면, 최근 4턴만 원문으로 남기고 오래된 턴을 아래 항목으로 접어 판단과 모든 모듈에 함께 보냅니다.</text>
 <text x="1376" y="64" class="tag" text-anchor="end">세션 파일의 summary 필드</text>
 <text x="1376" y="84" class="tagk" text-anchor="end">chats/&lt;프로젝트 ID&gt;/&lt;세션 ID&gt;.json</text>
 <text x="76" y="124" class="colh">항목</text>
@@ -28,69 +28,68 @@
 <text x="76" y="161" class="nm2">요약 범위</text>
 <text x="160" y="161" class="mono" fill="#6b7385">coveredTurns</text>
 <text x="330" y="161" class="desc">턴 1부터 이 번호까지는 원문 대신 요약으로 읽고, 그 뒤 턴은 원문으로 읽습니다.</text>
-<text x="900" y="161" class="mono">Turns 1-4 of this conversation are folded …</text>
-<rect x="56" y="188" width="1328" height="100" rx="12" fill="#eef4fc" stroke="#dde2ea" stroke-width="1.2"/>
-<rect x="56" y="188" width="6" height="100" rx="3" fill="#6f9bd1"/>
-<text x="76" y="222" class="nm" fill="#2b3240">Goal</text>
-<text x="76" y="244" class="kr">목표</text>
-<rect x="76" y="254" width="73" height="20" rx="10" fill="#ffffff" stroke="#6f9bd1" stroke-width="1"/>
-<text x="85" y="268" class="who" fill="#6f9bd1">모델이 씀</text>
-<text x="330" y="220" class="desc">논문의 주제와 지금 하고자 하는 작업</text>
-<text x="330" y="242" class="desc">한두 문장, 최대 300자</text>
-<text x="330" y="264" class="desc">작업이 바뀌었을 때만 새로 씁니다</text>
+<text x="900" y="161" class="mono">Turns 1-6 of this conversation are folded …</text>
+<rect x="56" y="188" width="1328" height="100" rx="12" fill="#eaf5f6" stroke="#dde2ea" stroke-width="1.2"/>
+<rect x="56" y="188" width="6" height="100" rx="3" fill="#4f9fae"/>
+<text x="76" y="222" class="nm" fill="#2b3240">Topic</text>
+<text x="76" y="244" class="kr">논문 주제</text>
+<rect x="76" y="254" width="73" height="20" rx="10" fill="#ffffff" stroke="#4f9fae" stroke-width="1"/>
+<text x="85" y="268" class="who" fill="#4f9fae">모델이 씀</text>
+<text x="330" y="220" class="desc">논문이 무엇에 관한 것인지 한 줄</text>
+<text x="330" y="242" class="desc">최대 1,000자</text>
+<text x="330" y="264" class="desc">비어 있거나 바뀌었을 때만 새로 씁니다</text>
 <rect x="880" y="200" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
-<text x="896" y="222" class="mono">Goal: STRoute 논문의 실험 결과와 3.2절을 다듬는 중</text>
-<rect x="56" y="298" width="1328" height="100" rx="12" fill="#f3f0fc" stroke="#dde2ea" stroke-width="1.2"/>
-<rect x="56" y="298" width="6" height="100" rx="3" fill="#8c7ad8"/>
-<text x="76" y="332" class="nm" fill="#2b3240">Preference</text>
-<text x="76" y="354" class="kr">선호  P1, P2, …</text>
-<rect x="76" y="364" width="73" height="20" rx="10" fill="#ffffff" stroke="#8c7ad8" stroke-width="1"/>
-<text x="85" y="378" class="who" fill="#8c7ad8">모델이 씀</text>
-<text x="330" y="330" class="desc">사용자가 원하는 답변 스타일, 답변을 만들 때 계속 지킬 규칙</text>
-<text x="330" y="352" class="desc">사용자가 명시적으로 지정했을 때만 추가 (말투나 반응으로 추측 안 함)</text>
-<text x="330" y="374" class="desc">사용자가 바꾸면 새 항목이 대체하고, 이전 항목은 대체됨으로 남김</text>
+<text x="896" y="222" class="mono">Topic: 가림에 강한 비디오 자세 추정을 위한 시공간 라우팅</text>
+<rect x="56" y="298" width="1328" height="100" rx="12" fill="#eef4fc" stroke="#dde2ea" stroke-width="1.2"/>
+<rect x="56" y="298" width="6" height="100" rx="3" fill="#6f9bd1"/>
+<text x="76" y="332" class="nm" fill="#2b3240">Goal</text>
+<text x="76" y="354" class="kr">지금 하는 작업</text>
+<rect x="76" y="364" width="73" height="20" rx="10" fill="#ffffff" stroke="#6f9bd1" stroke-width="1"/>
+<text x="85" y="378" class="who" fill="#6f9bd1">모델이 씀</text>
+<text x="330" y="330" class="desc">사용자가 지금 하고 있는 작업 한 줄</text>
+<text x="330" y="352" class="desc">최대 1,000자</text>
+<text x="330" y="374" class="desc">작업이 바뀌었을 때만 새로 씁니다</text>
 <rect x="880" y="310" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
-<text x="896" y="332" class="mono">Preferences (follow the active ones):</text>
-<text x="896" y="351" class="mono">- P1 (replaced by P2): 답은 짧게</text>
-<text x="896" y="370" class="mono">- P2: 답은 다섯 문장 이내로</text>
-<rect x="56" y="408" width="1328" height="100" rx="12" fill="#fdf3ea" stroke="#dde2ea" stroke-width="1.2"/>
-<rect x="56" y="408" width="6" height="100" rx="3" fill="#d88a52"/>
-<text x="76" y="442" class="nm" fill="#2b3240">Unresolved</text>
-<text x="76" y="464" class="kr">답하지 못한 요청  U1, …</text>
-<rect x="76" y="474" width="172" height="20" rx="10" fill="#ffffff" stroke="#d88a52" stroke-width="1"/>
-<text x="85" y="488" class="who" fill="#d88a52">코드가 씀, 모델은 닫기만</text>
-<text x="330" y="440" class="desc">중지, 실패, 길이 초과로 끝난 답과 LOGICA가 되물은 질문</text>
-<text x="330" y="462" class="desc">모델이 아니라 코드가 턴 상태를 보고 추가합니다</text>
-<text x="330" y="484" class="desc">나중 턴에서 처리되면 닫히고 요약에서 빠집니다</text>
+<text x="896" y="332" class="mono">Goal: 실험 결과(Table 1)와 3.2절 설명 다듬기</text>
+<rect x="56" y="408" width="1328" height="100" rx="12" fill="#f3f0fc" stroke="#dde2ea" stroke-width="1.2"/>
+<rect x="56" y="408" width="6" height="100" rx="3" fill="#8c7ad8"/>
+<text x="76" y="442" class="nm" fill="#2b3240">Preference</text>
+<text x="76" y="464" class="kr">선호  P1, P2, …</text>
+<rect x="76" y="474" width="73" height="20" rx="10" fill="#ffffff" stroke="#8c7ad8" stroke-width="1"/>
+<text x="85" y="488" class="who" fill="#8c7ad8">모델이 씀</text>
+<text x="330" y="440" class="desc">사용자가 원하는 답변 스타일, 답변을 만들 때 계속 지킬 규칙</text>
+<text x="330" y="462" class="desc">사용자가 명시적으로 지정했을 때만 추가 (말투나 반응으로 추측 안 함)</text>
+<text x="330" y="484" class="desc">사용자가 바꾸면 새 항목이 대체하고, 이전 항목은 대체됨으로 남김</text>
 <rect x="880" y="420" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
-<text x="896" y="442" class="mono">Requests not fully answered:</text>
-<text x="896" y="461" class="mono">- U1 (turn 2): The user stopped the answer</text>
-<text x="896" y="480" class="mono">  to "3.2절 첫 문단 고쳐줘".</text>
+<text x="896" y="442" class="mono">Preferences (follow the active ones):</text>
+<text x="896" y="461" class="mono">- P1 (replaced by P2): 답은 짧게</text>
+<text x="896" y="480" class="mono">- P2: 답은 다섯 문장 이내로</text>
 <rect x="56" y="518" width="1328" height="100" rx="12" fill="#ecf6f1" stroke="#dde2ea" stroke-width="1.2"/>
 <rect x="56" y="518" width="6" height="100" rx="3" fill="#4ea37f"/>
-<text x="76" y="552" class="nm" fill="#2b3240">Topic</text>
-<text x="76" y="574" class="kr">다룬 내용  T1, T2, …</text>
+<text x="76" y="552" class="nm" fill="#2b3240">Session history</text>
+<text x="76" y="574" class="kr">세션 기록  턴 번호로 표시</text>
 <rect x="76" y="584" width="73" height="20" rx="10" fill="#ffffff" stroke="#4ea37f" stroke-width="1"/>
 <text x="85" y="598" class="who" fill="#4ea37f">모델이 씀</text>
-<text x="330" y="550" class="desc">답한 턴마다 무엇을 다뤘는지 한 줄 (섹션, 그림, 표, 질문)</text>
-<text x="330" y="572" class="desc">잡담은 넣지 않음, 항목마다 최대 200자</text>
-<text x="330" y="594" class="desc">같은 내용을 다시 묻거나 이어 갈 때 참고합니다</text>
+<text x="330" y="550" class="desc">답한 턴마다 무엇을 물었고 어떻게 끝났는지 한 줄</text>
+<text x="330" y="572" class="desc">답의 결론, 제안한 수정, 나중 턴에서 받아들였는지까지, 최대 300자</text>
+<text x="330" y="594" class="desc">잡담은 넣지 않고, 한 번 쓰면 바뀌지 않음 (최근 턴 원문 앞까지의 흐름)</text>
 <rect x="880" y="530" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
-<text x="896" y="552" class="mono">Topics covered:</text>
-<text x="896" y="571" class="mono">- T1 (turn 1): Table 1 결과(MPJPE) 해석</text>
-<text x="896" y="590" class="mono">- T2 (turn 3): 3.2절 불확실성 추정 설명</text>
+<text x="896" y="552" class="mono">Session history:</text>
+<text x="896" y="571" class="mono">- turn 1: Table 1(MPJPE) 해석 → 해석 문단 제시</text>
+<text x="896" y="590" class="mono">- turn 3: 3.2절 설명 → 정의를 앞으로 옮긴 수정안</text>
 <rect x="56" y="628" width="1328" height="100" rx="12" fill="#fcf7e6" stroke="#dde2ea" stroke-width="1.2"/>
 <rect x="56" y="628" width="6" height="100" rx="3" fill="#c9ad4f"/>
-<text x="76" y="662" class="nm" fill="#2b3240">Reference</text>
-<text x="76" y="684" class="kr">사용자 자료  R1, …</text>
+<text x="76" y="662" class="nm" fill="#2b3240">External reference</text>
+<text x="76" y="684" class="kr">외부 참고 자료  R1, …</text>
 <rect x="76" y="694" width="73" height="20" rx="10" fill="#ffffff" stroke="#c9ad4f" stroke-width="1"/>
 <text x="85" y="708" class="who" fill="#c9ad4f">모델이 씀</text>
 <text x="330" y="660" class="desc">사용자가 대화에 준 논문 밖 자료 (리뷰어 코멘트, 다른 논문, 데이터)</text>
 <text x="330" y="682" class="desc">원문 그대로 최대 1,500자, 논문 자체의 글은 넣지 않음</text>
 <text x="330" y="704" class="desc">사용자가 바꾸면 새 항목이 대체합니다</text>
 <rect x="880" y="640" width="490" height="76" rx="8" fill="#ffffff" stroke="#d9dee7" stroke-width="1"/>
-<text x="896" y="662" class="mono">Material from the user:</text>
+<text x="896" y="662" class="mono">External references (from the user):</text>
 <text x="896" y="681" class="mono">- R1 (turn 4, pasted): Reviewer 2: The</text>
 <text x="896" y="700" class="mono">  ablation in Table 2 lacks …</text>
-<text x="56" y="776" class="foot">요약 전체는 최대 4,000자입니다. 넘치면 닫힌 U#, 대체된 항목, 오래된 T#, 오래된 R# 순으로 빼고, 활성 P#와 열린 U#는 항상 남깁니다.</text>
+<text x="56" y="776" class="foot">요약 전체는 최대 4,000자입니다. 넘치면 대체된 항목, 오래된 세션 기록, 오래된 R# 순으로 빼고, 활성 P#는 항상 남깁니다. 중단되거나 실패한 요청은 남기지 않습니다(다시 요청).</text>
+<text x="56" y="796" class="foot">P1, R1 같은 번호는 요약 모듈이 교체할 항목을 가리킬 때 씁니다. 세션 기록은 바뀌지 않으므로 번호 대신 턴 번호로 표시합니다.</text>
 </svg>

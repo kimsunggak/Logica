@@ -29,7 +29,8 @@ describe("provider adapters", () => {
   it("Claude uses the Messages API format", () => {
     const body = new AnthropicProvider().buildBody(request);
     expect(body).toMatchObject({ model: "model-x", stream: true, max_tokens: 1000 });
-    expect(typeof body.system).toBe("string");
+    // The tools and system prompt end at a cache breakpoint.
+    expect(body.system).toEqual([{ type: "text", text: expect.any(String), cache_control: { type: "ephemeral" } }]);
     expect((body.messages as { role: string }[])[0].role).toBe("user");
   });
 });

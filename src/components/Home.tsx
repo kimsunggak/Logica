@@ -6,10 +6,11 @@ import { confirmDialog, isDemoMode } from "../lib/backend";
 import { timeAgo } from "../lib/time";
 import type { MathFieldProps } from "../home/background/MathField";
 import { PdfThumbnail } from "../pdf/PdfThumbnail";
-import { newPaper, openProject } from "../project/projectActions";
+import { openProject } from "../project/projectActions";
 import { pathExists } from "../project/projectApi";
 import { useProject } from "../project/projectStore";
 import { useWorkspace, type ProjectMemory } from "../storage/workspaceStore";
+import { NewPaperMenu } from "./NewPaperMenu";
 import { chooseAndOpenProject } from "./TopBar";
 
 const THUMB_WIDTH = 220;
@@ -116,18 +117,25 @@ export function Home() {
           </h1>
 
           <div className="mt-7 grid gap-3 sm:grid-cols-2">
-            <button
-              className="flex items-center gap-3 rounded-lg border border-sky-600 bg-sky-600 px-4 py-3.5 text-left text-white shadow-sm hover:bg-sky-700 disabled:opacity-60"
-              onClick={() => void newPaper()}
-              disabled={loading}
-              data-testid="home-new"
-            >
-              <FilePlus size={22} />
-              <span>
-                <span className="block text-[14px] font-semibold">{t("home.new")}</span>
-                <span className="block text-[12px] text-sky-100">{t("home.newHint")}</span>
-              </span>
-            </button>
+            <NewPaperMenu
+              menuClassName="top-full left-0 mt-1 w-full"
+              trigger={({ open, toggle }) => (
+                <button
+                  className="flex w-full items-center gap-3 rounded-lg border border-sky-600 bg-sky-600 px-4 py-3.5 text-left text-white shadow-sm hover:bg-sky-700 disabled:opacity-60"
+                  onClick={toggle}
+                  disabled={loading}
+                  aria-haspopup="menu"
+                  aria-expanded={open}
+                  data-testid="home-new"
+                >
+                  <FilePlus size={22} />
+                  <span>
+                    <span className="block text-[14px] font-semibold">{t("home.new")}</span>
+                    <span className="block text-[12px] text-sky-100">{t("home.newHint")}</span>
+                  </span>
+                </button>
+              )}
+            />
             <button
               className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-[#151c26] dark:hover:bg-slate-800"
               onClick={() => void chooseAndOpenProject()}

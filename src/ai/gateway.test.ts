@@ -64,11 +64,15 @@ describe("LLM Gateway", () => {
     scripts.anthropic = reply("anthropic", "ok");
     const judge = await callModel("judge", request, { control: control() });
     const refine = await callModel("refine", request, { control: control() });
-    expect(judge.choice).toEqual({ provider: "anthropic", model: "claude-sonnet-5-5", reasoningEffort: "high" });
-    expect(refine.choice).toEqual({ provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" });
+    await callModel("select", request, { control: control() });
+    await callModel("edit", request, { control: control() });
+    expect(judge.choice).toEqual({ provider: "anthropic", model: "claude-sonnet-5-5", reasoningEffort: "xhigh" });
+    expect(refine.choice).toEqual({ provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" });
     expect(calls.map((c) => [c.request.task, c.request.model, c.request.reasoningEffort])).toEqual([
-      ["judge", "claude-sonnet-5-5", "high"],
-      ["refine", "gpt-6.1-sol", "medium"],
+      ["judge", "claude-sonnet-5-5", "xhigh"],
+      ["refine", "gpt-6.1-sol", "low"],
+      ["select", "gpt-6.1-sol", "low"],
+      ["edit", "gpt-6.1-sol", "medium"],
     ]);
     expect(judge.fallbackFrom).toBeUndefined();
   });

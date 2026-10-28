@@ -9,12 +9,13 @@
  * that did not finish stay in the conversation with a note, so the next
  * model call knows the request was not answered.
  *
- * Every call reads a recent window (four turns for the judge, two for the
- * other modules), extended to include every turn not yet summarized.
- * Long messages keep their start and end.
+ * Every call reads at least the last four turns, extended to include every
+ * turn not yet summarized; the judge reads longer messages than the other
+ * modules. Long messages keep their start and end.
  */
 import type { AIMessage } from "../../ai/types";
 import { t } from "../../i18n";
+import type { ProposedEdit } from "../../ai/agent/edits";
 
 export type TurnStatus = "done" | "clarify" | "truncated" | "cancelled" | "error";
 
@@ -33,15 +34,17 @@ export interface TurnMessage {
   status: "done" | "streaming" | "error" | "cancelled";
   route?: string;
   truncated?: boolean;
+  edits?: ProposedEdit[];
+  editStates?: Record<number, string>;
 }
 
 /** The judge keeps at least four recent turns, each message up to 10,000 characters. */
 export const JUDGE_TURNS = 4;
 export const JUDGE_MESSAGE_CHARS = 10_000;
-/** The other modules keep at least two recent turns, each message up to 4,000 characters. */
+/** The other modules keep at least four recent turns, each message up to 4,000 characters. */
 export const MODULE_MESSAGE_CHARS = 4_000;
-/** At least the last two turns go word for word, even when the summary covers them. */
-export const MODULE_TURNS = 2;
+/** At least the last four turns go word for word, even when the summary covers them. */
+export const MODULE_TURNS = 4;
 
 /** Notes after an answer that did not finish; the prompts explain them. */
 export const TURN_NOTES: Record<Exclude<TurnStatus, "done" | "clarify">, string> = {
@@ -70,7 +73,12 @@ function answerOf(m: TurnMessage): { answer: string; status: TurnStatus } {
     const text = m.content.endsWith(notice) ? m.content.slice(0, -notice.length) : m.content;
     return { answer: note(text, TURN_NOTES.truncated), status: "truncated" };
   }
-  return { answer: m.content, status: m.route === "clarify" ? "clarify" : "done" };
+  const edits = m.edits?.map((edit, i) => [
+    `[paper edit ${i + 1}: ${m.editStates?.[i] ?? "pending application"}; file: ${edit.path}]`,
+    `ORIGINAL:\n${edit.original}`,
+    `REVISED:\n${edit.revised}`,
+  ].join("\n")).join("\n\n");
+  return { answer: [m.content, edits].filter(Boolean).join("\n\n"), status: m.route === "clarify" ? "clarify" : "done" };
 }
 
 function note(text: string, mark: string): string {

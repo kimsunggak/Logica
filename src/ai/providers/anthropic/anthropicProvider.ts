@@ -49,7 +49,9 @@ export class AnthropicProvider implements AIProvider {
     const prompt = buildPrompt(request);
     return {
       model: request.model,
-      system: prompt.system,
+      // Cache the tools and the system prompt, which every call of a task repeats;
+      // the messages after them change from turn to turn.
+      system: [{ type: "text", text: prompt.system, cache_control: { type: "ephemeral" } }],
       messages: prompt.messages.map((m) => ({ role: m.role, content: m.content })),
       max_tokens: request.maxOutputTokens ?? DEFAULT_MAX_TOKENS,
       stream: true,
@@ -60,8 +62,9 @@ export class AnthropicProvider implements AIProvider {
         ? {
             // strict: inputs are sampled to match the schema.
             tools: request.tools.map((tool) => ({ name: tool.name, description: tool.description, strict: true, input_schema: tool.parameters })),
-            // Thinking only allows "auto"; without it a tool call is required.
-            tool_choice: { type: request.reasoningEffort ? "auto" : "any", disable_parallel_tool_use: true },
+            // Current Claude models reject a forced tool_choice ("any"/"tool") with a 400.
+            // The prompts ask for exactly one call; strict schemas keep its input valid.
+            tool_choice: { type: "auto", disable_parallel_tool_use: true },
           }
         : {}),
     };

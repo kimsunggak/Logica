@@ -8,6 +8,8 @@ import { Compartment, EditorSelection, EditorState, type Extension, type StateEf
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import { indentUnit } from "@codemirror/language";
 import { flashLine } from "./aiTarget";
+import { pendingEdits } from "./pendingEdits";
+import { textChanges } from "./textDiff";
 import { editorTheme, fontTheme } from "./theme";
 
 export interface EditorConfig {
@@ -40,6 +42,10 @@ const compartments = {
   wrap: new Compartment(),
 };
 
+/** Per file, not part of the shared config: a file that is not UTF-8 stays read-only until it is converted. */
+const lock = new Compartment();
+const lockExtension = (readOnly: boolean): Extension => (readOnly ? EditorState.readOnly.of(true) : []);
+
 class EditorSession {
   private view: EditorView | null = null;
   private readonly states = new Map<string, EditorState>();
@@ -54,8 +60,20 @@ class EditorSession {
     wordWrap: true,
   };
   private flashTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly openHooks: ((path: string) => void)[] = [];
+  private readonly closeHooks: ((path: string, state: EditorState) => void)[] = [];
   activePath: string | null = null;
   listener: SessionListener | null = null;
+
+  /** Run after a file's editor state is created (opened, or reset to new text). */
+  onOpen(hook: (path: string) => void) {
+    this.openHooks.push(hook);
+  }
+
+  /** Run before an open file's editor state is discarded. */
+  onClose(hook: (path: string, state: EditorState) => void) {
+    this.closeHooks.push(hook);
+  }
 
   /** Extensions shared by every file (set once by the editor component). */
   setBaseExtensions(extensions: Extension[]) {
@@ -109,8 +127,13 @@ class EditorSession {
   }
 
   /** Create the editor state for a file (no-op if already open). */
-  open(path: string, text: string, cursor?: { anchor: number; head: number }) {
+  open(path: string, text: string, cursor?: { anchor: number; head: number }, options: { readOnly?: boolean } = {}) {
     if (this.states.has(path)) return;
+    this.create(path, text, cursor, options.readOnly ?? false);
+    for (const hook of this.openHooks) hook(path);
+  }
+
+  private create(path: string, text: string, cursor: { anchor: number; head: number } | undefined, readOnly: boolean) {
     const len = text.length;
     const selection = cursor
       ? EditorSelection.single(Math.min(cursor.anchor, len), Math.min(cursor.head, len))
@@ -118,7 +141,7 @@ class EditorSession {
     const state = EditorState.create({
       doc: text,
       selection,
-      extensions: [...this.baseExtensions, ...this.configExtensions()],
+      extensions: [...this.baseExtensions, ...this.configExtensions(), lock.of(lockExtension(readOnly)), pendingEdits],
     });
     this.states.set(path, state);
     this.saved.set(path, state.doc);
@@ -145,6 +168,8 @@ class EditorSession {
   }
 
   close(path: string) {
+    const state = this.stateOf(path);
+    if (state) for (const hook of this.closeHooks) hook(path, state);
     this.states.delete(path);
     this.saved.delete(path);
     this.dirty.delete(path);
@@ -168,6 +193,15 @@ class EditorSession {
     return this.dirty.get(path) ?? false;
   }
 
+  isReadOnly(path: string): boolean {
+    return this.stateOf(path)?.readOnly ?? false;
+  }
+
+  /** Lock or unlock a file for editing; programmatic reloads still replace its text. */
+  setReadOnly(path: string, readOnly: boolean) {
+    if (this.has(path) && this.isReadOnly(path) !== readOnly) this.dispatchEffects(path, [lock.reconfigure(lockExtension(readOnly))]);
+  }
+
   /** Record that `text` (default: current content) is what is on disk. */
   markSaved(path: string, text?: string) {
     const state = this.stateOf(path);
@@ -176,14 +210,31 @@ class EditorSession {
     this.updateDirty(path, state.doc);
   }
 
-  /** Replace a file's content (external reload). Kept undoable. */
+  /**
+   * Replace a file's content (external reload). Kept undoable. Only the
+   * changed parts are replaced, so the cursor and highlights elsewhere stay.
+   */
   replaceDocument(path: string, text: string) {
     const state = this.stateOf(path);
     if (!state) return;
-    const spec = { changes: { from: 0, to: state.doc.length, insert: text } };
+    const spec = { changes: textChanges(state.doc.toString(), text) };
     if (path === this.activePath && this.view) this.view.dispatch(spec);
     else this.states.set(path, state.update(spec).state);
     this.markSaved(path);
+  }
+
+  /**
+   * Replace a file's content with a fresh state: unlike `replaceDocument`,
+   * the old text cannot be undone back into the buffer.
+   */
+  resetDocument(path: string, text: string) {
+    const state = this.stateOf(path);
+    if (!state) return;
+    const head = Math.min(state.selection.main.head, text.length);
+    this.create(path, text, { anchor: head, head }, false);
+    if (path === this.activePath && this.view) this.view.setState(this.states.get(path)!);
+    this.updateDirty(path, this.states.get(path)!.doc);
+    for (const hook of this.openHooks) hook(path);
   }
 
   /** Dispatch state effects to any open file (active or in the background). */
@@ -195,10 +246,10 @@ class EditorSession {
     }
   }
 
-  /** Apply an edit to any open file. */
+  /** Apply an edit to any open file that is not read-only. */
   applyEdit(path: string, from: number, to: number, insert: string, effects: StateEffect<unknown>[] = []) {
     const state = this.stateOf(path);
-    if (!state) return false;
+    if (!state || state.readOnly) return false;
     const spec = {
       changes: { from, to, insert },
       selection: EditorSelection.cursor(from + insert.length),

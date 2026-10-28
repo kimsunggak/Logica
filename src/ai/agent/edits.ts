@@ -19,6 +19,14 @@ export interface ProposedEdit {
   path: string;
   original: string;
   revised: string;
+  /**
+   * Where ORIGINAL is in the file, with the hash of the whole file text these
+   * offsets belong to. While the file is open the proposal follows its
+   * highlight instead; this places the highlight again after the file is
+   * reopened, if the file is unchanged. `null`: the text was lost (removed or
+   * changed while highlighted) and must not be searched for.
+   */
+  anchor?: { from: number; to: number; hash: string } | null;
 }
 
 const BODY = /^<{7} ?ORIGINAL[^\n]*\n([\s\S]*?)\n?={7}[^\n]*\n([\s\S]*?)\n?>{7} ?REVISED[^\n]*\s*$/;

@@ -1,5 +1,5 @@
 /**
- * What a turn reads of the paper. The judge picks the sections a message
+ * What a turn reads of the paper. Source selection picks the sections a message
  * needs word for word from the paper map; the others are read as their
  * summaries from the paper report.
  *
@@ -14,6 +14,7 @@
 import { ALL_SECTIONS } from "../../ai/tools/chatTools";
 import type { MapEntry, PaperView, ProjectFile, ViewSection } from "../../ai/types";
 import { FRONT, type SectionUnit } from "./sections";
+import { METADATA } from "./metadata";
 
 /** The paper as one turn reads it. */
 export interface Paper {
@@ -25,6 +26,8 @@ export interface Paper {
   units?: SectionUnit[];
   summaries?: Map<string, string>;
   macros?: string;
+  /** The `.tex` sources the units were cut from, as read for this turn. */
+  texts?: ReadonlyMap<string, string>;
 }
 
 export interface Scope {
@@ -46,11 +49,11 @@ export interface Scope {
   chars: number;
 }
 
-/** The sections the judge picks from, or nothing when the paper has no sections. */
+/** The sections source selection picks from, or nothing when the paper has no sections. */
 export function paperMap(paper: Paper): MapEntry[] | undefined {
   if (!paper.units?.length) return undefined;
   return paper.units.map((u) => {
-    const summary = paper.summaries?.get(u.key);
+    const summary = u.summary ?? paper.summaries?.get(u.key);
     return {
       key: u.key,
       title: u.title,
@@ -70,7 +73,7 @@ export function resolveScope(paper: Paper, requested: string[] | undefined): Sco
   const byKey = new Map(units.map((u) => [u.key, u]));
   const unknown = asked.filter((k) => k !== ALL_SECTIONS && !byKey.has(k));
   const none = { full: [], summarized: [], unsummarized: [], omitted: [], unknown };
-  if (!units.some((u) => summaries.has(u.key))) {
+  if (!units.some((u) => u.key !== METADATA && summaries.has(u.key))) {
     return { kind: "full", why: "no_summaries", ...none, chars: paper.files.reduce((n, f) => n + f.text.length, 0) };
   }
   if (asked.includes(ALL_SECTIONS)) return { kind: "full", why: "all", ...none, chars: paper.files.reduce((n, f) => n + f.text.length, 0) };
@@ -86,7 +89,7 @@ export function resolveScope(paper: Paper, requested: string[] | undefined): Sco
     want(key);
     for (const u of units) if (u.parentKey === key) want(u.key);
   }
-  for (const u of units) if (!summaries.has(u.key)) want(u.key);
+  for (const u of units) if (u.summary === undefined && !summaries.has(u.key)) want(u.key);
   let chars = 0;
   const fits = new Set<string>();
   for (const key of order) {
@@ -98,7 +101,7 @@ export function resolveScope(paper: Paper, requested: string[] | undefined): Sco
 
   const scope: Scope = { kind: "sections", full: [], summarized: [], unsummarized: [], omitted: [], unknown, chars };
   for (const u of units) {
-    const summary = summaries.get(u.key);
+    const summary = u.summary ?? summaries.get(u.key);
     if (fits.has(u.key)) {
       scope.full.push(u.key);
       if (!summary && u.key !== FRONT) scope.unsummarized.push(u.key);
@@ -119,7 +122,7 @@ export function paperRequest(paper: Paper, scope: Scope): { projectFiles: Projec
   const sections = (paper.units ?? []).map((u): ViewSection => {
     const base = { key: u.key, title: u.title, depth: u.depth };
     if (full.has(u.key)) return { ...base, content: "full", sources: u.sources };
-    const summary = paper.summaries?.get(u.key);
+    const summary = u.summary ?? paper.summaries?.get(u.key);
     return summary ? { ...base, content: "summary", summary } : { ...base, content: "omitted" };
   });
   return { paperView: { sections, ...(paper.macros ? { macros: paper.macros } : {}) } };
