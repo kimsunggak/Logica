@@ -255,6 +255,7 @@ const en = {
   "agent.failed": "The original text was not found (it may have changed since), so this edit was not applied.",
   "agent.appliedCount": "Applied {count} edit(s).",
   "agent.failedCount": "{count} edit(s) could not be applied because the original text was not found.",
+  "agent.failedSome": "The original text of {count} edit(s) was not found, so nothing was applied. The other edits can still be applied.",
   "agent.line": "line {line}",
   "agent.lineMissing": "original text not found",
 
@@ -620,6 +621,7 @@ const ko: Record<MessageKey, string> = {
   "agent.failed": "원문을 찾지 못해 적용하지 않았습니다. 그사이 내용이 바뀌었을 수 있습니다.",
   "agent.appliedCount": "수정 {count}개를 적용했습니다.",
   "agent.failedCount": "원문을 찾지 못해 수정 {count}개는 적용하지 못했습니다.",
+  "agent.failedSome": "원문을 찾지 못한 수정 {count}개가 있어 아무것도 적용하지 않았습니다. 나머지 수정은 다시 적용할 수 있습니다.",
   "agent.line": "{line}행",
   "agent.lineMissing": "원문을 찾을 수 없음",
 
