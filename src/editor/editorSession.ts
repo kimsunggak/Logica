@@ -40,6 +40,10 @@ const compartments = {
   wrap: new Compartment(),
 };
 
+/** Per file, not part of the shared config: a file that is not UTF-8 stays read-only until it is converted. */
+const lock = new Compartment();
+const lockExtension = (readOnly: boolean): Extension => (readOnly ? EditorState.readOnly.of(true) : []);
+
 class EditorSession {
   private view: EditorView | null = null;
   private readonly states = new Map<string, EditorState>();
@@ -109,7 +113,7 @@ class EditorSession {
   }
 
   /** Create the editor state for a file (no-op if already open). */
-  open(path: string, text: string, cursor?: { anchor: number; head: number }) {
+  open(path: string, text: string, cursor?: { anchor: number; head: number }, options: { readOnly?: boolean } = {}) {
     if (this.states.has(path)) return;
     const len = text.length;
     const selection = cursor
@@ -118,7 +122,7 @@ class EditorSession {
     const state = EditorState.create({
       doc: text,
       selection,
-      extensions: [...this.baseExtensions, ...this.configExtensions()],
+      extensions: [...this.baseExtensions, ...this.configExtensions(), lock.of(lockExtension(options.readOnly ?? false))],
     });
     this.states.set(path, state);
     this.saved.set(path, state.doc);
@@ -168,6 +172,15 @@ class EditorSession {
     return this.dirty.get(path) ?? false;
   }
 
+  isReadOnly(path: string): boolean {
+    return this.stateOf(path)?.readOnly ?? false;
+  }
+
+  /** Lock or unlock a file for editing; programmatic reloads still replace its text. */
+  setReadOnly(path: string, readOnly: boolean) {
+    if (this.has(path) && this.isReadOnly(path) !== readOnly) this.dispatchEffects(path, [lock.reconfigure(lockExtension(readOnly))]);
+  }
+
   /** Record that `text` (default: current content) is what is on disk. */
   markSaved(path: string, text?: string) {
     const state = this.stateOf(path);
@@ -195,10 +208,10 @@ class EditorSession {
     }
   }
 
-  /** Apply an edit to any open file. */
+  /** Apply an edit to any open file that is not read-only. */
   applyEdit(path: string, from: number, to: number, insert: string, effects: StateEffect<unknown>[] = []) {
     const state = this.stateOf(path);
-    if (!state) return false;
+    if (!state || state.readOnly) return false;
     const spec = {
       changes: { from, to, insert },
       selection: EditorSelection.cursor(from + insert.length),

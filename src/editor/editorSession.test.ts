@@ -42,4 +42,23 @@ describe("editorSession", () => {
     expect(editorSession.textOf("b.tex")).toBe("xbeta");
     expect(editorSession.isDirty("b.tex")).toBe(true);
   });
+
+  it("keeps a read-only file unchanged until it is unlocked, while reloads still replace it", () => {
+    editorSession.open("legacy.tex", "\uFFFD text", undefined, { readOnly: true });
+    expect(editorSession.isReadOnly("legacy.tex")).toBe(true);
+    expect(editorSession.applyEdit("legacy.tex", 0, 0, "x")).toBe(false);
+    editorSession.activate("legacy.tex");
+    expect(view.state.readOnly).toBe(true);
+    expect(editorSession.applyEdit("legacy.tex", 0, 0, "x")).toBe(false);
+    editorSession.replaceDocument("legacy.tex", "서론 text");
+    editorSession.setReadOnly("legacy.tex", false);
+    expect(editorSession.applyEdit("legacy.tex", 0, 0, "x")).toBe(true);
+    expect(editorSession.textOf("legacy.tex")).toBe("x서론 text");
+    // The lock belongs to its file and survives switching files.
+    editorSession.setReadOnly("legacy.tex", true);
+    editorSession.activate("a.tex");
+    expect(view.state.readOnly).toBe(false);
+    editorSession.activate("legacy.tex");
+    expect(view.state.readOnly).toBe(true);
+  });
 });

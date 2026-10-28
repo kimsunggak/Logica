@@ -7,6 +7,8 @@
 use std::path::{Component, Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
+use encoding_rs::Encoding;
 use serde::Serialize;
 use tauri::ipc::Response;
 
@@ -58,6 +60,17 @@ pub struct TextFile {
 #[serde(rename_all = "camelCase")]
 pub struct WriteResult {
     mtime: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConvertResult {
+    content: String,
+    mtime: u64,
+    /// Encoding the original was decoded from (e.g. `EUC-KR`).
+    encoding: String,
+    /// Project-relative path of the untouched original.
+    backup: String,
 }
 
 #[derive(Serialize)]
@@ -221,6 +234,10 @@ pub async fn read_text_file(root: String, path: String) -> CmdResult<TextFile> {
 /// When `expected_mtime` is given and the file on disk has a different
 /// modification time, the write is refused with kind `conflict` unless `force`
 /// is set. This protects against silently overwriting external edits.
+///
+/// A file on disk that is not UTF-8 is never overwritten (kind `not_utf8`):
+/// its text was read with replacement characters, and saving it would destroy
+/// the original. `convert_text_file_to_utf8` converts it first.
 #[tauri::command]
 pub async fn write_text_file(
     root: String,
@@ -240,22 +257,103 @@ pub async fn write_text_file(
             ));
         }
     }
+    if existing.as_ref().is_some_and(|meta| meta.is_file()) && std::str::from_utf8(&std::fs::read(&file)?).is_err() {
+        return Err(CmdError::new(
+            "not_utf8",
+            format!("{path} is not UTF-8. Convert it to UTF-8 before saving."),
+        ));
+    }
+    write_atomic(&file, content.as_bytes(), existing.as_ref())?;
+    let meta = std::fs::metadata(&file)?;
+    Ok(WriteResult {
+        mtime: mtime_ms(&meta),
+    })
+}
+
+/// Replace `file` with `bytes` through a temporary file and a rename.
+fn write_atomic(file: &Path, bytes: &[u8], existing: Option<&std::fs::Metadata>) -> CmdResult<()> {
     let file_name = file
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "file".into());
     let tmp = file.with_file_name(format!(".{file_name}.logica-tmp"));
-    std::fs::write(&tmp, content.as_bytes())?;
-    if let Some(meta) = &existing {
+    std::fs::write(&tmp, bytes)?;
+    if let Some(meta) = existing {
         let _ = std::fs::set_permissions(&tmp, meta.permissions());
     }
-    if let Err(err) = std::fs::rename(&tmp, &file) {
+    if let Err(err) = std::fs::rename(&tmp, file) {
         let _ = std::fs::remove_file(&tmp);
         return Err(err.into());
     }
+    Ok(())
+}
+
+/// Decode a file that is not UTF-8: by its byte order mark, or by detecting
+/// the legacy encoding (EUC-KR, Shift_JIS, windows-1252, ...). `None` when the
+/// detected encoding cannot decode it without errors.
+fn decode_legacy(bytes: &[u8]) -> Option<(&'static Encoding, String)> {
+    let guess = match Encoding::for_bom(bytes) {
+        Some((encoding, _)) => encoding,
+        None => {
+            let mut detector = EncodingDetector::new(Iso2022JpDetection::Deny);
+            detector.feed(bytes, true);
+            detector.guess(None, Utf8Detection::Deny)
+        }
+    };
+    let (text, encoding, had_errors) = guess.decode(bytes);
+    (!had_errors).then(|| (encoding, text.into_owned()))
+}
+
+/// Copy the original next to it as `name.<encoding>.bak`, numbered if taken.
+fn write_backup(file: &Path, bytes: &[u8], encoding: &'static Encoding) -> CmdResult<PathBuf> {
+    use std::io::Write;
+    let file_name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "file".into());
+    let label = encoding.name().to_ascii_lowercase();
+    for n in 0..100 {
+        let name = if n == 0 { format!("{file_name}.{label}.bak") } else { format!("{file_name}.{label}.{n}.bak") };
+        let backup = file.with_file_name(name);
+        // create_new never follows or replaces an existing file or link.
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&backup) {
+            Ok(mut out) => {
+                out.write_all(bytes)?;
+                out.sync_all()?;
+                return Ok(backup);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Err(CmdError::new("io", "Too many backups of this file already exist"))
+}
+
+/// Rewrite a text file that is not UTF-8 as UTF-8, keeping the original as a backup.
+#[tauri::command]
+pub async fn convert_text_file_to_utf8(root: String, path: String) -> CmdResult<ConvertResult> {
+    let root_path = canonical_root(&root)?;
+    let file = resolve(&root_path, &path)?;
     let meta = std::fs::metadata(&file)?;
-    Ok(WriteResult {
+    if meta.len() > MAX_TEXT_BYTES {
+        return Err(CmdError::new("too_large", format!("{path} is too large to edit")));
+    }
+    let bytes = std::fs::read(&file)?;
+    if std::str::from_utf8(&bytes).is_ok() {
+        return Err(CmdError::new("already_utf8", format!("{path} is already UTF-8")));
+    }
+    let (encoding, content) = decode_legacy(&bytes)
+        .ok_or_else(|| CmdError::new("unknown_encoding", format!("Could not detect the encoding of {path}")))?;
+    let backup = write_backup(&file, &bytes, encoding)?;
+    write_atomic(&file, content.as_bytes(), Some(&meta))?;
+    let meta = std::fs::metadata(&file)?;
+    let backup = to_rel_string(&root_path, &backup)
+        .unwrap_or_else(|| backup.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+    Ok(ConvertResult {
+        content,
         mtime: mtime_ms(&meta),
+        encoding: encoding.name().into(),
+        backup,
     })
 }
 
@@ -422,6 +520,34 @@ mod tests {
         write_text_file(root.clone(), "a.tex".into(), "three".into(), Some(second.mtime), Some(true)).await.unwrap();
         let file = read_text_file(root, "a.tex".into()).await.unwrap();
         assert_eq!(file.content, "three");
+    }
+
+    #[tokio::test]
+    async fn legacy_files_are_never_overwritten_until_converted() {
+        let dir = std::env::temp_dir().join(format!("logica-encoding-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let root = dir.to_string_lossy().into_owned();
+        let text = "\\section{서론}\n한글 논문의 본문입니다. 인코딩 변환을 확인합니다.\n";
+        let (original, _, _) = encoding_rs::EUC_KR.encode(text);
+        std::fs::write(dir.join("old.tex"), &original).unwrap();
+
+        let read = read_text_file(root.clone(), "old.tex".into()).await.unwrap();
+        assert!(read.lossy);
+        let err = write_text_file(root.clone(), "old.tex".into(), read.content, None, Some(true)).await.err().unwrap();
+        assert_eq!(err.kind, "not_utf8");
+        assert_eq!(std::fs::read(dir.join("old.tex")).unwrap(), original.as_ref());
+
+        let converted = convert_text_file_to_utf8(root.clone(), "old.tex".into()).await.unwrap();
+        assert_eq!(converted.encoding, "EUC-KR");
+        assert_eq!(converted.content, text);
+        assert_eq!(converted.backup, "old.tex.euc-kr.bak");
+        assert_eq!(std::fs::read(dir.join("old.tex.euc-kr.bak")).unwrap(), original.as_ref());
+        assert_eq!(std::fs::read_to_string(dir.join("old.tex")).unwrap(), text);
+        write_text_file(root.clone(), "old.tex".into(), "edited".into(), Some(converted.mtime), None).await.unwrap();
+        let err = convert_text_file_to_utf8(root, "old.tex".into()).await.err().unwrap();
+        assert_eq!(err.kind, "already_utf8");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

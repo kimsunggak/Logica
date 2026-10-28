@@ -45,6 +45,7 @@ pub fn run() {
             project::list_project_files,
             project::read_text_file,
             project::write_text_file,
+            project::convert_text_file_to_utf8,
             project::stat_files,
             project::read_binary_file,
             project::path_exists,

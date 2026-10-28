@@ -46,6 +46,21 @@ export function writeTextFile(
   return call<{ mtime: number }>("write_text_file", { root, path, content, expectedMtime, force });
 }
 
+export interface ConvertedFile {
+  content: string;
+  mtime: number;
+  /** Encoding the original was decoded from (e.g. `EUC-KR`). */
+  encoding: string;
+  /** Project-relative path of the untouched original. */
+  backup: string;
+}
+
+/** Rewrite a file that is not UTF-8 as UTF-8; the backend keeps the original as a backup. */
+export async function convertTextFileToUtf8(root: string, path: string): Promise<ConvertedFile> {
+  const file = await call<ConvertedFile>("convert_text_file_to_utf8", { root, path });
+  return { ...file, content: file.content.replace(/\r\n?/g, "\n") };
+}
+
 export function statFiles(root: string, paths: string[]): Promise<FileStat[]> {
   return call<FileStat[]>("stat_files", { root, paths });
 }

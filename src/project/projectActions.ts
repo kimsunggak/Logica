@@ -12,7 +12,7 @@ import { keyAtOffset, REF_COMMANDS } from "../latex/parser/parseFile";
 import { confirmDialog, errorKind, errorMessage } from "../lib/backend";
 import { useSettings } from "../settings/settingsStore";
 import { useWorkspace } from "../storage/workspaceStore";
-import { createStarterProject, exportPdfFile, listProjectFiles, pathExists, readTextFile, statFiles, writeTextFile } from "./projectApi";
+import { convertTextFileToUtf8, createStarterProject, exportPdfFile, listProjectFiles, pathExists, readTextFile, statFiles, writeTextFile } from "./projectApi";
 import { initialProjectState, notify, openFileMeta, updateOpenFile, useProject, type CompileTrigger } from "./projectStore";
 import type { PaperTemplateId } from "./templates";
 import { t } from "../i18n";
@@ -208,7 +208,8 @@ export async function openFile(
       diskMtimes.set(path, mtime);
     }
     const cursor = useWorkspace.getState().project(root).cursors[path];
-    editorSession.open(path, content, cursor);
+    // Text decoded with replacement characters must never be saved over the original.
+    editorSession.open(path, content, cursor, { readOnly: lossy });
     useProject.setState((s) => ({
       openFiles: s.openFiles.some((f) => f.path === path)
         ? s.openFiles
@@ -251,6 +252,10 @@ export async function saveFile(path: string, force = false): Promise<boolean> {
   const meta = openFileMeta(path);
   const content = editorSession.textOf(path);
   if (!root || !meta || content === undefined) return false;
+  if (meta.lossy) {
+    notify("error", t("project.lossyReadOnly", { path }));
+    return false;
+  }
   try {
     const expected = meta.external === "deleted" ? undefined : meta.mtime;
     const result = await writeTextFile(root, path, content, expected, force);
@@ -563,7 +568,8 @@ export async function checkExternalChanges(): Promise<void> {
         updateOpenFile(stat.path, { mtime: file.mtime });
       } else if (!editorSession.isDirty(stat.path)) {
         editorSession.replaceDocument(stat.path, file.content);
-        updateOpenFile(stat.path, { mtime: file.mtime, external: undefined, dirty: false });
+        editorSession.setReadOnly(stat.path, file.lossy);
+        updateOpenFile(stat.path, { mtime: file.mtime, external: undefined, dirty: false, lossy: file.lossy });
         notify("info", t("project.reloaded", { path: stat.path }));
       } else {
         updateOpenFile(stat.path, { external: "modified" });
@@ -592,12 +598,36 @@ export async function resolveExternalChange(path: string, choice: "reload" | "ke
   try {
     const file = await readTextFile(root, path);
     editorSession.replaceDocument(path, file.content);
+    editorSession.setReadOnly(path, file.lossy);
     diskTexts.set(path, file.content);
     diskMtimes.set(path, file.mtime);
-    updateOpenFile(path, { mtime: file.mtime, external: undefined, dirty: false });
+    updateOpenFile(path, { mtime: file.mtime, external: undefined, dirty: false, lossy: file.lossy });
     scheduleRebuild(50);
   } catch (err) {
     notify("error", t("project.reloadError", { path, error: errorMessage(err) }));
+  }
+}
+
+/**
+ * Make a file that is not UTF-8 editable: the backend detects its encoding,
+ * keeps the original next to it as a backup and rewrites it as UTF-8.
+ */
+export async function convertToUtf8(path: string): Promise<void> {
+  const { root } = useProject.getState();
+  if (!root || !openFileMeta(path)?.lossy) return;
+  if (!(await confirmDialog(t("project.convertConfirm", { path })))) return;
+  try {
+    const file = await convertTextFileToUtf8(root, path);
+    if (useProject.getState().root !== root) return;
+    editorSession.replaceDocument(path, file.content);
+    editorSession.setReadOnly(path, false);
+    diskTexts.set(path, file.content);
+    diskMtimes.set(path, file.mtime);
+    updateOpenFile(path, { mtime: file.mtime, external: undefined, dirty: false, lossy: false });
+    scheduleRebuild(50);
+    notify("success", t("project.converted", { path, encoding: file.encoding, backup: file.backup }));
+  } catch (err) {
+    notify("error", t("project.convertError", { path, error: errorMessage(err) }));
   }
 }
 

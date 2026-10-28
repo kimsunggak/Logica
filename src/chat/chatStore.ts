@@ -585,6 +585,13 @@ async function executePaperEditTool(messageId: string, entries: { index: number;
       endSpan(span, "edit", { applied: 0, reason: "project, session or pending proposal changed" });
       return null;
     }
+    // A file that is not UTF-8 stays read-only until it is converted; the proposal stays pending.
+    const locked = entries.find(({ edit }) => editorSession.isReadOnly(edit.path));
+    if (locked) {
+      notify("error", t("project.lossyReadOnly", { path: locked.edit.path }));
+      endSpan(span, "edit", { applied: 0, reason: "file is not UTF-8 (read-only)" });
+      return null;
+    }
     const texts = new Map(entries.map(({ edit }) => [edit.path, editorSession.textOf(edit.path) ?? ""]));
     const edits = entries.map(({ edit }) => {
       if (message.mode) return edit;
