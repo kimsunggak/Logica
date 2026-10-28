@@ -3,7 +3,7 @@ import { CHAT_MODELS } from "../ai/models/modelConfig";
 import { useProject } from "../project/projectStore";
 import { loadSession, saveSession } from "./chatHistory";
 import { runChatTurn, type Turn, type TurnResult } from "./orchestrator";
-import { sendChatMessage, setChatMode, switchChatSession, useChat } from "./chatStore";
+import { newChatSession, sendChatMessage, setChatMode, switchChatSession, useChat } from "./chatStore";
 import { preparePaperEdits } from "./paper/editTool";
 
 vi.mock("./orchestrator", async (original) => ({ ...(await original<object>()), runChatTurn: vi.fn() }));
@@ -45,6 +45,20 @@ describe("UI modes and persisted editing proposals", () => {
     await sending;
     expect(useChat.getState().mode).toBe("chat");
     expect(useChat.getState().messages.at(-1)).toMatchObject({ mode: "edit", route: "edit", editToolCallId: "tool-1" });
+  });
+
+  it("saves a turn still running as stopped when the author leaves the conversation", async () => {
+    vi.mocked(runChatTurn).mockImplementation(() => new Promise(() => {}));
+    void sendChatMessage("Unanswered question");
+    newChatSession();
+    expect(saveSession).toHaveBeenCalledWith("/project", "session-1", expect.objectContaining({
+      messages: [
+        expect.objectContaining({ role: "user", content: "Unanswered question" }),
+        expect.objectContaining({ role: "assistant", status: "cancelled", stage: undefined }),
+      ],
+    }));
+    expect(useChat.getState()).toMatchObject({ messages: [], runningId: null });
+    expect(useChat.getState().sessionId).not.toBe("session-1");
   });
 
   it("saves composer mode and structured tool edits", async () => {

@@ -419,12 +419,28 @@ function stopSectionSummaries() {
 
 // ---------------------------------------------------------------- saved sessions
 
-/** Load the project's conversations and show the most recent one (or a new one). */
-export async function openChatsFor(root: string | null): Promise<void> {
+/**
+ * Leave the shown conversation: stop its turn and summary and save it now.
+ * A conversation is not saved while an answer streams, so a turn still
+ * running is kept as stopped instead of being lost.
+ */
+function leaveSession() {
+  const { runningId } = useChat.getState();
   stopChat();
   stopSummary();
+  if (runningId) {
+    useChat.setState((s) => ({
+      runningId: null,
+      messages: s.messages.map((m) => (m.id === runningId && m.status === "streaming" ? { ...m, status: "cancelled", stage: undefined } : m)),
+    }));
+  }
+  flushSave();
+}
+
+/** Load the project's conversations and show the most recent one (or a new one). */
+export async function openChatsFor(root: string | null): Promise<void> {
+  leaveSession();
   stopSectionSummaries();
-  clearTimeout(saveTimer);
   useChat.setState({ root, mode: "auto", messages: [], summary: null, sessions: [], sessionId: newSessionId(), createdAt: Date.now() });
   if (!root) return;
   const sessions = await listSessions(root).catch(() => [] as SessionSummary[]);
@@ -435,18 +451,14 @@ export async function openChatsFor(root: string | null): Promise<void> {
 
 /** Start an empty conversation; it is saved once it has a message. */
 export function newChatSession() {
-  stopChat();
-  stopSummary();
-  flushSave();
+  leaveSession();
   useChat.setState({ messages: [], summary: null, sessionId: newSessionId(), createdAt: Date.now() });
 }
 
 export async function switchChatSession(id: string): Promise<void> {
   const { root } = useChat.getState();
   if (!root) return;
-  stopChat();
-  stopSummary();
-  flushSave();
+  leaveSession();
   const file = await loadSession<ChatMessage>(root, id).catch(() => null);
   if (!file || useChat.getState().root !== root) return;
   const messages = file.messages.map((saved) => {
