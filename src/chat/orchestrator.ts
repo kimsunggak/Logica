@@ -85,15 +85,22 @@ interface Selection {
   reference: string[];
   reason: string;
 }
+/** The paper's own key. Claude may change an enum value's capitalization, so a unique case-insensitive match counts. */
+function sectionKey(paper: Paper, value: string): string | undefined {
+  const keys = [ALL_SECTIONS, ...(paper.units ?? []).map((u) => u.key)];
+  if (keys.includes(value)) return value;
+  const same = keys.filter((key) => key.toLowerCase() === value.toLowerCase());
+  return same.length === 1 ? same[0] : undefined;
+}
 function selectionOf(response: AIResponse, mode: ExecutionMode, paper: Paper): Selection {
   const call = response.toolCalls?.[0];
   const invalid = () => new AIError("malformed_response", t("chat.invalidSections"));
   if (response.toolCalls?.length !== 1 || !call || call.argumentsError || call.name !== (mode === "edit" ? SELECT_EDIT_SECTIONS : SELECT_CHAT_SECTIONS)) throw invalid();
   const list = (value: unknown): string[] => {
     if (!Array.isArray(value) || value.some((v) => typeof v !== "string" || !v.trim())) throw invalid();
-    const keys = [...new Set((value as string[]).map((v) => v.trim()))];
-    if (keys.some((key) => key !== ALL_SECTIONS && !paper.units?.some((u) => u.key === key))) throw invalid();
-    return keys;
+    const keys = (value as string[]).map((v) => sectionKey(paper, v.trim()));
+    if (keys.some((key) => key === undefined)) throw invalid();
+    return [...new Set(keys as string[])];
   };
   const reason = typeof call.arguments.reason === "string" ? call.arguments.reason.trim() : "";
   if (!reason) throw invalid();
@@ -205,7 +212,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
   const selected = await traced(turn.id, deps.root, "selection", "runSectionSelection",
     () => ({ mode: route, question: turn.instruction, refined_request: refined, paper_map: map, ...moduleReads.info }),
     async (span) => {
-      const result = await call("select", { ...request, id: `${turn.id}-select`, tools: sectionTools(route) }, options(span, moduleReads));
+      const result = await call("select", { ...request, id: `${turn.id}-select`, tools: sectionTools(route, map?.map((e) => e.key) ?? []) }, options(span, moduleReads));
       complete(result);
       const question = clarification(result.response);
       if (question) return { question, result, selection: undefined };
