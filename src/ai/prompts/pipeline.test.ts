@@ -47,9 +47,19 @@ describe("separate prompt responsibilities", () => {
     expect(prompt.system).toContain("mode is already fixed");
     expect(prompt.messages[0].content).toContain("A summary of method.");
     expect(prompt.messages[0].content).not.toContain("Exact paper source.");
-    const tools = sectionTools(executionMode);
+    const tools = sectionTools(executionMode, ["3", "3.1"]);
     expect(tools[0].name).toBe(executionMode === "chat" ? "select_chat_sections" : "select_edit_sections");
     if (executionMode === "edit") expect(tools[0].parameters.properties).toHaveProperty("reference_sections");
+  });
+
+  it.each(["chat", "edit"] as const)("lets %s select only the paper map's keys or all", (executionMode) => {
+    const lists = executionMode === "chat" ? ["sections"] : ["edit_sections", "reference_sections"];
+    const allowed = (keys: string[]) => {
+      const properties = sectionTools(executionMode, keys)[0].parameters.properties as Record<string, { items: { enum: string[] } }>;
+      return lists.map((name) => properties[name].items.enum);
+    };
+    expect(allowed(["abstract", "3", "3.1"])).toEqual(lists.map(() => ["all", "abstract", "3", "3.1"]));
+    expect(allowed([])).toEqual(lists.map(() => ["all"]));
   });
 
   it("Chat has a dedicated system prompt and no editable blocks", () => {
