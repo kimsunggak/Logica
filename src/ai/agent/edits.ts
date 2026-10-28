@@ -20,11 +20,13 @@ export interface ProposedEdit {
   original: string;
   revised: string;
   /**
-   * Lines (1-based, inclusive) of the source block ORIGINAL was copied from,
-   * with the hash of that block's text. The same text can appear elsewhere in
-   * the file; this tells them apart while the block is unchanged.
+   * Where ORIGINAL is in the file, with the hash of the whole file text these
+   * offsets belong to. While the file is open the proposal follows its
+   * highlight instead; this places the highlight again after the file is
+   * reopened, if the file is unchanged. `null`: the text was lost (removed or
+   * changed while highlighted) and must not be searched for.
    */
-  lines?: { from: number; to: number; hash: string };
+  anchor?: { from: number; to: number; hash: string } | null;
 }
 
 const BODY = /^<{7} ?ORIGINAL[^\n]*\n([\s\S]*?)\n?={7}[^\n]*\n([\s\S]*?)\n?>{7} ?REVISED[^\n]*\s*$/;

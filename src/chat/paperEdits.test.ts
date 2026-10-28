@@ -59,13 +59,40 @@ describe("accepted apply_paper_edits execution", () => {
     expect(useChat.getState().messages[0].editStates).toEqual({ 0: "applied", 1: "applied", 2: "applied" });
   });
 
-  it("applies an anchor repeated in another section to the section it was copied from", async () => {
-    files.set("main.tex", "\\section{A}\nShared ending.\n\\section{B}\nShared ending.\n");
-    const edit: ProposedEdit = { path: "main.tex", original: "Shared ending.", revised: "New ending.", lines: { from: 3, to: 4, hash: textHash("\\section{B}\nShared ending.") } };
-    useChat.setState({ messages: [proposal([edit])] });
-    await applyChatEdit("answer", 0, edit);
-    expect(editorSession.textOf("main.tex")).toBe("\\section{A}\nShared ending.\n\\section{B}\nNew ending.\n");
-    expect(useChat.getState().messages[0].editStates).toEqual({ 0: "applied" });
+  describe("a sentence that also appears in another section", () => {
+    const text = "\\section{A}\nShared ending.\n\\section{B}\nShared ending.\n";
+    const from = text.lastIndexOf("Shared ending.");
+    const edit: ProposedEdit = { path: "main.tex", original: "Shared ending.", revised: "New ending.", anchor: { from, to: from + 14, hash: textHash(text) } };
+    beforeEach(() => {
+      files.set("main.tex", text);
+      useChat.setState({ messages: [proposal([edit])] });
+    });
+
+    it("is applied where its highlight moved after lines were added above it", async () => {
+      editorSession.open("main.tex", text);
+      editorSession.applyEdit("main.tex", 0, 0, "% added\n% added\n% added\n");
+      await applyChatEdit("answer", 0, edit);
+      expect(editorSession.textOf("main.tex")).toBe("% added\n% added\n% added\n\\section{A}\nShared ending.\n\\section{B}\nNew ending.\n");
+      expect(useChat.getState().messages[0].editStates).toEqual({ 0: "applied" });
+    });
+
+    it("is not applied elsewhere once its highlighted text was deleted", async () => {
+      editorSession.open("main.tex", text);
+      editorSession.applyEdit("main.tex", from, from + 14, "");
+      await applyChatEdit("answer", 0, edit);
+      expect(editorSession.textOf("main.tex")).toBe("\\section{A}\nShared ending.\n\\section{B}\n\n");
+      expect(useChat.getState().messages[0].editStates).toEqual({ 0: "failed" });
+    });
+
+    it("keeps its place when the file is closed and opened again", async () => {
+      editorSession.open("main.tex", text);
+      editorSession.applyEdit("main.tex", 0, 0, "% added\n");
+      files.set("main.tex", editorSession.textOf("main.tex")!);
+      editorSession.close("main.tex");
+      expect(useChat.getState().messages[0].edits![0].anchor).toMatchObject({ from: from + 8, to: from + 22 });
+      await applyChatEdit("answer", 0, useChat.getState().messages[0].edits![0]);
+      expect(editorSession.textOf("main.tex")).toBe("% added\n\\section{A}\nShared ending.\n\\section{B}\nNew ending.\n");
+    });
   });
 
   it("keeps a proposal for a file that is not UTF-8 pending without changing the file", async () => {

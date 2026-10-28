@@ -3,7 +3,6 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentTyp
 import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
 import { CHAT_MODELS } from "../ai/models/modelConfig";
 import type { ChatMode } from "../ai/types";
-import { locateExact } from "./paper/editTool";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
 import { DiffView } from "../editor/inlineEdit/DiffView";
 import { validateRewrite } from "../latex/validation";
@@ -17,8 +16,11 @@ import { CollapseButton } from "../components/panes";
 import {
   applyAllChatEdits,
   applyChatEdit,
+  chatEditId,
   deleteChatSession,
+  focusChatEdit,
   newChatSession,
+  pendingEditLine,
   switchChatSession,
   rejectAllChatEdits,
   rejectChatEdit,
@@ -62,15 +64,19 @@ function EditCard({ messageId, index, edit, state, exact = false }: { messageId:
     () => validateRewrite(edit.original, edit.revised, { bibKeys: new Set(bibEntries.map((e) => e.key)), allowEmpty: exact }),
     [edit, bibEntries, exact],
   );
-  const text = currentTexts().get(edit.path);
-  const at = state || text === undefined ? null : exact ? locateExact(text, edit.original, edit.lines) : locateEdit(text, edit.original);
-  const line = at && text !== undefined ? lineOf(text, at.from) : null;
+  // A tool edit applies where its highlight is now; an older edit block by searching its text.
+  const text = exact || state ? undefined : currentTexts().get(edit.path);
+  const at = text === undefined ? null : locateEdit(text, edit.original);
+  const line = state ? null : exact ? pendingEditLine(messageId, index, edit) : at && text !== undefined ? lineOf(text, at.from) : null;
   const errors = issues.filter((i) => i.severity === "error");
   return (
     <div
       className={`overflow-hidden rounded-md border border-slate-200 dark:border-slate-700 ${state === "rejected" ? "opacity-50" : ""}`}
       data-testid="agent-edit"
       data-state={state ?? "pending"}
+      data-edit-card={exact ? chatEditId(messageId, index) : undefined}
+      onMouseEnter={exact && !state ? () => focusChatEdit(messageId, index, edit, true) : undefined}
+      onMouseLeave={exact && !state ? () => focusChatEdit(messageId, index, edit, false) : undefined}
     >
       <div className="flex items-center gap-1.5 border-b border-slate-200 bg-slate-50 px-2 py-1 text-[11.5px] dark:border-slate-700 dark:bg-slate-800/60">
         <FileText size={12} className="shrink-0 text-slate-400" />
@@ -110,7 +116,7 @@ function EditCard({ messageId, index, edit, state, exact = false }: { messageId:
         <div className="flex items-center gap-1.5 border-t border-slate-200 px-2 py-1 dark:border-slate-700">
           <button
             className={`${errors.length ? "btn-danger" : "btn-primary"} h-6 text-[11.5px]`}
-            disabled={!at}
+            disabled={!line}
             onClick={() => void applyChatEdit(messageId, index, edit)}
             data-testid="agent-apply"
           >

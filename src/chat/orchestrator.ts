@@ -231,7 +231,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
         complete(result);
         const question = clarification(result.response);
         if (question) return { result, question, proposal: undefined };
-        const proposal = readEditProposal(result.response, sources);
+        const proposal = readEditProposal(result.response, sources, paper.texts);
         step(turn.id, span, "edit", "queuePaperEdits", { tool: "apply_paper_edits", call_id: proposal.callId }, () => ({ status: "awaiting_application", ...proposal }));
         return { result, proposal, question: undefined };
       }, (out) => out.question ? { clarify: out.question } : { status: "awaiting_application", edits: out.proposal?.edits.length });

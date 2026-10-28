@@ -12,7 +12,7 @@ const response = (edits: unknown): AIResponse => ({
 
 describe("editing tool arguments", () => {
   it("reads a queued tool proposal without applying it", () => {
-    expect(readEditProposal(response([edit]), sources)).toEqual({ callId: "tool-1", summary: "Proposed changes.", edits: [{ ...edit, lines: { from: 4, to: 5, hash: textHash(sources[0].text) } }] });
+    expect(readEditProposal(response([edit]), sources)).toEqual({ callId: "tool-1", summary: "Proposed changes.", edits: [edit] });
   });
   it.each(["/tmp/a.tex", "../a.tex", "sections/../a.tex", "C:\\a.tex", "main.bib", "./main.tex", "a//b.tex"])("rejects invalid source path %s", (path) => {
     expect(validEditPath(path)).toBe(false);
@@ -35,30 +35,25 @@ describe("editing tool arguments", () => {
   });
 });
 
-describe("an anchor that also appears outside its section", () => {
+describe("a sentence that also appears in another section", () => {
   const file = "\\section{A}\n\\begin{itemize}\n\\item a\n\\end{itemize}\n\\section{B}\n\\begin{itemize}\n\\item b\n\\end{itemize}\n";
   const sectionB: SourceRange = { path: "main.tex", fromLine: 5, toLine: 8, text: file.split("\n").slice(4, 8).join("\n") };
+  const proposed = { path: "main.tex", original: "\\end{itemize}", revised: "\\item c\n\\end{itemize}" };
 
-  const lines = { from: 5, to: 8, hash: textHash(sectionB.text) };
-
-  it("applies to the occurrence in the section the model was given", () => {
-    const proposal = readEditProposal(response([{ path: "main.tex", original: "\\end{itemize}", revised: "\\item c\n\\end{itemize}" }]), [sectionB]);
-    expect(proposal.edits[0].lines).toEqual(lines);
-    const [change] = preparePaperEdits(proposal.edits, new Map([["main.tex", file]]))!;
+  it("is placed in the file where the model read it", () => {
+    const [placed] = readEditProposal(response([proposed]), [sectionB], new Map([["main.tex", file]])).edits;
+    const from = file.lastIndexOf("\\end{itemize}");
+    expect(placed.anchor).toEqual({ from, to: from + proposed.original.length, hash: textHash(file) });
+  });
+  it("applies at its range, and only while that range still holds it", () => {
+    const from = file.lastIndexOf("\\end{itemize}");
+    const range = { from, to: from + proposed.original.length };
+    const [change] = preparePaperEdits([proposed], new Map([["main.tex", file]]), [range])!;
     expect(file.slice(0, change.from) + change.revised + file.slice(change.to)).toBe(file.replace("\\item b\n", "\\item b\n\\item c\n"));
-  });
-  it("stays ambiguous without the section, or twice inside it", () => {
-    expect(locateExact(file, "\\end{itemize}")).toBeNull();
-    expect(locateExact(file, "itemize}", lines)).toBeNull();
-  });
-  it("refuses a repeated anchor once lines above it moved the section", () => {
-    // Four new lines put the first section's anchor inside the saved line range.
-    expect(locateExact("1\n2\n3\n4\n" + file, "\\end{itemize}", lines)).toBeNull();
-    // The same happens when the section itself was changed.
-    expect(locateExact(file.replace("\\item b", "\\item B"), "\\end{itemize}", lines)).toBeNull();
-  });
-  it("finds a text unique in the file even after its section moved", () => {
-    expect(locateExact("1\n2\n3\n4\n" + file, "\\item b", lines)).not.toBeNull();
+    expect(preparePaperEdits([proposed], new Map([["main.tex", file]]), [{ from: 0, to: proposed.original.length }])).toBeNull();
+    expect(preparePaperEdits([proposed], new Map([["main.tex", file]]), [null])).toBeNull();
+    // Without a range the sentence is ambiguous, as before.
+    expect(preparePaperEdits([proposed], new Map([["main.tex", file]]))).toBeNull();
   });
 });
 

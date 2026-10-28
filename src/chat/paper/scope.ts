@@ -26,6 +26,8 @@ export interface Paper {
   units?: SectionUnit[];
   summaries?: Map<string, string>;
   macros?: string;
+  /** The `.tex` sources the units were cut from, as read for this turn. */
+  texts?: ReadonlyMap<string, string>;
 }
 
 export interface Scope {

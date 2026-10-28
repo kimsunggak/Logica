@@ -10,18 +10,22 @@ import type { RunControl } from "../ai/gateway";
 import { CHAT_MODELS } from "../ai/models/modelConfig";
 import { aiService, newRequestId } from "../ai/service";
 import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
-import { preparePaperEdits, validEditPath } from "./paper/editTool";
+import { locateExact, preparePaperEdits, validEditPath } from "./paper/editTool";
 import { deleteSession, listSessions, loadSession, newSessionId, saveSession, SESSION_VERSION, type SessionSummary } from "./chatHistory";
 import { runChatTurn, type Outcome, type Paper, type Route, type Stage, type Turn } from "./orchestrator";
 import { emptyReport, hasSummaries, loadReport, saveReport, summariesFor, unitsToSummarize, withSummaries, type PaperReport } from "./paper/report";
 import { summarizeSections } from "./paper/sectionSummarizer";
-import { paperUnits } from "./paper/sections";
+import { paperUnits, textHash } from "./paper/sections";
 import { foldTurns, moduleChars, turnsToFold, unsummarized } from "./session/summarizer";
 import { readSummary, type ConversationSummary } from "./session/summary";
 import { turnsOf } from "./session/turns";
 import { endSpan, failSpan, setDebugProject, startSpan, step, type Span } from "../debug/trace";
 import type { ChatMode, ProjectFile, ProviderId } from "../ai/types";
+import type { EditorState } from "@codemirror/state";
+import type { TargetRange } from "../editor/aiTarget";
 import { editorSession } from "../editor/editorSession";
+import { clearPendingEdits, focusPendingEdit, pendingEditRange, setPendingEdit } from "../editor/pendingEdits";
+import { mapRange } from "../editor/textDiff";
 import { buildPaperDocument, outlineText } from "../latex/parser/documentModel";
 import { currentTexts, navigateTo, openFile } from "../project/projectActions";
 import { notify, useProject } from "../project/projectStore";
@@ -115,7 +119,7 @@ function paperOf(report: PaperReport): Paper {
     used += text.length;
   }
   const { units, macros } = paperUnits(doc, tex);
-  return { files, omitted, budget: PAPER_BUDGET, units, summaries: summariesFor(units, report), macros };
+  return { files, omitted, budget: PAPER_BUDGET, units, summaries: summariesFor(units, report), macros, texts: tex };
 }
 
 /**
@@ -217,6 +221,7 @@ export async function sendChatMessage(text: string): Promise<void> {
   const control: RunControl = { stopped: false, activeRequest: null };
   running = control;
   let route: Route | undefined;
+  let read: Paper | undefined;
   try {
     const project = useProject.getState().root;
     let report = project ? await loadReport(project) : emptyReport();
@@ -225,7 +230,7 @@ export async function sendChatMessage(text: string): Promise<void> {
     const result = await runChatTurn(turn, {
       root,
       control,
-      paper: () => paperOf(report),
+      paper: () => (read = paperOf(report)),
       hooks: {
         onStage: (stage) => updateMessage(requestId, { stage }),
         onRefined: (refined) => updateMessage(requestId, { refined }),
@@ -240,7 +245,7 @@ export async function sendChatMessage(text: string): Promise<void> {
       status: "done",
       stage: undefined,
       route: result.outcome,
-      edits: result.edits,
+      edits: result.edits && anchoredNow(result.edits, read?.texts),
       editToolCallId: result.editToolCallId,
       provider: result.choice.provider,
       model: result.choice.model,
@@ -258,6 +263,7 @@ export async function sendChatMessage(text: string): Promise<void> {
       ui_mode: mode,
     }));
     endSpan(root, "pipeline", { status: "done", route: result.route, outcome: result.outcome });
+    placePendingMarks();
   } catch (err) {
     const error = err instanceof AIError ? err : new AIError("unknown", String(err));
     if (error.kind === "cancelled") updateMessage(requestId, { status: "cancelled", stage: undefined });
@@ -435,6 +441,7 @@ function leaveSession() {
     }));
   }
   flushSave();
+  clearPendingMarks();
 }
 
 /** Load the project's conversations and show the most recent one (or a new one). */
@@ -478,6 +485,7 @@ export async function switchChatSession(id: string): Promise<void> {
   const fits = summary && summary.coveredTurns <= turnsOf(messages).length ? summary : null;
   const mode = file.mode === "chat" || file.mode === "edit" ? file.mode : "auto";
   useChat.setState({ messages, mode, summary: fits, sessionId: id, createdAt: file.createdAt });
+  placePendingMarks();
 }
 
 export async function deleteChatSession(id: string): Promise<void> {
@@ -488,6 +496,7 @@ export async function deleteChatSession(id: string): Promise<void> {
     stopChat();
     stopSummary();
     clearTimeout(saveTimer);
+    clearPendingMarks();
     useChat.setState({ messages: [], summary: null, sessionId: newSessionId(), createdAt: Date.now() });
   }
   await deleteSession(root, id);
@@ -510,7 +519,9 @@ function flushSave() {
   const { root, sessionId, createdAt, messages, summary, runningId, sessions, mode } = useChat.getState();
   if (!root || messages.length === 0 || runningId) return;
   const updatedAt = Date.now();
-  void saveSession(root, sessionId, { version: SESSION_VERSION, createdAt, updatedAt, mode, messages, ...(summary ? { summary } : {}) }).catch(() => {
+  // Saved with where each pending edit's highlight is now, to place it again after a restart.
+  const saved = liveAnchors(messages, (path) => editorSession.stateOf(path));
+  void saveSession(root, sessionId, { version: SESSION_VERSION, createdAt, updatedAt, mode, messages: saved, ...(summary ? { summary } : {}) }).catch(() => {
     // Saving is best effort; the conversation stays usable in memory.
   });
   const entry: SessionSummary = { id: sessionId, title: sessionTitle(messages), createdAt, updatedAt, messageCount: messages.length };
@@ -552,10 +563,126 @@ export function splitBlocks(content: string): Block[] {
 
 // ---------------------------------------------------------------- agent edits
 
+/** The id of a proposed edit: its answer and its place in the tool call. */
+export function chatEditId(messageId: string, index: number): string {
+  return `${messageId}:${index}`;
+}
+
+/** Highlights and anchors belong to the shown conversation's project only. */
+function sameProject(): boolean {
+  const { root } = useChat.getState();
+  return !!root && root === useProject.getState().root;
+}
+
+/** Where a pending edit's text is in a file that shows no highlight for it. */
+function anchorIn(text: string, edit: ProposedEdit): TargetRange | null {
+  const { anchor } = edit;
+  if (anchor === null) return null;
+  // Proposals saved before highlights existed: only an unambiguous text.
+  if (anchor === undefined) return locateExact(text, edit.original);
+  return textHash(text) === anchor.hash && text.slice(anchor.from, anchor.to) === edit.original ? { from: anchor.from, to: anchor.to } : null;
+}
+
+/** Move anchors from the text the model read to the text now: the author may have typed while it answered. */
+function anchoredNow(edits: ProposedEdit[], read: ReadonlyMap<string, string> | undefined): ProposedEdit[] {
+  const now = currentTexts();
+  return edits.map((edit) => {
+    const before = read?.get(edit.path);
+    const after = now.get(edit.path);
+    if (!edit.anchor || before === undefined || after === undefined) return edit;
+    const range = mapRange(before, after, edit.anchor);
+    const anchor = range && after.slice(range.from, range.to) === edit.original ? { ...range, hash: textHash(after) } : null;
+    return { ...edit, anchor };
+  });
+}
+
+/** Highlight the pending edits of the shown conversation in open files that do not show them yet. */
+function placePendingMarks(path?: string) {
+  if (!sameProject()) return;
+  useChat.getState().messages.forEach((message) => {
+    if (!message.mode) return;
+    messageEdits(message).forEach((edit, index) => {
+      if (message.editStates?.[index] || (path !== undefined && edit.path !== path)) return;
+      const state = editorSession.stateOf(edit.path);
+      const id = chatEditId(message.id, index);
+      if (!state || pendingEditRange(state, id)) return;
+      const range = anchorIn(state.doc.toString(), edit);
+      if (range) editorSession.dispatchEffects(edit.path, [setPendingEdit.of({ id, range })]);
+    });
+  });
+}
+
+function clearPendingMarks() {
+  for (const path of editorSession.openPaths()) editorSession.dispatchEffects(path, [clearPendingEdits.of(null)]);
+}
+
+/**
+ * Pending edits with anchors taken from their highlights in the given editor
+ * states (the same array when nothing moved). An open file without the
+ * highlight lost the text, and its anchor becomes null.
+ */
+function liveAnchors(messages: ChatMessage[], stateOf: (path: string) => EditorState | undefined): ChatMessage[] {
+  if (!sameProject()) return messages;
+  const hashes = new Map<EditorState, string>();
+  let changedAny = false;
+  const next = messages.map((message) => {
+    if (!message.mode || !messageEdits(message).length) return message;
+    let changed = false;
+    const edits = message.edits!.map((edit, index) => {
+      const state = message.editStates?.[index] ? undefined : stateOf(edit.path);
+      if (!state) return edit;
+      const range = pendingEditRange(state, chatEditId(message.id, index));
+      let hash = hashes.get(state);
+      if (hash === undefined) hashes.set(state, (hash = textHash(state.doc.toString())));
+      const anchor = range && state.sliceDoc(range.from, range.to) === edit.original ? { ...range, hash } : null;
+      if (anchor === edit.anchor || (anchor && edit.anchor && anchor.from === edit.anchor.from && anchor.to === edit.anchor.to && anchor.hash === edit.anchor.hash)) return edit;
+      changed = true;
+      return { ...edit, anchor };
+    });
+    if (!changed) return message;
+    changedAny = true;
+    return { ...message, edits };
+  });
+  return changedAny ? next : messages;
+}
+
+// A file opened later shows its pending edits; a closed one keeps where they were.
+editorSession.onOpen((path) => placePendingMarks(path));
+editorSession.onClose((path, state) => {
+  const { messages } = useChat.getState();
+  const next = liveAnchors(messages, (p) => (p === path ? state : undefined));
+  if (next !== messages) useChat.setState({ messages: next });
+});
+
+/** The highlighted text a tool edit applies to, in an open file. */
+function highlighted(messageId: string, index: number, edit: ProposedEdit): TargetRange | null {
+  const state = editorSession.stateOf(edit.path);
+  return state ? pendingEditRange(state, chatEditId(messageId, index)) : null;
+}
+
+/** The line a pending tool edit applies to now, or null when its text is gone or changed. */
+export function pendingEditLine(messageId: string, index: number, edit: ProposedEdit): number | null {
+  const state = editorSession.stateOf(edit.path);
+  const marked = state && pendingEditRange(state, chatEditId(messageId, index));
+  if (state && marked) return state.sliceDoc(marked.from, marked.to) === edit.original ? state.doc.lineAt(marked.from).number : null;
+  // Not highlighted (yet): only an anchor saved for exactly this text tells where it is.
+  if (state && !edit.anchor) return null;
+  const text = state ? state.doc.toString() : currentTexts().get(edit.path);
+  const range = text === undefined ? null : anchorIn(text, edit);
+  return range && text !== undefined ? lineOf(text, range.from) : null;
+}
+
+/** Emphasize a pending edit's highlight while its card is hovered. */
+export function focusChatEdit(messageId: string, index: number, edit: ProposedEdit, on: boolean) {
+  if (editorSession.has(edit.path)) editorSession.dispatchEffects(edit.path, [focusPendingEdit.of(on ? chatEditId(messageId, index) : null)]);
+}
+
 function setEditState(messageId: string, index: number, state: EditState) {
+  const edit = useChat.getState().messages.find((m) => m.id === messageId)?.edits?.[index];
   useChat.setState((s) => ({
     messages: s.messages.map((m) => (m.id === messageId && !m.editStates?.[index] ? { ...m, editStates: { ...m.editStates, [index]: state } } : m)),
   }));
+  if (edit && editorSession.has(edit.path)) editorSession.dispatchEffects(edit.path, [setPendingEdit.of({ id: chatEditId(messageId, index), range: null })]);
 }
 
 /** Only proposals actually saved on a completed Edit response may execute. */
@@ -582,8 +709,7 @@ async function executePaperEditTool(messageId: string, entries: { index: number;
     const saved = messageEdits(latest);
     return entries.every(({ index, edit }) => {
       const original = saved[index];
-      return !latest.editStates?.[index] && original && original.path === edit.path && original.original === edit.original && original.revised === edit.revised
-        && original.lines?.from === edit.lines?.from && original.lines?.to === edit.lines?.to && original.lines?.hash === edit.lines?.hash;
+      return !latest.editStates?.[index] && original && original.path === edit.path && original.original === edit.original && original.revised === edit.revised;
     });
   };
   if (!authorized()) return null;
@@ -612,7 +738,9 @@ async function executePaperEditTool(messageId: string, entries: { index: number;
       const at = locateEdit(text, edit.original);
       return at ? { ...edit, original: text.slice(at.from, at.to) } : edit;
     });
-    const replacements = preparePaperEdits(edits, texts);
+    // Tool edits apply where their highlight is now, wherever the text has moved.
+    const ranges = message.mode ? entries.map(({ index, edit }) => highlighted(messageId, index, edit)) : undefined;
+    const replacements = preparePaperEdits(edits, texts, ranges);
     step(messageId, span, "edit", "validatePaperEdits", { edits: entries.length }, { valid: !!replacements });
     if (!replacements) throw new Error(t("agent.failed"));
     const first = replacements[0];

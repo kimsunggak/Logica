@@ -5,6 +5,8 @@ import { loadSession, saveSession } from "./chatHistory";
 import { runChatTurn, type Turn, type TurnResult } from "./orchestrator";
 import { newChatSession, sendChatMessage, setChatMode, switchChatSession, useChat } from "./chatStore";
 import { preparePaperEdits } from "./paper/editTool";
+import { textHash } from "./paper/sections";
+import { editorSession } from "../editor/editorSession";
 
 vi.mock("./orchestrator", async (original) => ({ ...(await original<object>()), runChatTurn: vi.fn() }));
 vi.mock("./chatHistory", async (original) => ({
@@ -59,6 +61,21 @@ describe("UI modes and persisted editing proposals", () => {
     }));
     expect(useChat.getState()).toMatchObject({ messages: [], runningId: null });
     expect(useChat.getState().sessionId).not.toBe("session-1");
+  });
+
+  it("moves a proposal to where its text is now when the author typed while the model answered", async () => {
+    editorSession.open("main.tex", "Same.\nSame.\n");
+    vi.mocked(runChatTurn).mockImplementation(async (turn, deps) => {
+      const read = deps.paper().texts!.get("main.tex")!;
+      editorSession.applyEdit("main.tex", 0, 0, "% typed\n");
+      const from = read.lastIndexOf("Same.");
+      return { ...finished(turn), edits: [{ path: "main.tex", original: "Same.", revised: "Changed.", anchor: { from, to: from + 5, hash: textHash(read) } }] };
+    });
+    setChatMode("edit");
+    await sendChatMessage("Change the second one");
+    const now = editorSession.textOf("main.tex")!;
+    expect(useChat.getState().messages.at(-1)!.edits![0].anchor).toEqual({ from: now.lastIndexOf("Same."), to: now.lastIndexOf("Same.") + 5, hash: textHash(now) });
+    editorSession.close("main.tex");
   });
 
   it("saves composer mode and structured tool edits", async () => {

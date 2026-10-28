@@ -46,6 +46,8 @@ function baseTheme(dark: boolean) {
       ".cm-tooltip": { backgroundColor: dark ? "#1b2330" : "#ffffff", border: `1px solid ${dark ? "#2b3646" : "#e2e8f0"}` },
       ".cm-tooltip-autocomplete > ul > li[aria-selected]": { backgroundColor: dark ? "#264f78" : "#dbeafe", color: "inherit" },
       ".cm-ai-target": { backgroundColor: dark ? "rgba(56,189,248,0.18)" : "rgba(14,165,233,0.15)", borderRadius: "2px" },
+      ".cm-pending-edit": { backgroundColor: dark ? "rgba(74,222,128,0.2)" : "rgba(34,197,94,0.2)", borderRadius: "2px", cursor: "pointer" },
+      ".cm-pending-edit-focused": { backgroundColor: dark ? "rgba(74,222,128,0.32)" : "rgba(34,197,94,0.34)", outline: `1px solid ${dark ? "#4ade80" : "#16a34a"}` },
       ".cm-flash-line": { backgroundColor: dark ? "rgba(250,204,21,0.18)" : "rgba(250,204,21,0.30)" },
     },
     { dark },
