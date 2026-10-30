@@ -295,8 +295,6 @@ AIProvider interface
 
 UI 컴포넌트는 vendor API를 직접 호출하지 않습니다.
 
-다음 단계인 지식 베이스(논문 작성 지식 카드, 관련 연구 위키)의 설계는 [`docs/knowledge-base-design.md`](docs/knowledge-base-design.md)에 있습니다.
-
 ## 개발
 
 ```bash
