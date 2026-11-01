@@ -90,7 +90,8 @@ async function attempt(
           fallback,
           request_id: request.id,
           tools: request.tools?.map((tool) => tool.name) ?? [],
-          web_search: request.webSearch === true,
+          // Only calls that offer the search tool carry the web search fields.
+          ...(request.webSearch ? { web_search: true } : {}),
           prompt: promptText(request),
         }),
         request.id,
@@ -113,8 +114,7 @@ async function attempt(
         tool_calls: response.toolCalls ?? [],
         finishReason: response.finishReason,
         usage: response.usage,
-        sources: response.sources ?? [],
-        search_queries: response.searchQueries ?? [],
+        ...(request.webSearch ? { sources: response.sources ?? [], search_queries: response.searchQueries ?? [] } : {}),
       }));
     }
     return response;
