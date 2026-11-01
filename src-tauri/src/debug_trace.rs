@@ -23,8 +23,9 @@ const MAX_STRING: usize = 400_000;
 struct HubState {
     seq: u64,
     history: VecDeque<String>,
-    /// Provider request id -> (trace id, span id) of the webview call that started it.
-    links: HashMap<String, (String, String)>,
+    /// Provider request id -> (trace id, span id) of the webview call that
+    /// started it, and how many provider requests that call has made.
+    links: HashMap<String, (String, String, u32)>,
     /// Trace id -> start time, for the relative times in the terminal log.
     started: HashMap<String, u64>,
     /// Active project and its fixed application-managed summary path.
@@ -126,12 +127,21 @@ impl DebugHub {
             let ts = obj.get("timestamp").and_then(Value::as_u64).unwrap_or(0);
             let start = *state.started.entry(trace.clone()).or_insert(ts);
             relative = ts.saturating_sub(start);
-            if str_field(obj, "event_type") == "span_start" {
+            let event_type = str_field(obj, "event_type");
+            let webview = str_field(obj, "source") == "webview";
+            if event_type == "span_start" {
                 let request = str_field(obj, "request_id");
-                if !request.is_empty() && str_field(obj, "source") == "webview" {
+                if !request.is_empty() && webview {
                     let span = str_field(obj, "span_id").to_string();
-                    state.links.insert(request.to_string(), (trace.clone(), span));
+                    if state.links.len() > 200 {
+                        state.links.clear();
+                    }
+                    state.links.insert(request.to_string(), (trace.clone(), span, 0));
                 }
+            } else if webview && (event_type == "span_end" || event_type == "span_error") {
+                // The webview call is over; no later provider request belongs to it.
+                let span = str_field(obj, "span_id");
+                state.links.retain(|_, (t, s, _)| !(t.as_str() == trace.as_str() && s.as_str() == span));
             }
             line = Value::Object(obj.clone()).to_string();
             state.history.push_back(line.clone());
@@ -146,22 +156,21 @@ impl DebugHub {
         let _ = self.0.tx.send(line);
     }
 
-    /// The webview trace a provider request belongs to, if it is traced.
-    pub fn link(&self, request_id: &str) -> Option<(String, String)> {
+    /// The webview trace a provider request belongs to, if it is traced, and
+    /// which provider request of that call this is: a paused Claude turn is
+    /// continued with the same request id. The link ends with the webview span.
+    pub fn link(&self, request_id: &str) -> Option<(String, String, u32)> {
         if !self.0.enabled {
             return None;
         }
-        self.0.state.lock().ok()?.links.get(request_id).cloned()
-    }
-
-    pub fn unlink(&self, request_id: &str) {
-        if let Ok(mut state) = self.0.state.lock() {
-            state.links.remove(request_id);
-        }
+        let mut state = self.0.state.lock().ok()?;
+        let link = state.links.get_mut(request_id)?;
+        link.2 += 1;
+        Some(link.clone())
     }
 
     #[cfg(debug_assertions)]
-    fn subscribe(&self) -> (Vec<String>, broadcast::Receiver<String>) {
+    pub(crate) fn subscribe(&self) -> (Vec<String>, broadcast::Receiver<String>) {
         // Subscribe before copying the history so no event falls in between;
         // the page drops duplicates by `seq`.
         let rx = self.0.tx.subscribe();
@@ -504,8 +513,13 @@ mod tests {
     fn links_provider_requests_to_webview_spans() {
         let hub = DebugHub::new(true);
         hub.emit(json!({ "trace_id": "t1", "span_id": "s2", "event_type": "span_start", "source": "webview", "request_id": "req-1" }));
-        assert_eq!(hub.link("req-1"), Some(("t1".into(), "s2".into())));
-        hub.unlink("req-1");
+        assert_eq!(hub.link("req-1"), Some(("t1".into(), "s2".into(), 1)));
+        // A paused Claude turn is continued with the same request id.
+        assert_eq!(hub.link("req-1"), Some(("t1".into(), "s2".into(), 2)));
+        // Another span ending leaves the link; the webview call ending removes it.
+        hub.emit(json!({ "trace_id": "t1", "span_id": "s1", "event_type": "span_end", "source": "webview" }));
+        assert!(hub.link("req-1").is_some());
+        hub.emit(json!({ "trace_id": "t1", "span_id": "s2", "event_type": "span_end", "source": "webview" }));
         assert_eq!(hub.link("req-1"), None);
         assert_eq!(DebugHub::new(false).link("req-1"), None);
     }

@@ -25,6 +25,7 @@ use crate::chatgpt::{self, ChatGptAuth};
 use crate::credentials::read_secret;
 use crate::debug_trace::{now_ms, DebugHub};
 use crate::error::{CmdError, CmdResult};
+use crate::web_search_trace::{offers_web_search, WebSearchLog};
 
 const OPENAI_BASE: &str = "https://api.openai.com";
 const ANTHROPIC_BASE: &str = "https://api.anthropic.com";
@@ -247,16 +248,29 @@ struct TransportTrace<'a> {
     hub: &'a DebugHub,
     link: Option<(String, String)>,
     request_id: String,
+    /// `rust-<request id>`, numbered from the second provider request of the
+    /// same webview call (a paused Claude turn continues with the same id).
+    span_id: String,
     started: Instant,
     stats: Mutex<StreamStats>,
+    /// Web searches read from the raw stream, when the request offers the tool.
+    web_search: Option<Mutex<WebSearchLog>>,
 }
 
 impl<'a> TransportTrace<'a> {
     fn start(hub: &'a DebugHub, request: &StreamRequest) -> Self {
+        let link = hub.link(&request.request_id);
+        let span_id = match &link {
+            Some((_, _, n)) if *n > 1 => format!("rust-{}-{n}", request.request_id),
+            _ => format!("rust-{}", request.request_id),
+        };
+        let web_search = offers_web_search(&request.body);
         let trace = Self {
             hub,
-            link: hub.link(&request.request_id),
+            web_search: (link.is_some() && web_search).then(|| Mutex::new(WebSearchLog::default())),
+            link: link.map(|(trace, span, _)| (trace, span)),
             request_id: request.request_id.clone(),
+            span_id,
             started: Instant::now(),
             stats: Mutex::new(StreamStats::default()),
         };
@@ -270,6 +284,7 @@ impl<'a> TransportTrace<'a> {
                     "auth": request.auth.as_deref().unwrap_or("api_key"),
                     "model": request.body.get("model"),
                     "body_bytes": request.body.to_string().len(),
+                    "web_search": web_search,
                 }
             }),
         );
@@ -280,7 +295,7 @@ impl<'a> TransportTrace<'a> {
         let Some((trace_id, parent)) = &self.link else { return };
         let mut event = serde_json::json!({
             "trace_id": trace_id,
-            "span_id": format!("rust-{}", self.request_id),
+            "span_id": self.span_id,
             "parent_id": parent,
             "source": "rust",
             "module": "llm",
@@ -311,37 +326,65 @@ impl<'a> TransportTrace<'a> {
             StreamEvent::Chunk { data } => {
                 stats.chunks += 1;
                 stats.bytes += data.len();
-                if stats.first_chunk_ms.is_none() {
+                let first = stats.first_chunk_ms.is_none();
+                if first {
                     stats.first_chunk_ms = Some(ms);
-                    drop(stats);
+                }
+                drop(stats);
+                if first {
                     self.emit("span_data", "running", serde_json::json!({ "data": { "label": "first_chunk", "value": { "ms": ms } } }));
                 }
+                self.observe_web_search(data, ms);
             }
             StreamEvent::Done => {}
         }
     }
 
+    /// Report each web search as the raw stream shows it.
+    fn observe_web_search(&self, data: &str, ms: u128) {
+        let Some(log) = &self.web_search else { return };
+        let updates = match log.lock() {
+            Ok(mut log) => log.push(data, ms),
+            Err(_) => return,
+        };
+        for (label, value) in updates {
+            self.emit("span_data", "running", serde_json::json!({ "data": { "label": label, "value": value } }));
+        }
+    }
+
+    // The link itself ends with the webview's span (see `DebugHub::emit`), so a
+    // paused Claude turn continued under the same request id is traced too.
     fn finish(&self, result: &CmdResult<()>) {
         let duration = self.started.elapsed().as_secs_f64() * 1000.0;
+        let web_search = self.web_search.as_ref().and_then(|log| log.lock().ok().map(|mut log| log.finish(self.started.elapsed().as_millis())));
         match result {
             Ok(()) => {
-                let output = self.stats.lock().map(|s| {
-                    serde_json::json!({
-                        "http_status": s.status,
-                        "chunks": s.chunks,
-                        "bytes": s.bytes,
-                        "first_chunk_ms": s.first_chunk_ms,
+                let mut output = self
+                    .stats
+                    .lock()
+                    .map(|s| {
+                        serde_json::json!({
+                            "http_status": s.status,
+                            "chunks": s.chunks,
+                            "bytes": s.bytes,
+                            "first_chunk_ms": s.first_chunk_ms,
+                        })
                     })
-                });
-                self.emit("span_end", "completed", serde_json::json!({ "output": output.unwrap_or_default(), "duration_ms": duration }));
+                    .unwrap_or_default();
+                if let Some(web_search) = web_search {
+                    output["web_search"] = web_search;
+                }
+                self.emit("span_end", "completed", serde_json::json!({ "output": output, "duration_ms": duration }));
             }
-            Err(e) => self.emit(
-                "span_error",
-                "error",
-                serde_json::json!({ "error": format!("{}: {}", e.kind, e.message), "duration_ms": duration }),
-            ),
+            Err(e) => {
+                let mut event = serde_json::json!({ "error": format!("{}: {}", e.kind, e.message), "duration_ms": duration });
+                // Searches that ran before a cancel or a broken stream.
+                if let Some(web_search) = web_search {
+                    event["output"] = serde_json::json!({ "web_search": web_search });
+                }
+                self.emit("span_error", "error", event);
+            }
         }
-        self.hub.unlink(&self.request_id);
     }
 }
 
@@ -487,6 +530,69 @@ mod tests {
             endpoint("anthropic", "GET", "/v1/models").unwrap(),
             "https://api.anthropic.com/v1/models?limit=1000"
         );
+    }
+
+    /// What the debug visualizer receives for a traced request with web search:
+    /// a paused Claude turn continued under the same request id.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn traces_web_searches_and_numbers_continued_requests() {
+        use serde_json::{json, Value};
+
+        let hub = DebugHub::new(true);
+        hub.emit(json!({ "trace_id": "t", "span_id": "t:9", "event_type": "span_start", "source": "webview", "request_id": "req" }));
+        let request = StreamRequest {
+            request_id: "req".into(),
+            provider: "anthropic".into(),
+            path: "/v1/messages".into(),
+            body: json!({ "model": "m", "tools": [{ "type": "web_search_20260318", "name": "web_search" }] }),
+            auth: None,
+        };
+        let sse = |events: &[Value]| events.iter().map(|e| format!("data: {e}\n\n")).collect::<String>();
+        for stop_reason in ["pause_turn", "end_turn"] {
+            let trace = TransportTrace::start(&hub, &request);
+            trace.observe(&StreamEvent::Open { status: 200 });
+            trace.observe(&StreamEvent::Chunk {
+                data: sse(&[
+                    json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "server_tool_use", "id": "srvtoolu_1", "name": "web_search", "input": { "query": "q" } } }),
+                    json!({ "type": "content_block_start", "index": 1, "content_block": { "type": "web_search_tool_result", "tool_use_id": "srvtoolu_1", "content": [{ "url": "https://a.example" }] } }),
+                    json!({ "type": "message_delta", "delta": { "stop_reason": stop_reason } }),
+                ]),
+            });
+            trace.finish(&Ok(()));
+        }
+        // The webview call ends: a later request with this id is not traced.
+        hub.emit(json!({ "trace_id": "t", "span_id": "t:9", "event_type": "span_end", "source": "webview" }));
+        TransportTrace::start(&hub, &request).finish(&Ok(()));
+
+        let (history, _) = hub.subscribe();
+        let events: Vec<Value> = history.iter().map(|line| serde_json::from_str(line).unwrap()).collect();
+        let of = |span: &str, kind: &str| events.iter().filter(|e| e["span_id"] == span && e["event_type"] == kind).cloned().collect::<Vec<_>>();
+        assert_eq!(of("rust-req", "span_start")[0]["input"]["web_search"], true);
+        assert_eq!(of("rust-req", "span_start")[0]["parent_id"], "t:9");
+        let data = of("rust-req", "span_data");
+        assert!(data.iter().any(|e| e["data"]["label"] == "web_search" && e["data"]["value"]["status"] == "done" && e["data"]["value"]["query"] == "q"));
+        assert!(data.iter().any(|e| e["data"]["label"] == "pause_turn"));
+        let end = &of("rust-req", "span_end")[0];
+        assert_eq!(end["output"]["http_status"], 200);
+        assert_eq!(end["output"]["web_search"]["searches"][0]["results"], 1);
+        assert_eq!(end["output"]["web_search"]["stop_reason"], "pause_turn");
+        assert_eq!(of("rust-req-2", "span_end")[0]["output"]["web_search"]["stop_reason"], "end_turn");
+        assert!(of("rust-req-3", "span_start").is_empty());
+    }
+
+    #[test]
+    fn traces_requests_without_web_search_as_before() {
+        use serde_json::json;
+
+        let hub = DebugHub::new(true);
+        hub.emit(json!({ "trace_id": "t", "span_id": "t:2", "event_type": "span_start", "source": "webview", "request_id": "r" }));
+        let request = StreamRequest { request_id: "r".into(), provider: "openai".into(), path: "/v1/responses".into(), body: json!({ "model": "m" }), auth: None };
+        let trace = TransportTrace::start(&hub, &request);
+        assert!(trace.web_search.is_none());
+        assert_eq!(trace.span_id, "rust-r");
+        trace.observe(&StreamEvent::Chunk { data: "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"web_search_call\",\"id\":\"ws\"}}\n\n".into() });
+        trace.finish(&Ok(()));
     }
 
     #[test]
