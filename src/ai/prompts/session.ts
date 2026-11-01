@@ -7,7 +7,7 @@ import { tag } from "./context";
 
 export const SESSION_RULES = [
   "<session_summary>, when present, sums up the conversation before the recent turns: what the paper is about (topic), what the user is working on now (goal), preferences (P#) to follow in every answer, the session history (one line per earlier turn: what was asked and how it ended) and external references the user gave (R#).",
-  "An earlier answer may end with [answer stopped by the user], [answer failed] or [answer cut off at the length limit]: that request was not fully answered. A long message may have its middle omitted, marked [... omitted ...].",
+  "An earlier answer may end with [answer stopped by the user], [answer failed] or [answer cut off at the length limit]: that request was not fully answered. A long message may have its middle omitted, marked [... omitted ...]. An answer may end with [web sources]: the web pages it drew on.",
 ].join("\n");
 
 export function summaryBlock(request: AIRequest): string {

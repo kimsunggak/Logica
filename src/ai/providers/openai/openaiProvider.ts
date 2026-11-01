@@ -25,6 +25,7 @@ import type {
   StreamHandlers,
 } from "../../types";
 import { toToolCalls, type StreamedCall } from "../toolCalls";
+import { SourceList, withSearchHint } from "../webSearch";
 
 /** Platform API keys get `data[]`; ChatGPT sign-in gets the plan catalog `models[]`. */
 interface OpenAIModelList {
@@ -33,6 +34,12 @@ interface OpenAIModelList {
 }
 
 export const CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage";
+
+/** The query of a finished `web_search_call` item: `action.query`, or the first of `action.queries`. */
+function searchQuery(action: any): string | undefined {
+  const query = typeof action?.query === "string" ? action.query : Array.isArray(action?.queries) ? action.queries.find((q: unknown) => typeof q === "string") : undefined;
+  return query?.trim() || undefined;
+}
 
 export class OpenAIProvider implements AIProvider {
   readonly id = "openai" as const;
@@ -81,19 +88,22 @@ export class OpenAIProvider implements AIProvider {
       input: prompt.messages.map((m) => ({ role: m.role, content: m.content })),
       stream: true,
       store: false,
-      ...(request.tools?.length
+      ...(request.tools?.length || request.webSearch
         ? {
-            tools: request.tools.map((tool) => ({
-              type: "function",
-              name: tool.name,
-              description: tool.description,
-              parameters: tool.parameters,
-              strict: true,
-            })),
-            tool_choice: "required",
-            parallel_tool_calls: false,
+            tools: [
+              ...(request.tools ?? []).map((tool) => ({
+                type: "function",
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.parameters,
+                strict: true,
+              })),
+              ...(request.webSearch ? [{ type: "web_search" }] : []),
+            ],
           }
         : {}),
+      // A call is required only of function tools; whether to search is the model's choice.
+      ...(request.tools?.length ? { tool_choice: "required", parallel_tool_calls: false } : {}),
       ...(request.reasoningEffort ? { reasoning: { effort: request.reasoningEffort } } : {}),
       ...(request.maxOutputTokens && auth === "api_key" ? { max_output_tokens: request.maxOutputTokens } : {}),
     };
@@ -104,7 +114,8 @@ export class OpenAIProvider implements AIProvider {
     try {
       return await this.stream(request, auth, handlers);
     } catch (err) {
-      throw err instanceof AIError ? this.explain(err, auth) : err;
+      const explained = err instanceof AIError ? this.explain(err, auth) : err;
+      throw request.webSearch ? withSearchHint(explained) : explained;
     }
   }
 
@@ -123,7 +134,45 @@ export class OpenAIProvider implements AIProvider {
       return call;
     };
     const keyOf = (json: any): string => String(json.item_id ?? json.item?.id ?? `#${json.output_index}`);
+    // Web searches by output item, and the pages the answer cites.
+    const searches = new Set<string>();
+    const queries: string[] = [];
+    const sources = new SourceList();
+    const startSearch = (key: string) => {
+      if (searches.has(key)) return;
+      searches.add(key);
+      // A note written before the search ("let me look that up") is not the answer.
+      text = "";
+      handlers?.onSearch?.();
+    };
+    const searchDone = (key: string, item: any) => {
+      startSearch(key);
+      const query = searchQuery(item?.action);
+      if (query && !queries.includes(query)) {
+        queries.push(query);
+        handlers?.onSearch?.(query);
+      }
+    };
+    const readCitations = (annotations: unknown) => {
+      if (!Array.isArray(annotations)) return;
+      for (const a of annotations) if (a?.type === "url_citation") sources.add(a.url, a.title);
+    };
     const readItem = (json: any, item: any) => {
+      if (item?.type === "web_search_call") {
+        if (json.type === "response.output_item.added") startSearch(keyOf(json));
+        else if (json.type === "response.output_item.done") searchDone(keyOf(json), item);
+        else {
+          // Only counted from the final output: the answer after it has already streamed.
+          searches.add(keyOf(json));
+          const query = searchQuery(item.action);
+          if (query && !queries.includes(query)) queries.push(query);
+        }
+        return;
+      }
+      if (item?.type === "message" && Array.isArray(item.content)) {
+        for (const part of item.content) readCitations(part?.annotations);
+        return;
+      }
       if (item?.type !== "function_call") return;
       const call = callOf(keyOf(json));
       if (typeof item.call_id === "string") call.id = item.call_id;
@@ -152,6 +201,14 @@ export class OpenAIProvider implements AIProvider {
         case "response.output_item.done":
           readItem(json, json.item);
           break;
+        case "response.web_search_call.in_progress":
+        case "response.web_search_call.searching":
+        case "response.web_search_call.completed":
+          if (json.item_id !== undefined) startSearch(String(json.item_id));
+          break;
+        case "response.output_text.annotation.added":
+          readCitations([json.annotation]);
+          break;
         case "response.function_call_arguments.delta":
           if (typeof json.delta === "string") callOf(keyOf(json)).args += json.delta;
           break;
@@ -165,9 +222,12 @@ export class OpenAIProvider implements AIProvider {
             cachedInputTokens: json.response?.usage?.input_tokens_details?.cached_tokens,
             outputTokens: json.response?.usage?.output_tokens,
           };
-          // Calls not streamed as items (some backends) are still in the final output.
-          if (calls.size === 0 && Array.isArray(json.response?.output)) {
-            json.response.output.forEach((item: any, i: number) => readItem({ item_id: item?.id ?? `out${i}` }, item));
+          if (Array.isArray(json.response?.output)) {
+            const output: any[] = json.response.output;
+            // Calls not streamed as items (some backends) are still in the final output.
+            if (calls.size === 0) output.forEach((item, i) => item?.type === "function_call" && readItem({ item_id: item?.id ?? `out${i}` }, item));
+            // Citations can be missing from the stream; the final message has them all.
+            output.forEach((item, i) => item?.type !== "function_call" && readItem({ type: json.type, item_id: item?.id ?? `out${i}` }, item));
           }
           break;
         case "response.incomplete":
@@ -200,7 +260,18 @@ export class OpenAIProvider implements AIProvider {
       });
     }
     const toolCalls = toToolCalls([...calls.values()]);
-    return { id: request.id, provider: this.id, model: request.model, text, ...(toolCalls.length ? { toolCalls } : {}), finishReason, usage };
+    if (searches.size) usage = { ...usage, webSearchRequests: searches.size };
+    return {
+      id: request.id,
+      provider: this.id,
+      model: request.model,
+      text,
+      ...(toolCalls.length ? { toolCalls } : {}),
+      finishReason,
+      usage,
+      ...(sources.size ? { sources: sources.list() } : {}),
+      ...(queries.length ? { searchQueries: queries } : {}),
+    };
   }
 
   async cancel(requestId: string): Promise<void> {

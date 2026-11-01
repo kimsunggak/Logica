@@ -25,6 +25,8 @@ export interface SessionFile<M> {
   messages: M[];
   /** Optional for version 1/2 files written before UI modes. */
   mode?: ChatMode;
+  /** The web search toggle; absent in files written before it, read as off. */
+  webSearch?: boolean;
   /** The session summary (`./session/summary.ts`), read with `readSummary`. */
   summary?: unknown;
 }

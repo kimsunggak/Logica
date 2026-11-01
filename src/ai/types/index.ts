@@ -111,6 +111,12 @@ export interface SectionToSummarize {
   text: string;
 }
 
+/** A web page the answer drew on, from the provider's built-in web search. */
+export interface WebSource {
+  url: string;
+  title?: string;
+}
+
 export interface AIRequest {
   id: string;
   task: AITask;
@@ -147,6 +153,8 @@ export interface AIRequest {
   /** Reasoning effort, mapped to each provider’s API format. */
   reasoningEffort?: ReasoningEffort;
   maxOutputTokens?: number;
+  /** Offer the provider's built-in web search; the model decides whether to search (answer only). */
+  webSearch?: boolean;
 }
 
 export type FinishReason = "stop" | "length" | "cancelled" | "error";
@@ -156,6 +164,8 @@ export interface AIUsage {
   /** Input tokens served from the provider's prompt cache. */
   cachedInputTokens?: number;
   outputTokens?: number;
+  /** Searches the provider's built-in web search ran. */
+  webSearchRequests?: number;
 }
 
 export interface AIResponse {
@@ -167,11 +177,20 @@ export interface AIResponse {
   toolCalls?: ToolCall[];
   finishReason: FinishReason;
   usage?: AIUsage;
+  /** Web pages the answer cites (or, when it cites none, the search results). */
+  sources?: WebSource[];
+  /** The queries of the web searches the model ran. */
+  searchQueries?: string[];
 }
 
 export interface StreamHandlers {
   /** Called for every streamed text delta with the accumulated text. */
   onDelta?: (delta: string, fullText: string) => void;
+  /**
+   * A web search started (no query yet) or its query is known. The text so far
+   * (a note like "let me look that up") is dropped: `onDelta` starts over after it.
+   */
+  onSearch?: (query?: string) => void;
 }
 
 export interface ModelConfig {

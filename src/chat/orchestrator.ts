@@ -9,7 +9,7 @@ import { callModel, type GatewayOptions, type GatewayResult, type RunControl } f
 import type { ModelChoice } from "../ai/models/modelConfig";
 import { NEED_SECTIONS } from "../ai/prompts/answer";
 import { ALL_SECTIONS, CHAT_TOOLS, CLARIFY_REQUEST, EDIT_TOOLS, ROUTE_CHAT, ROUTE_EDIT, SELECT_CHAT_SECTIONS, SELECT_EDIT_SECTIONS, sectionTools } from "../ai/tools/chatTools";
-import type { AIMessage, AIResponse, AIUsage, ChatMode, ExecutionMode, FinishReason } from "../ai/types";
+import type { AIMessage, AIResponse, AIUsage, ChatMode, ExecutionMode, FinishReason, WebSource } from "../ai/types";
 import { step, traced, type Span } from "../debug/trace";
 import { t } from "../i18n";
 import { editableSources, readEditProposal, requireFullSections } from "./paper/editTool";
@@ -26,6 +26,8 @@ export interface Turn {
   id: string;
   instruction: string;
   mode?: ChatMode;
+  /** Let the Answer Module search the web (Chat, and Auto when it routes to Chat). */
+  webSearch?: boolean;
   turns: TurnRecord[];
   summary?: ConversationSummary | null;
 }
@@ -35,6 +37,8 @@ export interface TurnHooks {
   onRefined?: (request: string) => void;
   onText?: (full: string) => void;
   onModel?: (choice: ModelChoice, fallback: boolean) => void;
+  /** The answer started a web search (no query) or its query is known; its text so far was dropped. */
+  onSearch?: (query?: string) => void;
 }
 export interface TurnResult {
   route: Route;
@@ -48,6 +52,8 @@ export interface TurnResult {
   usage?: AIUsage;
   choice: ModelChoice;
   fallbackFrom?: ModelChoice;
+  /** Web pages the answer drew on. */
+  sources?: WebSource[];
 }
 export interface OrchestratorDeps {
   root: Span;
@@ -257,16 +263,21 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
       };
       const mayAsk = scope.kind === "sections";
       const shown = holdBack(showText);
-      const first = await call("answer", { ...request, id: turn.id, ...readPaper(), mayAskForSections: mayAsk }, {
+      // Only the answer may search the web; the text before a search starts over.
+      const webSearch = turn.webSearch === true;
+      const onSearch = (query?: string) => { shown.reset(); hooks.onSearch?.(query); };
+      const first = await call("answer", { ...request, id: turn.id, ...readPaper(), mayAskForSections: mayAsk, webSearch }, {
         ...options(span, moduleReads, mayAsk ? shown.onText : showText),
         onAttempt: (choice, fallback) => { shown.reset(); hooks.onModel?.(choice, fallback); },
+        onSearch,
       });
       const more = mayAsk && first.response.finishReason === "stop" ? askedForSections(first.response.text) : null;
       if (!more) { shown.release(); return first; }
       requested = [...requested, ...more];
       scope = resolveScope(paper, requested);
       step(turn.id, span, "answer", "askForSections", more, () => describeScope(scope));
-      return call("answer", { ...request, id: `${turn.id}-more`, ...readPaper() }, options(span, moduleReads, showText));
-    }, (result) => ({ text: result.response.text, finishReason: result.response.finishReason, model: result.choice.model }));
-  return { route, outcome: "chat", reason: decision.reason, refined, content: answered.response.text, ...finished(answered) };
+      return call("answer", { ...request, id: `${turn.id}-more`, ...readPaper(), webSearch }, { ...options(span, moduleReads, showText), onSearch: hooks.onSearch });
+    }, (result) => ({ text: result.response.text, finishReason: result.response.finishReason, model: result.choice.model, sources: result.response.sources ?? [] }));
+  const sources = answered.response.sources;
+  return { route, outcome: "chat", reason: decision.reason, refined, content: answered.response.text, ...finished(answered), ...(sources?.length ? { sources } : {}) };
 }

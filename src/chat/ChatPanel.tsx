@@ -1,4 +1,4 @@
-import { Check, CheckCheck, FileText, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
+import { Check, CheckCheck, FileText, Globe, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
 import { CHAT_MODELS } from "../ai/models/modelConfig";
@@ -6,7 +6,7 @@ import type { ChatMode } from "../ai/types";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
 import { DiffView } from "../editor/inlineEdit/DiffView";
 import { validateRewrite } from "../latex/validation";
-import { confirmDialog } from "../lib/backend";
+import { confirmDialog, openExternal } from "../lib/backend";
 import { timeAgo } from "../lib/time";
 import { currentTexts, navigateTo } from "../project/projectActions";
 import { useProject } from "../project/projectStore";
@@ -26,6 +26,7 @@ import {
   rejectChatEdit,
   sendChatMessage,
   setChatMode,
+  setWebSearch,
   splitBlocks,
   stopChat,
   useChat,
@@ -145,6 +146,37 @@ function RefinedLine({ message }: { message: ChatMessage }) {
   );
 }
 
+/** The web pages a finished answer drew on; links open in the system browser. */
+function SourceList({ message }: { message: ChatMessage }) {
+  const t = useT();
+  if (message.status !== "done" || !message.sources?.length) return null;
+  return (
+    <div className="border-t border-slate-100 pt-1.5 text-[11.5px] dark:border-slate-800" data-testid="chat-sources">
+      <div className="mb-0.5 flex items-center gap-1 text-slate-500">
+        <Globe size={11} /> {t("chat.sources")}
+      </div>
+      <ol className="list-decimal space-y-0.5 pl-5 text-slate-500">
+        {message.sources.map((source) => (
+          <li key={source.url}>
+            <a
+              href={source.url}
+              title={source.url}
+              className="break-words text-sky-700 underline decoration-sky-700/30 underline-offset-2 hover:decoration-sky-700 dark:text-sky-400 dark:decoration-sky-400/30"
+              onClick={(e) => {
+                e.preventDefault();
+                void openExternal(source.url);
+              }}
+              data-testid="chat-source"
+            >
+              {source.title || source.url}
+            </a>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 function AssistantMessage({ message }: { message: ChatMessage }) {
   const t = useT();
   if (message.status === "error") {
@@ -164,6 +196,7 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   const allEdits = toolEdits.length ? toolEdits.map((edit, index) => ({ index, edit })) : [...edits.values()];
   const pending = allEdits.filter(({ index }) => !message.editStates?.[index]);
   const streaming = message.status === "streaming";
+  const searching = streaming && message.searchQuery !== undefined && !message.content;
   return (
     <div className="space-y-2">
       {(message.stage === "paper" || message.stage === "judge" || message.stage === "refine" || message.stage === "select") && (
@@ -172,7 +205,13 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
         </div>
       )}
       <RefinedLine message={message} />
-      {(message.stage === "answer" || message.stage === "reply" || message.stage === "edit") && !message.content && (
+      {searching && (
+        <div className="flex items-center gap-1 text-[11.5px] text-slate-500" data-testid="chat-searching">
+          <Globe size={11} className="shrink-0 animate-pulse" />
+          <span className="min-w-0 truncate">{message.searchQuery ? t("chat.searchingFor", { query: message.searchQuery }) : t("chat.searching")}</span>
+        </div>
+      )}
+      {(message.stage === "answer" || message.stage === "reply" || message.stage === "edit") && !message.content && !searching && (
         <div className="text-[11.5px] text-slate-500" data-testid="chat-stage">
           {t(message.stage === "edit" ? "chat.stageEdit" : message.stage === "answer" ? "chat.stageAnswer" : "chat.stageReply")}
         </div>
@@ -222,6 +261,7 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
         <EditCard key={`tool-${index}`} messageId={message.id} index={index} edit={edit} state={message.editStates?.[index]} exact />
       ))}
       {message.status === "streaming" && <span className="inline-block h-3 w-1.5 animate-pulse bg-slate-400" />}
+      <SourceList message={message} />
       {message.status === "cancelled" && <div className="text-[11.5px] text-slate-400">{t("chat.stopped")}</div>}
       {message.fallbackFrom && message.status === "done" && (
         <div className="text-[11px] text-amber-700 dark:text-amber-400" data-testid="chat-fallback">
@@ -318,6 +358,7 @@ export function ChatPanel() {
   const messages = useChat((s) => s.messages);
   const running = useChat((s) => s.runningId !== null);
   const mode = useChat((s) => s.mode);
+  const webSearch = useChat((s) => s.webSearch);
   const config = mode === "edit" ? CHAT_MODELS.edit : CHAT_MODELS.answer;
   const models = t("chat.modelLabel", { primary: config.primary.model, fallback: config.fallback.model });
   const [draft, setDraft] = useState("");
@@ -374,7 +415,7 @@ export function ChatPanel() {
         {messages.map((message) =>
           message.role === "user" ? (
             <div key={message.id} className="ml-6">
-              <div className="mb-0.5 text-right text-[10px] text-slate-400">{message.mode === "chat" ? "Chat" : message.mode === "edit" ? "Edit" : "Auto"}</div>
+              <div className="mb-0.5 text-right text-[10px] text-slate-400">{message.mode === "chat" ? "Chat" : message.mode === "edit" ? "Edit" : "Auto"}{message.webSearch ? " · Web" : ""}</div>
               <div className="flex items-start justify-end gap-1.5">
                 <div className="min-w-0 rounded-lg bg-sky-50 px-2.5 py-1.5 leading-normal whitespace-pre-wrap text-slate-800 dark:bg-sky-950/50 dark:text-slate-100">
                   {message.content}
@@ -397,19 +438,37 @@ export function ChatPanel() {
       </div>
       <div className="shrink-0 border-t border-slate-200 p-2 dark:border-slate-800">
         <div className="flex items-end gap-1.5">
+        <div className="flex w-[76px] shrink-0 flex-col gap-1">
+        <button
+          type="button"
+          onClick={() => setWebSearch(!webSearch)}
+          disabled={running || mode === "edit"}
+          aria-pressed={webSearch}
+          aria-label={t("chat.webSearch")}
+          title={t(mode === "edit" ? "chat.webSearchEditOnly" : webSearch ? "chat.webSearchOn" : "chat.webSearchOff")}
+          className={`flex h-6 items-center justify-center gap-1 rounded-md border text-[11px] disabled:cursor-not-allowed disabled:opacity-50 ${
+            webSearch && mode !== "edit"
+              ? "border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-700 dark:bg-sky-950/50 dark:text-sky-300"
+              : "border-slate-200 text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+          }`}
+          data-testid="chat-web-search"
+        >
+          <Globe size={11} /> Web
+        </button>
         <select
           value={mode}
           onChange={(e) => setChatMode(e.target.value as ChatMode)}
           disabled={running}
           aria-label={t("chat.mode")}
           title={t(mode === "chat" ? "chat.modeChat" : mode === "edit" ? "chat.modeEdit" : "chat.modeAuto")}
-          className="input h-8 w-[76px] shrink-0 px-1.5 text-[12px]"
+          className="input h-8 w-full px-1.5 text-[12px]"
           data-testid="chat-mode"
         >
           <option value="chat">Chat</option>
           <option value="edit">Edit</option>
           <option value="auto">Auto</option>
         </select>
+        </div>
         <textarea
           ref={inputRef}
           data-testid="chat-input"
