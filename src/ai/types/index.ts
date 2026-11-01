@@ -185,6 +185,12 @@ export interface AIRequest {
   webSearch?: boolean;
   /** Most web searches this call may run, where the provider takes a limit (research). */
   maxSearches?: number;
+  /**
+   * Keep the text written before each web search (research: findings come
+   * between searches). By default it is dropped as a note such as "let me
+   * look that up", and the text starts over after the search.
+   */
+  keepTextBeforeSearch?: boolean;
 }
 
 export type FinishReason = "stop" | "length" | "cancelled" | "error";

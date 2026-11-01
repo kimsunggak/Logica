@@ -155,9 +155,12 @@ export class AnthropicProvider implements AIProvider {
             } else if (started.type === "server_tool_use") {
               inputs.set(at, "");
               if (started.name === "web_search") {
-                // A note written before the search ("let me look that up") is not the answer.
-                text = "";
-                spans.length = 0;
+                // A note written before the search ("let me look that up") is not the answer,
+                // unless the caller keeps it (research findings come between searches).
+                if (!request.keepTextBeforeSearch) {
+                  text = "";
+                  spans.length = 0;
+                }
                 handlers?.onSearch?.();
               }
             } else if (started.type === "web_search_tool_result" && Array.isArray(started.content)) {

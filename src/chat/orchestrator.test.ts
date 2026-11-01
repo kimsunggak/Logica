@@ -211,6 +211,8 @@ describe("Web search", () => {
     await r.result;
     expect(r.log.map((c) => [c.task, c.request.webSearch])).toEqual([["refine", undefined], ["judge", undefined], ["select", undefined], ["answer", true]]);
     expect(r.log.at(-1)!.options.onSearch).toBeTypeOf("function");
+    // An answer drops a note written before its search; only research keeps that text.
+    expect(r.log.at(-1)!.request).not.toHaveProperty("keepTextBeforeSearch");
   });
 
   it("leaves it off when the turn did not turn it on", async () => {
@@ -293,7 +295,7 @@ describe("Web research before an edit", () => {
     const [, select, searched, edited] = r.log;
     expect(select.request.mayResearch).toBe(true);
     expect((select.request.tools![0].parameters as { properties: object }).properties).toHaveProperty("web_research");
-    expect(searched.request).toMatchObject({ webSearch: true, researchQuestions: ["Latest OCHuman results?"], refinedQuestion: turn.instruction });
+    expect(searched.request).toMatchObject({ webSearch: true, keepTextBeforeSearch: true, researchQuestions: ["Latest OCHuman results?"], refinedQuestion: turn.instruction });
     expect(searched.request.researchSources?.map((s) => s.path)).toEqual([target.path]);
     expect(searched.request.history).toBeUndefined();
 

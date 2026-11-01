@@ -299,6 +299,8 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
         const result = await call("research", {
           id: `${turn.id}-research`, instruction: turn.instruction, refinedQuestion: refined, context: {}, uiMode: mode, executionMode: route,
           researchQuestions: questions, researchSources: researchSources(sources), webSearch: true,
+          // Findings written between searches are kept; the evidence keeps only the cited lines.
+          keepTextBeforeSearch: true,
         }, { ...options(span, { history: [], info: { turn_numbers: [] } }), onSearch: hooks.onSearch });
         // A research cut off at the length limit still has the findings written so far.
         if (result.response.finishReason === "cancelled") throw new AIError("cancelled", t("chat.stopped"));

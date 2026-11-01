@@ -151,11 +151,14 @@ export class OpenAIProvider implements AIProvider {
     const startSearch = (key: string) => {
       if (searches.has(key)) return;
       searches.add(key);
-      // A note written before the search ("let me look that up") is not the answer.
-      text = "";
-      partStart.clear();
-      spans.length = 0;
-      spanKeys.clear();
+      // A note written before the search ("let me look that up") is not the answer,
+      // unless the caller keeps it (research findings come between searches).
+      if (!request.keepTextBeforeSearch) {
+        text = "";
+        partStart.clear();
+        spans.length = 0;
+        spanKeys.clear();
+      }
       handlers?.onSearch?.();
     };
     const searchDone = (key: string, item: any) => {

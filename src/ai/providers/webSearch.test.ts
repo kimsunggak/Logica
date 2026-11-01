@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fromHttpError } from "../errors";
+import { buildEvidence } from "../agent/evidence";
 import { t } from "../../i18n";
 import type { AIRequest } from "../types";
 
@@ -316,5 +317,83 @@ describe("citation positions", () => {
       { start: 53, end: 61, url: "https://b.org", title: "Paper B" },
     ]);
     expect(response.text.slice(26, 50)).toBe("([a.org](https://a.org))");
+  });
+});
+
+describe("research findings written between searches", () => {
+  const research: AIRequest = { ...request, task: "research", keepTextBeforeSearch: true };
+  const search = (index: number, id: string, query: string) => [
+    start(index, { type: "server_tool_use", id, name: "web_search", input: {} }),
+    delta(index, { type: "input_json_delta", partial_json: JSON.stringify({ query }) }),
+    stop(index),
+    start(index + 1, { type: "web_search_tool_result", tool_use_id: id, content: [result1] }),
+    stop(index + 1),
+  ];
+  const finding = (index: number, text: string, url: string) => [
+    start(index, { type: "text", text: "" }),
+    delta(index, { type: "citations_delta", citation: citation(url, url) }),
+    delta(index, { type: "text_delta", text }),
+    stop(index),
+  ];
+  const claudeTurn = () => sse([
+    { type: "message_start", message: { usage: { input_tokens: 10 } } },
+    start(0, { type: "text", text: "" }), delta(0, { type: "text_delta", text: "Let me look up question 1.\n" }), stop(0),
+    ...search(1, "srvtoolu_1", "q1"),
+    ...finding(3, "- Paper A reaches 81.2 AP.", "https://example.org/a"),
+    ...search(4, "srvtoolu_2", "q2"),
+    start(6, { type: "text", text: "" }), delta(6, { type: "text_delta", text: "\n" }), stop(6),
+    ...finding(7, "- Paper B reaches 78.9 AP.", "https://example.org/b"),
+    ...end("end_turn"),
+  ]);
+
+  it("Claude keeps every finding of a research call, with its citation in place", async () => {
+    replies = [claudeTurn()];
+    const searches: (string | undefined)[] = [];
+    const response = await new AnthropicProvider().generate(research, { onSearch: (q) => searches.push(q) });
+    expect(response.text).toBe("Let me look up question 1.\n- Paper A reaches 81.2 AP.\n- Paper B reaches 78.9 AP.");
+    expect(searches).toEqual([undefined, "q1", undefined, "q2"]);
+    expect(response.citations!.map((c) => response.text.slice(c.start, c.end))).toEqual(["- Paper A reaches 81.2 AP.", "- Paper B reaches 78.9 AP."]);
+    // The note has no citation, so only the two findings become evidence.
+    expect(buildEvidence(response.text, response.citations!, ["q1", "q2"]).evidence.map((e) => [e.id, e.finding])).toEqual([
+      ["W1", "Paper A reaches 81.2 AP."],
+      ["W2", "Paper B reaches 78.9 AP."],
+    ]);
+  });
+
+  it("Claude still drops the text before each search for an answer", async () => {
+    replies = [claudeTurn()];
+    const response = await new AnthropicProvider().generate({ ...research, task: "answer", keepTextBeforeSearch: undefined });
+    expect(response.text).toBe("\n- Paper B reaches 78.9 AP.");
+    expect(response.citations).toEqual([{ start: 1, end: 27, url: "https://example.org/b", title: "https://example.org/b", quote: "…" }]);
+  });
+
+  const openAITurn = () => sse([
+    { type: "response.output_item.added", output_index: 0, item: { id: "ws_1", type: "web_search_call", status: "in_progress" } },
+    { type: "response.output_item.done", output_index: 0, item: { id: "ws_1", type: "web_search_call", status: "completed", action: { type: "search", queries: ["q1"] } } },
+    { type: "response.output_text.delta", item_id: "msg_1", content_index: 0, delta: "- Paper A reaches 81.2 AP.\n" },
+    { type: "response.output_text.annotation.added", item_id: "msg_1", content_index: 0, annotation: { type: "url_citation", url: "https://a.org", title: "A", start_index: 2, end_index: 25 } },
+    { type: "response.output_item.added", output_index: 2, item: { id: "ws_2", type: "web_search_call", status: "in_progress" } },
+    { type: "response.output_item.done", output_index: 2, item: { id: "ws_2", type: "web_search_call", status: "completed", action: { type: "search", queries: ["q2"] } } },
+    { type: "response.output_text.delta", item_id: "msg_3", content_index: 0, delta: "- Paper B reaches 78.9 AP." },
+    { type: "response.output_text.annotation.added", item_id: "msg_3", content_index: 0, annotation: { type: "url_citation", url: "https://b.org", title: "B", start_index: 2, end_index: 25 } },
+    { type: "response.completed", response: { usage: {} } },
+  ]);
+
+  it("OpenAI keeps every finding of a research call, with its citation in place", async () => {
+    replies = [openAITurn()];
+    const response = await new OpenAIProvider(() => "chatgpt").generate({ ...research, model: "gpt-6.1-sol" });
+    expect(response.text).toBe("- Paper A reaches 81.2 AP.\n- Paper B reaches 78.9 AP.");
+    expect(response.citations!.map((c) => [c.url, response.text.slice(c.start, c.end)])).toEqual([
+      ["https://a.org", "Paper A reaches 81.2 AP"],
+      ["https://b.org", "Paper B reaches 78.9 AP"],
+    ]);
+    expect(buildEvidence(response.text, response.citations!, ["q1", "q2"]).evidence).toHaveLength(2);
+  });
+
+  it("OpenAI still drops the text before each search for an answer", async () => {
+    replies = [openAITurn()];
+    const response = await new OpenAIProvider(() => "chatgpt").generate({ ...research, task: "answer", model: "gpt-6.1-sol", keepTextBeforeSearch: undefined });
+    expect(response.text).toBe("- Paper B reaches 78.9 AP.");
+    expect(response.citations).toEqual([{ start: 2, end: 25, url: "https://b.org", title: "B" }]);
   });
 });
