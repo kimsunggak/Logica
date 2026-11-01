@@ -10,7 +10,8 @@ export const SELECT_EDIT_SECTIONS = "select_edit_sections";
 export const APPLY_PAPER_EDITS = "apply_paper_edits";
 
 const reason = { type: "string", description: "One sentence explaining this choice, in the user's language." };
-const keys = (description: string) => ({ type: "array", items: { type: "string" }, description });
+/** Strict tool use samples only the listed keys, so no key outside the paper map comes back. */
+const keys = (allowed: string[], description: string) => ({ type: "array", items: { type: "string", enum: allowed }, description });
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 
 export const CLARIFY_TOOL: ToolDefinition = {
@@ -26,19 +27,21 @@ export const CHAT_TOOLS: ToolDefinition[] = [
   CLARIFY_TOOL,
 ];
 
-export function sectionTools(mode: ExecutionMode): ToolDefinition[] {
+/** @param sectionKeys the paper map's keys; "all" is always allowed, and is the only key without sections. */
+export function sectionTools(mode: ExecutionMode, sectionKeys: string[]): ToolDefinition[] {
+  const allowed = [...new Set([ALL_SECTIONS, ...sectionKeys])];
   return [mode === "edit" ? {
     name: SELECT_EDIT_SECTIONS,
     description: "Select the sections to modify and the additional sections to read word for word as references. Use keys from paper_map.",
     parameters: object({
       reason,
-      edit_sections: keys('Sections to modify, including any affected subsections. Must not be empty. ["all"] means the whole paper.'),
-      reference_sections: keys('Additional sections needed word for word for terminology, facts or consistency. [] if unnecessary; ["all"] for all.'),
+      edit_sections: keys(allowed, 'Sections to modify, including any affected subsections. Must not be empty. ["all"] means the whole paper.'),
+      reference_sections: keys(allowed, 'Additional sections needed word for word for terminology, facts or consistency. [] if unnecessary; ["all"] for all.'),
     }),
   } : {
     name: SELECT_CHAT_SECTIONS,
     description: "Select sections whose exact source is needed to answer. The remaining sections are provided as summaries.",
-    parameters: object({ reason, sections: keys('Keys to read word for word. [] when summaries suffice or for small talk. ["all"] for the whole paper.') }),
+    parameters: object({ reason, sections: keys(allowed, 'Keys to read word for word. [] when summaries suffice or for small talk. ["all"] for the whole paper.') }),
   }, CLARIFY_TOOL];
 }
 

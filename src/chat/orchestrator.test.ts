@@ -142,6 +142,25 @@ describe("Refinement → Routing → Execution", () => {
     }
   });
 
+  it("lets section selection choose only the paper map's keys, or all when the paper has no sections", async () => {
+    const allowed = (r: ReturnType<typeof run>) => (r.log[1].request.tools![0].parameters.properties as Record<string, { items: { enum: string[] } }>).sections.items.enum;
+    const r = run("chat");
+    await r.result;
+    expect(allowed(r)).toEqual(["all", ...paper.units!.map((u) => u.key)]);
+    const bare = run("chat", { select: () => tool("select_chat_sections", { reason: "Read the paper", sections: ["all"] }) }, { ...paper, units: undefined, summaries: undefined });
+    expect(await bare.result).toMatchObject({ outcome: "chat" });
+    expect(allowed(bare)).toEqual(["all"]);
+  });
+
+  it("reads keys that differ from the paper's only in capitalization as the paper's keys", async () => {
+    const r = run("edit", { select: () => tool("select_edit_sections", { reason: "because", edit_sections: ["3.2"], reference_sections: ["Metadata", "ABSTRACT"] }) });
+    expect(await r.result).toMatchObject({ outcome: "edit" });
+    expect(Object.fromEntries(r.log[2].request.paperView!.sections.map((s) => [s.key, s.content]))).toMatchObject({ metadata: "full", abstract: "full", "3.2": "full" });
+    const all = run("chat", { select: () => tool("select_chat_sections", { reason: "because", sections: ["All"] }) });
+    await all.result;
+    expect(all.log[2].request.projectFiles).toBeDefined();
+  });
+
   it("requires all selected edit and reference sources to fit", async () => {
     const r = run("edit", {}, { ...paper, budget: 1 });
     await expect(r.result).rejects.toMatchObject({ kind: "bad_request" });

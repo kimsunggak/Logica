@@ -5,6 +5,7 @@ import { useProject } from "../project/projectStore";
 import { applyAllChatEdits, applyChatEdit, rejectChatEdit, summaryIdle, useChat, type ChatMessage } from "./chatStore";
 import { call } from "../lib/backend";
 import { textHash } from "./paper/sections";
+import { t } from "../i18n";
 
 const { files, open, navigate } = vi.hoisted(() => ({ files: new Map<string, string>(), open: vi.fn(), navigate: vi.fn() }));
 vi.mock("../project/projectActions", () => ({
@@ -102,13 +103,33 @@ describe("accepted apply_paper_edits execution", () => {
     expect(useChat.getState().messages[0].editStates).toBeUndefined();
   });
 
-  it("leaves the entire batch untouched if one anchor has changed", async () => {
-    const changed = { ...second, original: "Outdated second sentence." };
-    useChat.setState({ messages: [proposal([first, changed])] });
-    await applyAllChatEdits("answer", [first, changed].map((edit, index) => ({ edit, index })));
-    expect(editorSession.textOf("main.tex")).toBe(original);
-    expect(useChat.getState().messages[0].editStates).toEqual({ 0: "failed", 1: "failed" });
+  it("leaves the batch untouched and fails only the edit whose original the author changed", async () => {
+    files.set("intro.tex", "Introduction.\nKeep this.");
+    const intro = { path: "intro.tex", original: "Introduction.", revised: "New introduction." };
+    useChat.setState({ messages: [proposal([first, second, intro])] });
+    editorSession.open("main.tex", original);
+    const at = original.indexOf("Second");
+    editorSession.applyEdit("main.tex", at, at + 6, "Edited");
+    const authored = original.replace("Second", "Edited");
+    await applyAllChatEdits("answer", [first, second, intro].map((edit, index) => ({ edit, index })));
+    expect(editorSession.textOf("main.tex")).toBe(authored);
+    expect(editorSession.textOf("intro.tex")).toBe("Introduction.\nKeep this.");
+    expect(useChat.getState().messages[0].editStates).toEqual({ 1: "failed" });
+    expect(useProject.getState().notices.at(-1)?.text).toBe(t("agent.failedSome", { count: 1 }));
     expect(navigate).not.toHaveBeenCalled();
+    // The edits left pending still apply together.
+    await applyAllChatEdits("answer", [{ index: 0, edit: first }, { index: 2, edit: intro }]);
+    expect(editorSession.textOf("main.tex")).toBe(authored.replace(first.original, first.revised));
+    expect(editorSession.textOf("intro.tex")).toBe("New introduction.\nKeep this.");
+    expect(useChat.getState().messages[0].editStates).toEqual({ 0: "applied", 1: "failed", 2: "applied" });
+  });
+
+  it("fails only the edits of a file that cannot be opened", async () => {
+    const gone = { path: "gone.tex", original: "Gone.", revised: "Back." };
+    useChat.setState({ messages: [proposal([first, gone])] });
+    await applyAllChatEdits("answer", [first, gone].map((edit, index) => ({ edit, index })));
+    expect(editorSession.textOf("main.tex")).toBe(original);
+    expect(useChat.getState().messages[0].editStates).toEqual({ 1: "failed" });
   });
 
   it("uses unsaved buffers and refuses a stale original even when only whitespace changed", async () => {
