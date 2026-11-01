@@ -183,6 +183,8 @@ export interface AIRequest {
   maxOutputTokens?: number;
   /** Offer the provider's built-in web search; the model decides whether to search (answer and research). */
   webSearch?: boolean;
+  /** Most web searches this call may run, where the provider takes a limit (research). */
+  maxSearches?: number;
 }
 
 export type FinishReason = "stop" | "length" | "cancelled" | "error";

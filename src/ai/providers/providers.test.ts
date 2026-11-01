@@ -60,6 +60,16 @@ describe("web search requests", () => {
     expect(off).not.toHaveProperty("tools");
   });
 
+  it("OpenAI limits a Research call's searches with an API key only", () => {
+    const research: AIRequest = { ...answer, task: "research", webSearch: true, maxSearches: 5 };
+    expect(new OpenAIProvider(() => "api_key").buildBody(research)).toMatchObject({ tools: [{ type: "web_search" }], max_tool_calls: 5 });
+    // Whether ChatGPT plan usage accepts the limit is not known.
+    expect(new OpenAIProvider(() => "chatgpt").buildBody(research)).not.toHaveProperty("max_tool_calls");
+    // No limit without one, or without search.
+    expect(new OpenAIProvider(() => "api_key").buildBody({ ...research, maxSearches: undefined })).not.toHaveProperty("max_tool_calls");
+    expect(new OpenAIProvider(() => "api_key").buildBody({ ...research, webSearch: false })).not.toHaveProperty("max_tool_calls");
+  });
+
   it("OpenAI still requires a function call when function tools come with search", () => {
     const body = new OpenAIProvider(() => "chatgpt").buildBody({ ...answer, tools: [fn], webSearch: true });
     expect(body.tools).toEqual([{ type: "function", name: "pick", description: "Pick one.", parameters: fn.parameters, strict: true }, { type: "web_search" }]);

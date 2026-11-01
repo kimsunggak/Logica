@@ -77,6 +77,16 @@ describe("LLM Gateway", () => {
     expect(judge.fallbackFrom).toBeUndefined();
   });
 
+  it("limits the searches of a Research call, for the primary and the fallback alike", async () => {
+    scripts.openai = failing(new AIError("unavailable", "down", { provider: "openai" }));
+    scripts.anthropic = reply("anthropic", "- finding");
+    await callModel("research", { ...request, webSearch: true }, { control: control() });
+    expect(calls.map((c) => [c.provider, c.request.maxSearches])).toEqual([["openai", 5], ["anthropic", 5]]);
+    scripts.openai = reply("openai", "ok");
+    await callModel("answer", { ...request, webSearch: true }, { control: control() });
+    expect(calls.at(-1)!.request).not.toHaveProperty("maxSearches");
+  });
+
   it("falls back to GPT for judge when Claude fails, preserving tools", async () => {
     scripts.anthropic = failing(new AIError("unavailable", "Claude is down", { provider: "anthropic" }));
     scripts.openai = reply("openai", "ok");

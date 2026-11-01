@@ -48,6 +48,15 @@ export const MAX_OUTPUT_TOKENS = {
   sections: 8192,
 } as const;
 
+/**
+ * Most web searches one call may run, for the tasks that cap them. One
+ * Research call answers all its questions within this limit (Claude's
+ * web search tool has the same limit for every call).
+ */
+export const MAX_SEARCHES: Partial<Record<ChatTask, number>> = {
+  research: 5,
+};
+
 export interface ModelChoice {
   provider: ProviderId;
   model: string;

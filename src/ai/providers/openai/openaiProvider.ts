@@ -80,6 +80,8 @@ export class OpenAIProvider implements AIProvider {
   /**
    * Convert the shared prompt payload into a Responses API request body.
    * ChatGPT plan usage rejects `max_output_tokens`, so it is sent only with an API key.
+   * The search limit (`max_tool_calls`) is sent only with an API key too: whether
+   * ChatGPT plan usage accepts it is not known.
    */
   buildBody(request: AIRequest, auth: AuthMethodKind = this.authMethod()): Record<string, unknown> {
     const prompt = buildPrompt(request);
@@ -107,6 +109,8 @@ export class OpenAIProvider implements AIProvider {
       ...(request.tools?.length ? { tool_choice: "required", parallel_tool_calls: false } : {}),
       ...(request.reasoningEffort ? { reasoning: { effort: request.reasoningEffort } } : {}),
       ...(request.maxOutputTokens && auth === "api_key" ? { max_output_tokens: request.maxOutputTokens } : {}),
+      // Caps every built-in tool call of the response; web search is the only one offered.
+      ...(request.webSearch && request.maxSearches && auth === "api_key" ? { max_tool_calls: request.maxSearches } : {}),
     };
   }
 
