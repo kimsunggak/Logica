@@ -24,14 +24,25 @@ const ANSWER_TASK = [
 
 const SECTIONS_RULE = 'Sections with content="summary" are summaries, not the paper\'s text: never quote them as the paper\'s words, and never write an edit block for a section you have only as a summary.';
 
+/** With web search on: search only for what the paper lacks, and keep the two apart. */
+const WEB_RULES = [
+  "You can search the web. Search only when the question needs information the paper does not contain, such as related or recent work, outside facts or references; when the paper is enough, answer without searching. The rule above about saying the paper does not contain something applies to the paper itself, not to what you find on the web.",
+  "Keep what the paper says apart from what you found on the web, and say which is which.",
+  "Mention only sources that appear in your search results. Never invent papers, authors or \\cite keys.",
+];
+
+const ASK_SECTIONS_FIRST = "If you need the text of sections you have only as summaries, ask for them first, before searching the web.";
+
 const ASK_RULE = `If the answer needs the text of sections you have only as summaries (to quote, edit or check exact details), reply with exactly ${NEED_SECTIONS} key, key]] and nothing else, with those sections' keys; you will then get them word for word.`;
 
 export function buildAnswerPrompt(request: AIRequest): PromptPayload {
-  const task = [...ANSWER_TASK, ...(request.paperView ? [SECTIONS_RULE] : []), ...(request.paperView && request.mayAskForSections ? [ASK_RULE] : [])];
+  const mayAsk = !!request.paperView && !!request.mayAskForSections;
+  const web = request.webSearch ? [...WEB_RULES, ...(mayAsk ? [ASK_SECTIONS_FIRST] : [])] : [];
+  const task = [...ANSWER_TASK, ...(request.paperView ? [SECTIONS_RULE] : []), ...(mayAsk ? [ASK_RULE] : []), ...web];
   const payload = paperPrompt(request, [
     tag("user_message", request.instruction),
     request.refinedQuestion ? tag("refined_question", request.refinedQuestion) : "",
     tag("task", task.join("\n")),
   ]);
-  return { ...payload, system: `${payload.system}\n\n${ANSWER_TASK.join("\n")}` };
+  return { ...payload, system: `${payload.system}\n\n${[...ANSWER_TASK, ...(request.webSearch ? WEB_RULES : [])].join("\n")}` };
 }

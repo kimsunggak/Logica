@@ -30,6 +30,8 @@ export interface GatewayOptions {
   onText?: (full: string) => boolean;
   /** Called before each attempt with the model it uses. */
   onAttempt?: (choice: ModelChoice, fallback: boolean) => void;
+  /** A web search started (no query) or its query is known; the text so far was dropped. */
+  onSearch?: (query?: string) => void;
 }
 
 export interface GatewayResult {
@@ -69,6 +71,7 @@ async function attempt(
   fallback: boolean,
   options: GatewayOptions,
   onText: (full: string) => void,
+  onSearch: (query?: string) => void,
 ): Promise<AIResponse> {
   options.onAttempt?.(choice, fallback);
   options.control.activeRequest = request.id;
@@ -87,6 +90,7 @@ async function attempt(
           fallback,
           request_id: request.id,
           tools: request.tools?.map((tool) => tool.name) ?? [],
+          web_search: request.webSearch === true,
           prompt: promptText(request),
         }),
         request.id,
@@ -101,6 +105,7 @@ async function attempt(
         first = false;
         onText(full);
       },
+      onSearch,
     });
     if (span) {
       endSpan(span, "llm", () => ({
@@ -108,6 +113,8 @@ async function attempt(
         tool_calls: response.toolCalls ?? [],
         finishReason: response.finishReason,
         usage: response.usage,
+        sources: response.sources ?? [],
+        search_queries: response.searchQueries ?? [],
       }));
     }
     return response;
@@ -133,6 +140,11 @@ export async function callModel(task: ChatTask, request: ChatRequest, options: G
     const displayed = options.onText?.(full) === true;
     if (full && displayed) shown = true;
   };
+  // The search drops the text shown so far; until new text shows, the fallback may still answer.
+  const onSearch = (query?: string) => {
+    if (query === undefined) shown = false;
+    options.onSearch?.(query);
+  };
   const full = (choice: ModelChoice, id: string): AIRequest => ({
     ...request,
     id,
@@ -146,7 +158,7 @@ export async function callModel(task: ChatTask, request: ChatRequest, options: G
   };
 
   try {
-    return { response: await attempt(task, full(primary, request.id), primary, false, options, onText), choice: primary };
+    return { response: await attempt(task, full(primary, request.id), primary, false, options, onText, onSearch), choice: primary };
   } catch (err) {
     const error = toAIError(err, primary.provider);
     if (error.kind === "cancelled" || options.control.stopped) throw error.kind === "cancelled" ? error : cancelledError(primary);
@@ -158,7 +170,7 @@ export async function callModel(task: ChatTask, request: ChatRequest, options: G
     }
     report("fallback", from, { provider: fallback.provider, model: fallback.model });
     try {
-      const response = await attempt(task, full(fallback, `${request.id}-fallback`), fallback, true, options, onText);
+      const response = await attempt(task, full(fallback, `${request.id}-fallback`), fallback, true, options, onText, onSearch);
       return { response, choice: fallback, fallbackFrom: { choice: primary, error } };
     } catch (err2) {
       const second = toAIError(err2, fallback.provider);

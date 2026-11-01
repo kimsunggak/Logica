@@ -361,9 +361,56 @@ function simulateAnswer(userMessage: string): string {
 const chunks = (text: string, size = 14) => Array.from({ length: Math.ceil(text.length / size) }, (_, i) => text.slice(i * size, (i + 1) * size));
 const sseEvent = (data: Record<string, unknown>) => `event: ${data.type}\ndata: ${JSON.stringify(data)}\n\n`;
 
-function openAIStream(reply: DemoReply): string[] {
+/** A search the demo pretends to run when the request offers web search. */
+interface DemoSearch {
+  query: string;
+  results: { url: string; title: string }[];
+}
+
+const DEMO_RESULTS = [
+  { url: "https://arxiv.org/abs/1812.08008", title: "OpenPose: Realtime Multi-Person 2D Pose Estimation using Part Affinity Fields" },
+  { url: "https://www.latex-project.org/help/documentation/", title: "LaTeX documentation" },
+];
+
+/** The search to simulate for a text answer, when the body offers web search. */
+function demoSearch(body: Record<string, any>, reply: DemoReply, messages: { content: unknown }[]): DemoSearch | null {
+  const offered = Array.isArray(body.tools) && body.tools.some((t: { type?: string }) => typeof t.type === "string" && t.type.startsWith("web_search"));
+  if (!offered || !("text" in reply)) return null;
+  const last = messages[messages.length - 1]?.content;
+  const question = typeof last === "string" ? between(last, "user_message") ?? "" : "";
+  return { query: question.replace(/\s+/g, " ").trim().slice(0, 60) || "related work", results: DEMO_RESULTS };
+}
+
+const searchNote = (reply: { text: string }) => (hangul(reply.text) ? "웹에서 찾아보겠습니다." : "Let me look that up on the web.");
+const webNote = (search: DemoSearch) => `\n\nFrom the web (demo): see ${search.results[0].title}.`;
+
+function openAIStream(reply: DemoReply, search: DemoSearch | null = null): string[] {
   const events = [sseEvent({ type: "response.created" })];
   let output = 0;
+  if ("text" in reply && search) {
+    // A note, the search, then the answer with a citation.
+    for (const delta of chunks(searchNote(reply))) events.push(sseEvent({ type: "response.output_text.delta", delta }));
+    const call = { id: "ws_demo", type: "web_search_call" };
+    events.push(
+      sseEvent({ type: "response.output_item.added", output_index: 1, item: { ...call, status: "in_progress" } }),
+      sseEvent({ type: "response.web_search_call.in_progress", output_index: 1, item_id: "ws_demo" }),
+      sseEvent({ type: "response.web_search_call.searching", output_index: 1, item_id: "ws_demo" }),
+      sseEvent({ type: "response.web_search_call.completed", output_index: 1, item_id: "ws_demo" }),
+      sseEvent({ type: "response.output_item.done", output_index: 1, item: { ...call, status: "completed", action: { type: "search", query: search.query } } }),
+    );
+    const text = reply.text + webNote(search);
+    for (const delta of chunks(text)) events.push(sseEvent({ type: "response.output_text.delta", delta }));
+    const annotations = search.results.map((r) => ({ type: "url_citation", url: r.url, title: r.title, start_index: reply.text.length, end_index: text.length }));
+    for (const annotation of annotations) events.push(sseEvent({ type: "response.output_text.annotation.added", output_index: 2, annotation }));
+    events.push(sseEvent({
+      type: "response.completed",
+      response: {
+        output: [{ ...call, status: "completed", action: { type: "search", query: search.query } }, { id: "msg_demo", type: "message", content: [{ type: "output_text", text, annotations }] }],
+        usage: { input_tokens: 900, input_tokens_details: { cached_tokens: 0 }, output_tokens: Math.ceil(text.length / 4) },
+      },
+    }));
+    return events;
+  }
   if ("text" in reply) {
     for (const delta of chunks(reply.text)) events.push(sseEvent({ type: "response.output_text.delta", delta }));
     output = Math.ceil(reply.text.length / 4);
@@ -382,9 +429,39 @@ function openAIStream(reply: DemoReply): string[] {
   return events;
 }
 
-function anthropicStream(reply: DemoReply): string[] {
+function anthropicStream(reply: DemoReply, search: DemoSearch | null = null): string[] {
   const events = [sseEvent({ type: "message_start", message: { usage: { input_tokens: 900 } } })];
   let output = 0;
+  if ("text" in reply && search) {
+    // A note, the search and its results, then the answer with a citation.
+    const text = reply.text + webNote(search);
+    const query = JSON.stringify({ query: search.query });
+    events.push(sseEvent({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }));
+    for (const t of chunks(searchNote(reply))) events.push(sseEvent({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: t } }));
+    events.push(
+      sseEvent({ type: "content_block_stop", index: 0 }),
+      sseEvent({ type: "content_block_start", index: 1, content_block: { type: "server_tool_use", id: "srvtoolu_demo", name: "web_search", input: {} } }),
+      ...chunks(query).map((partial_json) => sseEvent({ type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json } })),
+      sseEvent({ type: "content_block_stop", index: 1 }),
+      sseEvent({
+        type: "content_block_start",
+        index: 2,
+        content_block: { type: "web_search_tool_result", tool_use_id: "srvtoolu_demo", content: search.results.map((r) => ({ type: "web_search_result", ...r, page_age: null, encrypted_content: "demo" })) },
+      }),
+      sseEvent({ type: "content_block_stop", index: 2 }),
+      sseEvent({ type: "content_block_start", index: 3, content_block: { type: "text", text: "" } }),
+    );
+    for (const r of search.results) {
+      events.push(sseEvent({ type: "content_block_delta", index: 3, delta: { type: "citations_delta", citation: { type: "web_search_result_location", url: r.url, title: r.title, cited_text: r.title, encrypted_index: "demo" } } }));
+    }
+    for (const t of chunks(text)) events.push(sseEvent({ type: "content_block_delta", index: 3, delta: { type: "text_delta", text: t } }));
+    events.push(
+      sseEvent({ type: "content_block_stop", index: 3 }),
+      sseEvent({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: Math.ceil(text.length / 4), server_tool_use: { web_search_requests: 1 } } }),
+      sseEvent({ type: "message_stop" }),
+    );
+    return events;
+  }
   if ("text" in reply) {
     events.push(sseEvent({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }), `event: ping\ndata: {"type": "ping"}\n\n`);
     for (const text of chunks(reply.text)) events.push(sseEvent({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text } }));
@@ -620,7 +697,8 @@ export function createDemoBackend(): DemoBackend {
       }
       const messages: { content: string }[] = provider === "openai" ? body.input : body.messages;
       const reply = simulateReply(body, messages);
-      const stream = (provider === "openai" ? openAIStream(reply) : anthropicStream(reply)).join("");
+      const search = demoSearch(body, reply, messages);
+      const stream = (provider === "openai" ? openAIStream(reply, search) : anthropicStream(reply, search)).join("");
       channel.onmessage({ type: "open", status: 200 });
       // Deliver in uneven chunks to exercise the SSE parser.
       for (let i = 0; i < stream.length; ) {

@@ -203,3 +203,63 @@ describe("Refinement → Routing → Execution", () => {
     expect(r.text).toEqual(["Detailed answer."]);
   });
 });
+
+describe("Web search", () => {
+  it("offers web search to the answer only, not to refinement, routing or selection", async () => {
+    const r = run("auto", {}, paper, { ...turn, webSearch: true });
+    await r.result;
+    expect(r.log.map((c) => [c.task, c.request.webSearch])).toEqual([["refine", undefined], ["judge", undefined], ["select", undefined], ["answer", true]]);
+    expect(r.log.at(-1)!.options.onSearch).toBeTypeOf("function");
+  });
+
+  it("leaves it off when the turn did not turn it on", async () => {
+    const r = run("chat");
+    await r.result;
+    expect(r.log.find((c) => c.task === "answer")!.request.webSearch).toBe(false);
+  });
+
+  it("never offers it to Edit", async () => {
+    const r = run("edit", {}, paper, { ...turn, webSearch: true });
+    await r.result;
+    expect(r.log.some((c) => c.request.webSearch)).toBe(false);
+  });
+
+  it("returns the final answer's sources", async () => {
+    const sources = [{ url: "https://example.org/a", title: "Paper A" }];
+    const r = run("chat", { answer: () => ({ ...response("From the web."), sources }) }, paper, { ...turn, webSearch: true });
+    expect(await r.result).toMatchObject({ content: "From the web.", sources });
+  });
+
+  it("still loads the sections the answer asks for after a search, and searches again with them", async () => {
+    const searches: (string | undefined)[] = [];
+    const text: string[] = [];
+    let count = 0;
+    const call = async (task: ChatTask, request: ChatRequest, options: GatewayOptions): Promise<GatewayResult> => {
+      const choice = CHAT_MODELS[task].primary;
+      if (task === "refine") return { response: response(turn.instruction), choice };
+      if (task === "select") return { response: tool("select_chat_sections", { reason: "Read the method", sections: ["3.2"] }), choice };
+      count++;
+      expect(request.webSearch).toBe(true);
+      if (count === 1) {
+        // A note before the search, then the request for sections.
+        options.onText?.("Let me look this up.");
+        options.onSearch?.();
+        options.onSearch?.("related work");
+        options.onText?.("[[need_sections: 4.3]]");
+        return { response: { ...response("[[need_sections: 4.3]]"), sources: [{ url: "https://example.org/old" }] }, choice };
+      }
+      expect(request.paperView?.sections.find((s) => s.key === "4.3")?.content).toBe("full");
+      options.onText?.("Detailed answer.");
+      return { response: { ...response("Detailed answer."), sources: [{ url: "https://example.org/new" }] }, choice };
+    };
+    const result = await runChatTurn({ ...turn, mode: "chat", webSearch: true }, {
+      root: startSpan(turn.id, null, "pipeline", "test"), control: { stopped: false, activeRequest: null }, paper: () => paper, call,
+      hooks: { onText: (s) => text.push(s), onSearch: (q) => searches.push(q) },
+    });
+    expect(count).toBe(2);
+    expect(searches).toEqual([undefined, "related work"]);
+    // The note was shown before the search; the section request never was.
+    expect(text).toEqual(["Let me look this up.", "Detailed answer."]);
+    expect(result).toMatchObject({ content: "Detailed answer.", sources: [{ url: "https://example.org/new" }] });
+  });
+});

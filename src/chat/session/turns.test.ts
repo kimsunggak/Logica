@@ -93,4 +93,12 @@ describe("windows", () => {
     expect(messages[1].content).toBe("short");
     expect(clipped).toEqual([{ turn: 7, role: "user", original_chars: 50 }]);
   });
+
+  it("adds the web pages a finished answer drew on", () => {
+    const sources = [{ url: "https://example.org/a", title: "Paper A" }, { url: "https://example.org/b" }];
+    expect(turnsOf([q("related work?"), a("Paper A is closest.", { sources })])[0].answer).toBe(
+      "Paper A is closest.\n\n[web sources]\n- Paper A (https://example.org/a)\n- https://example.org/b",
+    );
+    expect(turnsOf([q("x"), a("partial", { status: "cancelled", sources })])[0].answer).toBe("partial\n[answer stopped by the user]");
+  });
 });

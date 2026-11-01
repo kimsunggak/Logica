@@ -13,7 +13,7 @@
  * turn not yet summarized; the judge reads longer messages than the other
  * modules. Long messages keep their start and end.
  */
-import type { AIMessage } from "../../ai/types";
+import type { AIMessage, WebSource } from "../../ai/types";
 import { t } from "../../i18n";
 import type { ProposedEdit } from "../../ai/agent/edits";
 
@@ -36,6 +36,8 @@ export interface TurnMessage {
   truncated?: boolean;
   edits?: ProposedEdit[];
   editStates?: Record<number, string>;
+  /** Web pages the answer drew on. */
+  sources?: WebSource[];
 }
 
 /** The judge keeps at least four recent turns, each message up to 10,000 characters. */
@@ -78,7 +80,9 @@ function answerOf(m: TurnMessage): { answer: string; status: TurnStatus } {
     `ORIGINAL:\n${edit.original}`,
     `REVISED:\n${edit.revised}`,
   ].join("\n")).join("\n\n");
-  return { answer: [m.content, edits].filter(Boolean).join("\n\n"), status: m.route === "clarify" ? "clarify" : "done" };
+  // The pages a finished answer drew on, so a later turn can refer to them.
+  const sources = m.sources?.length ? ["[web sources]", ...m.sources.map((s) => (s.title ? `- ${s.title} (${s.url})` : `- ${s.url}`))].join("\n") : "";
+  return { answer: [m.content, edits, sources].filter(Boolean).join("\n\n"), status: m.route === "clarify" ? "clarify" : "done" };
 }
 
 function note(text: string, mark: string): string {

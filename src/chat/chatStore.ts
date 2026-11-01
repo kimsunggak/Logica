@@ -20,7 +20,7 @@ import { foldTurns, moduleChars, turnsToFold, unsummarized } from "./session/sum
 import { readSummary, type ConversationSummary } from "./session/summary";
 import { turnsOf } from "./session/turns";
 import { endSpan, failSpan, setDebugProject, startSpan, step, type Span } from "../debug/trace";
-import type { ChatMode, ProjectFile, ProviderId } from "../ai/types";
+import type { ChatMode, ProjectFile, ProviderId, WebSource } from "../ai/types";
 import type { EditorState } from "@codemirror/state";
 import type { TargetRange } from "../editor/aiTarget";
 import { editorSession } from "../editor/editorSession";
@@ -37,6 +37,12 @@ export interface ChatMessage {
   content: string;
   /** UI purpose frozen when this turn was sent. Old messages default to Auto. */
   mode?: ChatMode;
+  /** On a question: web search was on for it (never in Edit mode). */
+  webSearch?: boolean;
+  /** Web pages the answer drew on. */
+  sources?: WebSource[];
+  /** While the answer streams: the web search running now ("" before its query is known). */
+  searchQuery?: string;
   status: "done" | "streaming" | "error" | "cancelled";
   /** The model that wrote the answer (the one running while it streams). */
   provider?: ProviderId;
@@ -64,6 +70,8 @@ export type EditState = "applied" | "rejected" | "failed";
 
 interface ChatState {
   mode: ChatMode;
+  /** Let Chat answers search the web; off by default, saved with the session. */
+  webSearch: boolean;
   messages: ChatMessage[];
   runningId: string | null;
   /** Project the conversation belongs to, and the session being shown. */
@@ -78,6 +86,7 @@ interface ChatState {
 
 export const useChat = create<ChatState>()(() => ({
   mode: "auto",
+  webSearch: false,
   messages: [],
   runningId: null,
   root: null,
@@ -178,10 +187,16 @@ export function setChatMode(mode: ChatMode) {
   if (mode === "auto" || mode === "chat" || mode === "edit") useChat.setState({ mode });
 }
 
+export function setWebSearch(on: boolean) {
+  useChat.setState({ webSearch: on });
+}
+
 export async function sendChatMessage(text: string): Promise<void> {
   const instruction = text.trim();
   if (!instruction || useChat.getState().runningId) return;
   const { mode, root: projectRoot, sessionId } = useChat.getState();
+  // Edit never searches the web, whatever the toggle says.
+  const webSearch = mode !== "edit" && useChat.getState().webSearch;
   // Only the question goes; the editor's open file, selection and cursor
   // often have nothing to do with what is asked.
   const requestId = newRequestId();
@@ -189,12 +204,13 @@ export async function sendChatMessage(text: string): Promise<void> {
     id: requestId,
     instruction,
     mode,
+    webSearch,
     turns: turnsOf(useChat.getState().messages),
     summary: useChat.getState().summary,
   };
 
   const first = CHAT_MODELS.refine.primary;
-  const userMessage: ChatMessage = { id: `${requestId}-u`, role: "user", content: instruction, status: "done", mode };
+  const userMessage: ChatMessage = { id: `${requestId}-u`, role: "user", content: instruction, status: "done", mode, ...(webSearch ? { webSearch } : {}) };
   const assistantMessage: ChatMessage = {
     id: requestId,
     role: "assistant",
@@ -209,7 +225,7 @@ export async function sendChatMessage(text: string): Promise<void> {
   useChat.setState((s) => ({ messages: [...s.messages, userMessage, assistantMessage], runningId: requestId }));
 
   // One trace per question; its id is the answer's message id.
-  const root = startSpan(requestId, null, "pipeline", "sendChatMessage", () => ({ question: instruction, ui_mode: mode, models: CHAT_MODELS }));
+  const root = startSpan(requestId, null, "pipeline", "sendChatMessage", () => ({ question: instruction, ui_mode: mode, web_search: webSearch, models: CHAT_MODELS }));
   step(requestId, root, "user", "receiveUserInput", instruction, () => ({
     question: instruction,
     ui_mode: mode,
@@ -235,7 +251,10 @@ export async function sendChatMessage(text: string): Promise<void> {
         onStage: (stage) => updateMessage(requestId, { stage }),
         onRefined: (refined) => updateMessage(requestId, { refined }),
         onText: (full) => updateMessage(requestId, { content: full }),
-        onModel: (choice) => updateMessage(requestId, { provider: choice.provider, model: choice.model }),
+        // The note written before the search is dropped; the search shows until the answer starts.
+        onSearch: (query) => updateMessage(requestId, { content: "", searchQuery: query ?? "" }),
+        // A new attempt (or the fallback) starts without the previous attempt's search.
+        onModel: (choice) => updateMessage(requestId, { provider: choice.provider, model: choice.model, searchQuery: undefined }),
       },
     });
     route = result.route;
@@ -250,6 +269,8 @@ export async function sendChatMessage(text: string): Promise<void> {
       provider: result.choice.provider,
       model: result.choice.model,
       fallbackFrom: result.fallbackFrom?.model,
+      searchQuery: undefined,
+      ...(result.sources?.length ? { sources: result.sources } : {}),
       ...(result.finishReason === "length" ? { truncated: true } : {}),
     });
     step(requestId, root, "final", "showFinalAnswer", content, () => ({
@@ -260,14 +281,15 @@ export async function sendChatMessage(text: string): Promise<void> {
       finishReason: result.finishReason,
       usage: result.usage,
       proposed_edits: result.edits?.length ?? 0,
+      sources: result.sources ?? [],
       ui_mode: mode,
     }));
     endSpan(root, "pipeline", { status: "done", route: result.route, outcome: result.outcome });
     placePendingMarks();
   } catch (err) {
     const error = err instanceof AIError ? err : new AIError("unknown", String(err));
-    if (error.kind === "cancelled") updateMessage(requestId, { status: "cancelled", stage: undefined });
-    else updateMessage(requestId, { status: "error", stage: undefined, content: error.message });
+    if (error.kind === "cancelled") updateMessage(requestId, { status: "cancelled", stage: undefined, searchQuery: undefined });
+    else updateMessage(requestId, { status: "error", stage: undefined, searchQuery: undefined, content: error.message });
     failSpan(root, "pipeline", error);
   } finally {
     if (running === control) running = null;
@@ -437,7 +459,7 @@ function leaveSession() {
   if (runningId) {
     useChat.setState((s) => ({
       runningId: null,
-      messages: s.messages.map((m) => (m.id === runningId && m.status === "streaming" ? { ...m, status: "cancelled", stage: undefined } : m)),
+      messages: s.messages.map((m) => (m.id === runningId && m.status === "streaming" ? { ...m, status: "cancelled", stage: undefined, searchQuery: undefined } : m)),
     }));
   }
   flushSave();
@@ -448,7 +470,7 @@ function leaveSession() {
 export async function openChatsFor(root: string | null): Promise<void> {
   leaveSession();
   stopSectionSummaries();
-  useChat.setState({ root, mode: "auto", messages: [], summary: null, sessions: [], sessionId: newSessionId(), createdAt: Date.now() });
+  useChat.setState({ root, mode: "auto", webSearch: false, messages: [], summary: null, sessions: [], sessionId: newSessionId(), createdAt: Date.now() });
   if (!root) return;
   const sessions = await listSessions(root).catch(() => [] as SessionSummary[]);
   if (useChat.getState().root !== root) return;
@@ -459,7 +481,7 @@ export async function openChatsFor(root: string | null): Promise<void> {
 /** Start an empty conversation; it is saved once it has a message. */
 export function newChatSession() {
   leaveSession();
-  useChat.setState({ messages: [], summary: null, sessionId: newSessionId(), createdAt: Date.now() });
+  useChat.setState({ messages: [], webSearch: false, summary: null, sessionId: newSessionId(), createdAt: Date.now() });
 }
 
 export async function switchChatSession(id: string): Promise<void> {
@@ -470,7 +492,7 @@ export async function switchChatSession(id: string): Promise<void> {
   if (!file || useChat.getState().root !== root) return;
   const messages = file.messages.map((saved) => {
     // An answer that was still streaming when the app closed is shown as stopped.
-    const message = saved.status === "streaming" ? { ...saved, status: "cancelled" as const, stage: undefined } : saved;
+    const message = saved.status === "streaming" ? { ...saved, status: "cancelled" as const, stage: undefined, searchQuery: undefined } : saved;
     if (!message.edits) return message;
     // Older proposals may have been generated from unopened CRLF files.
     // Keep them compatible with the LF source used by file reads and CodeMirror.
@@ -484,7 +506,7 @@ export async function switchChatSession(id: string): Promise<void> {
   const summary = readSummary(file.summary);
   const fits = summary && summary.coveredTurns <= turnsOf(messages).length ? summary : null;
   const mode = file.mode === "chat" || file.mode === "edit" ? file.mode : "auto";
-  useChat.setState({ messages, mode, summary: fits, sessionId: id, createdAt: file.createdAt });
+  useChat.setState({ messages, mode, webSearch: file.webSearch === true, summary: fits, sessionId: id, createdAt: file.createdAt });
   placePendingMarks();
 }
 
@@ -497,7 +519,7 @@ export async function deleteChatSession(id: string): Promise<void> {
     stopSummary();
     clearTimeout(saveTimer);
     clearPendingMarks();
-    useChat.setState({ messages: [], summary: null, sessionId: newSessionId(), createdAt: Date.now() });
+    useChat.setState({ messages: [], webSearch: false, summary: null, sessionId: newSessionId(), createdAt: Date.now() });
   }
   await deleteSession(root, id);
   const sessions = useChat.getState().sessions.filter((s) => s.id !== id);
@@ -516,12 +538,12 @@ function sessionTitle(messages: ChatMessage[]): string {
 /** Write the shown conversation now (when it has messages and no answer is streaming). */
 function flushSave() {
   clearTimeout(saveTimer);
-  const { root, sessionId, createdAt, messages, summary, runningId, sessions, mode } = useChat.getState();
+  const { root, sessionId, createdAt, messages, summary, runningId, sessions, mode, webSearch } = useChat.getState();
   if (!root || messages.length === 0 || runningId) return;
   const updatedAt = Date.now();
   // Saved with where each pending edit's highlight is now, to place it again after a restart.
   const saved = liveAnchors(messages, (path) => editorSession.stateOf(path));
-  void saveSession(root, sessionId, { version: SESSION_VERSION, createdAt, updatedAt, mode, messages: saved, ...(summary ? { summary } : {}) }).catch(() => {
+  void saveSession(root, sessionId, { version: SESSION_VERSION, createdAt, updatedAt, mode, webSearch, messages: saved, ...(summary ? { summary } : {}) }).catch(() => {
     // Saving is best effort; the conversation stays usable in memory.
   });
   const entry: SessionSummary = { id: sessionId, title: sessionTitle(messages), createdAt, updatedAt, messageCount: messages.length };
@@ -531,7 +553,7 @@ function flushSave() {
 // Save shortly after the conversation changes (new message, finished answer, applied edit, new summary).
 useChat.subscribe((state, prev) => {
   if (state.root !== prev.root || state.sessionId !== prev.sessionId) setDebugProject(state.root, state.sessionId);
-  if (state.messages === prev.messages && state.runningId === prev.runningId && state.summary === prev.summary && state.mode === prev.mode) return;
+  if (state.messages === prev.messages && state.runningId === prev.runningId && state.summary === prev.summary && state.mode === prev.mode && state.webSearch === prev.webSearch) return;
   if (state.sessionId !== prev.sessionId || state.root !== prev.root) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flushSave, SAVE_DELAY_MS);
