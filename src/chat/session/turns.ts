@@ -38,6 +38,8 @@ export interface TurnMessage {
   editStates?: Record<number, string>;
   /** Web pages the answer drew on. */
   sources?: WebSource[];
+  /** The web searches the answer ran, by query ("" when the query is unknown). */
+  searches?: string[];
 }
 
 /** The judge keeps at least four recent turns, each message up to 10,000 characters. */
@@ -73,7 +75,7 @@ function answerOf(m: TurnMessage): { answer: string; status: TurnStatus } {
   if (m.truncated) {
     const notice = `\n\n${t("chat.truncated")}`;
     const text = m.content.endsWith(notice) ? m.content.slice(0, -notice.length) : m.content;
-    return { answer: note(text, TURN_NOTES.truncated), status: "truncated" };
+    return { answer: searched(m, note(text, TURN_NOTES.truncated)), status: "truncated" };
   }
   const edits = m.edits?.map((edit, i) => [
     `[paper edit ${i + 1}: ${m.editStates?.[i] ?? "pending application"}; file: ${edit.path}]`,
@@ -82,7 +84,14 @@ function answerOf(m: TurnMessage): { answer: string; status: TurnStatus } {
   ].join("\n")).join("\n\n");
   // The pages a finished answer drew on, so a later turn can refer to them.
   const sources = m.sources?.length ? ["[web sources]", ...m.sources.map((s) => (s.title ? `- ${s.title} (${s.url})` : `- ${s.url}`))].join("\n") : "";
-  return { answer: [m.content, edits, sources].filter(Boolean).join("\n\n"), status: m.route === "clarify" ? "clarify" : "done" };
+  return { answer: searched(m, [m.content, edits, sources].filter(Boolean).join("\n\n")), status: m.route === "clarify" ? "clarify" : "done" };
+}
+
+/** The web searches before the answer, one line each, so a later turn knows they really ran. */
+function searched(m: TurnMessage, answer: string): string {
+  if (!m.searches?.length) return answer;
+  const calls = m.searches.map((query) => (query ? `[tool call] web search: "${query}"` : "[tool call] web search"));
+  return [...calls, answer].join("\n");
 }
 
 function note(text: string, mark: string): string {

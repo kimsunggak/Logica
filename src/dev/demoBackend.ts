@@ -396,7 +396,7 @@ function openAIStream(reply: DemoReply, search: DemoSearch | null = null): strin
       sseEvent({ type: "response.web_search_call.in_progress", output_index: 1, item_id: "ws_demo" }),
       sseEvent({ type: "response.web_search_call.searching", output_index: 1, item_id: "ws_demo" }),
       sseEvent({ type: "response.web_search_call.completed", output_index: 1, item_id: "ws_demo" }),
-      sseEvent({ type: "response.output_item.done", output_index: 1, item: { ...call, status: "completed", action: { type: "search", query: search.query } } }),
+      sseEvent({ type: "response.output_item.done", output_index: 1, item: { ...call, status: "completed", action: { type: "search", queries: [search.query] } } }),
     );
     const text = reply.text + webNote(search);
     for (const delta of chunks(text)) events.push(sseEvent({ type: "response.output_text.delta", delta }));
@@ -405,7 +405,7 @@ function openAIStream(reply: DemoReply, search: DemoSearch | null = null): strin
     events.push(sseEvent({
       type: "response.completed",
       response: {
-        output: [{ ...call, status: "completed", action: { type: "search", query: search.query } }, { id: "msg_demo", type: "message", content: [{ type: "output_text", text, annotations }] }],
+        output: [{ ...call, status: "completed", action: { type: "search", queries: [search.query] } }, { id: "msg_demo", type: "message", content: [{ type: "output_text", text, annotations }] }],
         usage: { input_tokens: 900, input_tokens_details: { cached_tokens: 0 }, output_tokens: Math.ceil(text.length / 4) },
       },
     }));

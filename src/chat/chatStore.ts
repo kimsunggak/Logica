@@ -41,6 +41,8 @@ export interface ChatMessage {
   webSearch?: boolean;
   /** Web pages the answer drew on. */
   sources?: WebSource[];
+  /** The web searches the answer ran, by query ("" when the query is unknown). */
+  searches?: string[];
   /** While the answer streams: the web search running now ("" before its query is known). */
   searchQuery?: string;
   status: "done" | "streaming" | "error" | "cancelled";
@@ -271,6 +273,7 @@ export async function sendChatMessage(text: string): Promise<void> {
       fallbackFrom: result.fallbackFrom?.model,
       searchQuery: undefined,
       ...(result.sources?.length ? { sources: result.sources } : {}),
+      ...(result.searches?.length ? { searches: result.searches } : {}),
       ...(result.finishReason === "length" ? { truncated: true } : {}),
     });
     step(requestId, root, "final", "showFinalAnswer", content, () => ({
@@ -282,6 +285,7 @@ export async function sendChatMessage(text: string): Promise<void> {
       usage: result.usage,
       proposed_edits: result.edits?.length ?? 0,
       sources: result.sources ?? [],
+      searches: result.searches ?? [],
       ui_mode: mode,
     }));
     endSpan(root, "pipeline", { status: "done", route: result.route, outcome: result.outcome });

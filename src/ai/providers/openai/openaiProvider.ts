@@ -35,10 +35,10 @@ interface OpenAIModelList {
 
 export const CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage";
 
-/** The query of a finished `web_search_call` item: `action.query`, or the first of `action.queries`. */
-function searchQuery(action: any): string | undefined {
-  const query = typeof action?.query === "string" ? action.query : Array.isArray(action?.queries) ? action.queries.find((q: unknown) => typeof q === "string") : undefined;
-  return query?.trim() || undefined;
+/** The queries of a finished `web_search_call` item: `action.queries`, or the deprecated `action.query`. */
+function searchQueries(action: any): string[] {
+  const all: unknown[] = Array.isArray(action?.queries) ? action.queries : [action?.query];
+  return all.filter((q): q is string => typeof q === "string" && !!q.trim()).map((q) => q.trim());
 }
 
 export class OpenAIProvider implements AIProvider {
@@ -147,8 +147,8 @@ export class OpenAIProvider implements AIProvider {
     };
     const searchDone = (key: string, item: any) => {
       startSearch(key);
-      const query = searchQuery(item?.action);
-      if (query && !queries.includes(query)) {
+      for (const query of searchQueries(item?.action)) {
+        if (queries.includes(query)) continue;
         queries.push(query);
         handlers?.onSearch?.(query);
       }
@@ -164,8 +164,7 @@ export class OpenAIProvider implements AIProvider {
         else {
           // Only counted from the final output: the answer after it has already streamed.
           searches.add(keyOf(json));
-          const query = searchQuery(item.action);
-          if (query && !queries.includes(query)) queries.push(query);
+          for (const query of searchQueries(item.action)) if (!queries.includes(query)) queries.push(query);
         }
         return;
       }

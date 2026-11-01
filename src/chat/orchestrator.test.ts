@@ -224,10 +224,17 @@ describe("Web search", () => {
     expect(r.log.some((c) => c.request.webSearch)).toBe(false);
   });
 
-  it("returns the final answer's sources", async () => {
+  it("returns the final answer's sources and searches", async () => {
     const sources = [{ url: "https://example.org/a", title: "Paper A" }];
-    const r = run("chat", { answer: () => ({ ...response("From the web."), sources }) }, paper, { ...turn, webSearch: true });
-    expect(await r.result).toMatchObject({ content: "From the web.", sources });
+    const r = run("chat", { answer: () => ({ ...response("From the web."), sources, searchQueries: ["pose 2026"] }) }, paper, { ...turn, webSearch: true });
+    expect(await r.result).toMatchObject({ content: "From the web.", sources, searches: ["pose 2026"] });
+  });
+
+  it("records a search whose query is unknown, and none when the answer did not search", async () => {
+    const unknown = run("chat", { answer: () => ({ ...response("From the web."), usage: { webSearchRequests: 1 } }) }, paper, { ...turn, webSearch: true });
+    expect((await unknown.result).searches).toEqual([""]);
+    const none = run("chat", {}, paper, { ...turn, webSearch: true });
+    expect(await none.result).not.toHaveProperty("searches");
   });
 
   it("still loads the sections the answer asks for after a search, and searches again with them", async () => {

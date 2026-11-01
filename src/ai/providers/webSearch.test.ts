@@ -200,7 +200,7 @@ describe("OpenAI web search", () => {
       { type: "response.web_search_call.in_progress", output_index: 1, item_id: "ws_1" },
       { type: "response.web_search_call.searching", output_index: 1, item_id: "ws_1" },
       { type: "response.web_search_call.completed", output_index: 1, item_id: "ws_1" },
-      { type: "response.output_item.done", output_index: 1, item: { ...call, status: "completed", action: { type: "search", query: "pose 2026" } } },
+      { type: "response.output_item.done", output_index: 1, item: { ...call, status: "completed", action: { type: "search", queries: ["pose 2026"] } } },
       { type: "response.output_text.delta", item_id: "msg_1", delta: "See Paper A." },
       { type: "response.output_text.annotation.added", annotation: { type: "url_citation", url: "https://example.org/a", title: "Paper A", start_index: 4, end_index: 11 } },
       { type: "response.completed", response: { usage: { input_tokens: 100, output_tokens: 10 } } },
@@ -245,6 +245,22 @@ describe("OpenAI web search", () => {
     expect(response.sources).toEqual([{ url: "https://example.org/a", title: "Paper A" }, { url: "https://example.org/b", title: "Paper B" }]);
     expect(response.searchQueries).toEqual(["pose"]);
     expect(response.usage).toMatchObject({ webSearchRequests: 1 });
+  });
+
+  it("reads every query of a search, and the deprecated single query", async () => {
+    replies = [sse([
+      { type: "response.output_item.added", output_index: 0, item: { ...call, status: "in_progress" } },
+      { type: "response.output_item.done", output_index: 0, item: { ...call, status: "completed", action: { type: "search", queries: ["pose 2026", " occlusion benchmark "] } } },
+      { type: "response.output_item.added", output_index: 1, item: { id: "ws_2", type: "web_search_call", status: "in_progress" } },
+      { type: "response.output_item.done", output_index: 1, item: { id: "ws_2", type: "web_search_call", status: "completed", action: { type: "search", query: "OCHuman" } } },
+      { type: "response.output_text.delta", delta: "Answer." },
+      { type: "response.completed", response: { usage: {} } },
+    ])];
+    const searches: (string | undefined)[] = [];
+    const response = await new OpenAIProvider(() => "chatgpt").generate(openai, { onSearch: (q) => searches.push(q) });
+    expect(searches).toEqual([undefined, "pose 2026", "occlusion benchmark", undefined, "OCHuman"]);
+    expect(response.searchQueries).toEqual(["pose 2026", "occlusion benchmark", "OCHuman"]);
+    expect(response.usage).toMatchObject({ webSearchRequests: 2 });
   });
 
   it("adds a hint to turn off web search when a search request is rejected", async () => {
