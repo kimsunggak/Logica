@@ -54,6 +54,8 @@ export interface TurnResult {
   fallbackFrom?: ModelChoice;
   /** Web pages the answer drew on. */
   sources?: WebSource[];
+  /** The web searches the answer ran, by query ("" when the query is unknown). */
+  searches?: string[];
 }
 export interface OrchestratorDeps {
   root: Span;
@@ -278,6 +280,8 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
       step(turn.id, span, "answer", "askForSections", more, () => describeScope(scope));
       return call("answer", { ...request, id: `${turn.id}-more`, ...readPaper(), webSearch }, { ...options(span, moduleReads, showText), onSearch: hooks.onSearch });
     }, (result) => ({ text: result.response.text, finishReason: result.response.finishReason, model: result.choice.model, sources: result.response.sources ?? [] }));
-  const sources = answered.response.sources;
-  return { route, outcome: "chat", reason: decision.reason, refined, content: answered.response.text, ...finished(answered), ...(sources?.length ? { sources } : {}) };
+  const { sources, searchQueries, usage } = answered.response;
+  const searches = searchQueries?.length ? searchQueries : usage?.webSearchRequests ? [""] : [];
+  return { route, outcome: "chat", reason: decision.reason, refined, content: answered.response.text, ...finished(answered),
+    ...(sources?.length ? { sources } : {}), ...(searches.length ? { searches } : {}) };
 }

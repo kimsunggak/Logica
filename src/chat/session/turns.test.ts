@@ -101,4 +101,15 @@ describe("windows", () => {
     );
     expect(turnsOf([q("x"), a("partial", { status: "cancelled", sources })])[0].answer).toBe("partial\n[answer stopped by the user]");
   });
+
+  it("puts a tool call line before an answer for each web search it ran", () => {
+    const sources = [{ url: "https://example.org/a", title: "Paper A" }];
+    expect(turnsOf([q("related work?"), a("Paper A is closest.", { searches: ["pose 2026", ""], sources })])[0].answer).toBe(
+      '[tool call] web search: "pose 2026"\n[tool call] web search\nPaper A is closest.\n\n[web sources]\n- Paper A (https://example.org/a)',
+    );
+    expect(turnsOf([q("x"), a(`long\n\n${t("chat.truncated")}`, { truncated: true, searches: ["q"] })])[0].answer).toBe(
+      '[tool call] web search: "q"\nlong\n[answer cut off at the length limit]',
+    );
+    expect(turnsOf([q("x"), a("plain")])[0].answer).toBe("plain");
+  });
 });
