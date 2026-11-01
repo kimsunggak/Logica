@@ -27,6 +27,8 @@ export interface ProposedEdit {
    * changed while highlighted) and must not be searched for.
    */
   anchor?: { from: number; to: number; hash: string } | null;
+  /** Ids of the web evidence (W1, W2, ...) the edit relies on. */
+  evidence?: string[];
 }
 
 const BODY = /^<{7} ?ORIGINAL[^\n]*\n([\s\S]*?)\n?={7}[^\n]*\n([\s\S]*?)\n?>{7} ?REVISED[^\n]*\s*$/;

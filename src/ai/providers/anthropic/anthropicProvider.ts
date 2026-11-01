@@ -19,6 +19,7 @@ import type {
   FinishReason,
   ModelConfig,
   StreamHandlers,
+  TextCitation,
 } from "../../types";
 import { toToolCalls, type StreamedCall } from "../toolCalls";
 import { SourceList, withSearchHint } from "../webSearch";
@@ -112,6 +113,9 @@ export class AnthropicProvider implements AIProvider {
     const cited = new SourceList();
     const found = new SourceList();
     const queries: string[] = [];
+    // Where each text block starts in `text`; its citations cover the block.
+    const textStart = new Map<number, number>();
+    const spans: TextCitation[] = [];
 
     for (let pass = 0; ; pass++) {
       const parser = new SSEParser();
@@ -143,7 +147,9 @@ export class AnthropicProvider implements AIProvider {
             const started = json.content_block;
             if (at < 0 || !started || typeof started !== "object") break;
             blocks[at] = structuredClone(started);
-            if (started.type === "tool_use") {
+            if (started.type === "text") {
+              textStart.set(at, text.length);
+            } else if (started.type === "tool_use") {
               calls.set(at, { id: started.id ?? "", name: started.name ?? "", args: "" });
               inputs.set(at, "");
             } else if (started.type === "server_tool_use") {
@@ -151,6 +157,7 @@ export class AnthropicProvider implements AIProvider {
               if (started.name === "web_search") {
                 // A note written before the search ("let me look that up") is not the answer.
                 text = "";
+                spans.length = 0;
                 handlers?.onSearch?.();
               }
             } else if (started.type === "web_search_tool_result" && Array.isArray(started.content)) {
@@ -180,6 +187,19 @@ export class AnthropicProvider implements AIProvider {
             break;
           }
           case "content_block_stop": {
+            if (block?.type === "text" && Array.isArray(block.citations) && textStart.has(at)) {
+              const start = Math.min(textStart.get(at)!, text.length);
+              for (const c of block.citations) {
+                if (typeof c?.url !== "string") continue;
+                spans.push({
+                  start,
+                  end: text.length,
+                  url: c.url,
+                  ...(typeof c.title === "string" && c.title ? { title: c.title } : {}),
+                  ...(typeof c.cited_text === "string" && c.cited_text.trim() ? { quote: c.cited_text.trim() } : {}),
+                });
+              }
+            }
             const raw = inputs.get(at);
             if (!block || raw === undefined) break;
             if (raw.trim()) {
@@ -254,6 +274,7 @@ export class AnthropicProvider implements AIProvider {
       usage,
       ...(sources.length ? { sources } : {}),
       ...(queries.length ? { searchQueries: queries } : {}),
+      ...(spans.length ? { citations: spans } : {}),
     };
   }
 

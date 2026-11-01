@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildPrompt } from "./index";
-import { CHAT_TOOLS, EDIT_TOOLS, sectionTools } from "../tools/chatTools";
+import { CHAT_TOOLS, EDIT_TOOLS, editTools, sectionTools } from "../tools/chatTools";
 import { OpenAIProvider } from "../providers/openai/openaiProvider";
 import { AnthropicProvider } from "../providers/anthropic/anthropicProvider";
 import type { AIRequest } from "../types";
@@ -102,5 +102,61 @@ describe("separate prompt responsibilities", () => {
   it("keeps the inline selection rule specific to inline editing", () => {
     expect(buildPrompt({ ...turn, task: "inline-edit" }).system).toContain("Only edit the selected text.");
     expect(buildPrompt({ ...turn, task: "edit" }).system).not.toContain("Only edit the selected text.");
+  });
+});
+
+describe("web research for Edit", () => {
+  const evidence = [{ id: "W1", finding: "Paper A reaches 81.2 AP on OCHuman.", sources: [{ url: "https://example.org/a", title: "Paper A", quote: "81.2 AP" }] }];
+
+  it("section selection decides on web research only when it is offered", () => {
+    const plain = buildPrompt({ ...turn, task: "select", executionMode: "edit" });
+    const offered = buildPrompt({ ...turn, task: "select", executionMode: "edit", mayResearch: true });
+    expect(plain.system).not.toContain("web_research");
+    expect(offered.system).toContain("In web_research, set needed to true only when");
+    expect(offered.system.replace(/\nWeb search is on\.[^\n]*/, "")).toBe(plain.system);
+    // Chat selection never decides on research.
+    expect(buildPrompt({ ...turn, task: "select", executionMode: "chat", mayResearch: true }).system).not.toContain("web_research");
+    const params = (research: boolean) => sectionTools("edit", ["3"], research)[0].parameters as { properties: Record<string, unknown>; required: string[] };
+    expect(params(false).properties).not.toHaveProperty("web_research");
+    expect(params(true).required).toContain("web_research");
+    expect(sectionTools("edit", ["3"])).toEqual(sectionTools("edit", ["3"], false));
+  });
+
+  it("the research reads the questions and the text to be edited, not the rest of the paper or the conversation", () => {
+    const prompt = buildPrompt({
+      ...turn, task: "research", researchQuestions: ["Latest OCHuman results?", "Who proposed PAFs?"],
+      researchSources: [{ path: "sections/method.tex", fromLine: 3, toLine: 4, text: "We route frames." }],
+    });
+    const content = prompt.messages[0].content;
+    expect(prompt.messages).toHaveLength(1);
+    expect(content).toContain("<research_questions>\n1. Latest OCHuman results?\n2. Who proposed PAFs?\n</research_questions>");
+    expect(content).toContain('<source file="sections/method.tex" lines="3-4">\nWe route frames.\n</source>');
+    expect(content).toContain(turn.instruction);
+    expect(content).not.toContain("Exact paper source.");
+    expect(content).not.toContain("We could shorten it.");
+    expect(prompt.system).toContain("Web Research Module");
+    expect(prompt.system).toContain("NOT FOUND:");
+  });
+
+  it("the edit gets the evidence and gaps only when the research ran, and is unchanged otherwise", () => {
+    const plain = buildPrompt({ ...turn, task: "edit", editSections: ["3"] });
+    expect(buildPrompt({ ...turn, task: "edit", editSections: ["3"], webEvidence: [], researchGaps: [] })).toEqual(plain);
+    const researched = buildPrompt({ ...turn, task: "edit", editSections: ["3"], webEvidence: evidence, researchGaps: ["The 2026 leaderboard"] });
+    const last = researched.messages.at(-1)!.content;
+    expect(last).toContain('<web_evidence>\n[W1] Paper A reaches 81.2 AP on OCHuman.\n  source: Paper A (https://example.org/a)\n  quote: "81.2 AP"\n</web_evidence>');
+    expect(last).toContain("<research_gaps>\n- The 2026 leaderboard\n</research_gaps>");
+    expect(researched.system).toContain("Facts from outside the paper may come only from these findings");
+    expect(researched.system).toContain("Do not fill these gaps from memory");
+    expect(plain.system).not.toContain("web_evidence");
+  });
+
+  it("each edit names the evidence it relies on only when there is evidence", () => {
+    expect(editTools()).toBe(EDIT_TOOLS);
+    expect(editTools([])).toBe(EDIT_TOOLS);
+    const items = (tools: typeof EDIT_TOOLS) => ((tools[0].parameters as any).properties.edits.items as { properties: Record<string, any>; required: string[] });
+    expect(items(EDIT_TOOLS).properties).not.toHaveProperty("evidence");
+    const withIds = items(editTools(["W1", "W2"]));
+    expect(withIds.properties.evidence.items.enum).toEqual(["W1", "W2"]);
+    expect(withIds.required).toContain("evidence");
   });
 });

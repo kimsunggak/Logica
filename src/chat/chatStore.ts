@@ -20,7 +20,7 @@ import { foldTurns, moduleChars, turnsToFold, unsummarized } from "./session/sum
 import { readSummary, type ConversationSummary } from "./session/summary";
 import { turnsOf } from "./session/turns";
 import { endSpan, failSpan, setDebugProject, startSpan, step, type Span } from "../debug/trace";
-import type { ChatMode, ProjectFile, ProviderId, WebSource } from "../ai/types";
+import type { ChatMode, ProjectFile, ProviderId, WebEvidence, WebSource } from "../ai/types";
 import type { EditorState } from "@codemirror/state";
 import type { TargetRange } from "../editor/aiTarget";
 import { editorSession } from "../editor/editorSession";
@@ -41,8 +41,12 @@ export interface ChatMessage {
   webSearch?: boolean;
   /** Web pages the answer drew on. */
   sources?: WebSource[];
-  /** The web searches the answer ran, by query ("" when the query is unknown). */
+  /** The web searches the answer or the edit's research ran, by query ("" when the query is unknown). */
   searches?: string[];
+  /** Edit: what the web research found; each proposed edit names the ids it relies on. */
+  evidence?: WebEvidence[];
+  /** Edit: what the web research could not find. */
+  researchGaps?: string[];
   /** While the answer streams: the web search running now ("" before its query is known). */
   searchQuery?: string;
   status: "done" | "streaming" | "error" | "cancelled";
@@ -197,8 +201,8 @@ export async function sendChatMessage(text: string): Promise<void> {
   const instruction = text.trim();
   if (!instruction || useChat.getState().runningId) return;
   const { mode, root: projectRoot, sessionId } = useChat.getState();
-  // Edit never searches the web, whatever the toggle says.
-  const webSearch = mode !== "edit" && useChat.getState().webSearch;
+  // Chat answers may search; an edit researches first when section selection asks for it.
+  const webSearch = useChat.getState().webSearch;
   // Only the question goes; the editor's open file, selection and cursor
   // often have nothing to do with what is asked.
   const requestId = newRequestId();
@@ -274,6 +278,8 @@ export async function sendChatMessage(text: string): Promise<void> {
       searchQuery: undefined,
       ...(result.sources?.length ? { sources: result.sources } : {}),
       ...(result.searches?.length ? { searches: result.searches } : {}),
+      ...(result.evidence?.length ? { evidence: result.evidence } : {}),
+      ...(result.researchGaps?.length ? { researchGaps: result.researchGaps } : {}),
       ...(result.finishReason === "length" ? { truncated: true } : {}),
     });
     step(requestId, root, "final", "showFinalAnswer", content, () => ({
@@ -286,6 +292,7 @@ export async function sendChatMessage(text: string): Promise<void> {
       proposed_edits: result.edits?.length ?? 0,
       sources: result.sources ?? [],
       searches: result.searches ?? [],
+      ...(result.evidence || result.researchGaps ? { web_evidence: result.evidence?.map((e) => e.id) ?? [], research_gaps: result.researchGaps ?? [] } : {}),
       ui_mode: mode,
     }));
     endSpan(root, "pipeline", { status: "done", route: result.route, outcome: result.outcome });

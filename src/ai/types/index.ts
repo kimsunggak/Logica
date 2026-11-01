@@ -32,7 +32,7 @@ export interface AIMessage {
 /** UI purpose; common refinement precedes fixed routing or Auto classification. */
 export type ChatMode = "auto" | "chat" | "edit";
 export type ExecutionMode = Exclude<ChatMode, "auto">;
-export type AITask = "inline-edit" | "judge" | "reply" | "refine" | "select" | "answer" | "edit" | "summary" | "sections";
+export type AITask = "inline-edit" | "judge" | "reply" | "refine" | "select" | "research" | "answer" | "edit" | "summary" | "sections";
 
 /** The model calls of a chat turn. */
 export type ChatTask = Exclude<AITask, "inline-edit">;
@@ -117,6 +117,24 @@ export interface WebSource {
   title?: string;
 }
 
+/** A source cited for `response.text.slice(start, end)`. */
+export interface TextCitation {
+  start: number;
+  end: number;
+  url: string;
+  title?: string;
+  /** The cited text of the source (Claude only, up to 150 characters). */
+  quote?: string;
+}
+
+/** A finding of the Web Research Module that the Paper Edit Module may use, with the sources it cites. */
+export interface WebEvidence {
+  /** W1, W2, ... */
+  id: string;
+  finding: string;
+  sources: (WebSource & { quote?: string })[];
+}
+
 export interface AIRequest {
   id: string;
   task: AITask;
@@ -141,6 +159,16 @@ export interface AIRequest {
   paperMap?: MapEntry[];
   /** The answer may ask for sections it has only as summaries (answer only). */
   mayAskForSections?: boolean;
+  /** Section selection decides whether the edit needs web research (select, in Edit with web search on). */
+  mayResearch?: boolean;
+  /** What to find out on the web (research only). */
+  researchQuestions?: string[];
+  /** The text the edit will change, to research for (research only). */
+  researchSources?: SourceRange[];
+  /** What the web research found, for the edit to use (edit only). */
+  webEvidence?: WebEvidence[];
+  /** What the web research could not find (edit only). */
+  researchGaps?: string[];
   /** The sections to summarize (sections only). */
   sectionsToSummarize?: SectionToSummarize[];
   /** The question as rewritten by the Refine Module (routing and execution). */
@@ -153,7 +181,7 @@ export interface AIRequest {
   /** Reasoning effort, mapped to each provider’s API format. */
   reasoningEffort?: ReasoningEffort;
   maxOutputTokens?: number;
-  /** Offer the provider's built-in web search; the model decides whether to search (answer only). */
+  /** Offer the provider's built-in web search; the model decides whether to search (answer and research). */
   webSearch?: boolean;
 }
 
@@ -181,6 +209,8 @@ export interface AIResponse {
   sources?: WebSource[];
   /** The queries of the web searches the model ran. */
   searchQueries?: string[];
+  /** Which parts of `text` cite which sources. */
+  citations?: TextCitation[];
 }
 
 export interface StreamHandlers {

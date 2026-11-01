@@ -268,3 +268,53 @@ describe("OpenAI web search", () => {
     await expect(new OpenAIProvider(() => "chatgpt").generate(openai)).rejects.toThrow(t("ai.err.webSearch"));
   });
 });
+
+describe("citation positions", () => {
+  it("Claude: each cited text block's place in the answer, counted after the search", async () => {
+    replies = [searchTurn([
+      start(4, { type: "text", text: "" }),
+      delta(4, { type: "text_delta", text: "- " }),
+      stop(4),
+      start(5, { type: "text", text: "" }),
+      delta(5, { type: "citations_delta", citation: { ...citation("https://example.org/b", "Paper B"), cited_text: "reaches 81.2 AP" } }),
+      delta(5, { type: "text_delta", text: "Paper B reaches 81.2 AP." }),
+      stop(5),
+      start(6, { type: "text", text: "" }),
+      delta(6, { type: "text_delta", text: "\n- Uncited line." }),
+      stop(6),
+    ])];
+    const response = await new AnthropicProvider().generate(request);
+    expect(response.text).toBe("- Paper B reaches 81.2 AP.\n- Uncited line.");
+    expect(response.citations).toEqual([{ start: 2, end: 26, url: "https://example.org/b", title: "Paper B", quote: "reaches 81.2 AP" }]);
+    expect(response.text.slice(2, 26)).toBe("Paper B reaches 81.2 AP.");
+  });
+
+  it("OpenAI: annotation indexes counted from the start of their text part", async () => {
+    replies = [sse([
+      { type: "response.output_text.delta", item_id: "msg_0", content_index: 0, delta: "Let me check." },
+      { type: "response.output_item.added", output_index: 1, item: { id: "ws_1", type: "web_search_call", status: "in_progress" } },
+      { type: "response.output_item.done", output_index: 1, item: { id: "ws_1", type: "web_search_call", status: "completed", action: { type: "search", queries: ["pose"] } } },
+      { type: "response.output_text.delta", item_id: "msg_1", content_index: 0, delta: "- Paper A reaches 81.2 AP " },
+      { type: "response.output_text.delta", item_id: "msg_1", content_index: 0, delta: "([a.org](https://a.org))\n- Paper B." },
+      { type: "response.output_text.annotation.added", item_id: "msg_1", content_index: 0, annotation: { type: "url_citation", url: "https://a.org", title: "Paper A", start_index: 26, end_index: 50 } },
+      {
+        type: "response.completed",
+        response: {
+          output: [{ id: "msg_1", type: "message", content: [{ type: "output_text", text: "", annotations: [
+            { type: "url_citation", url: "https://a.org", title: "Paper A", start_index: 26, end_index: 50 },
+            { type: "url_citation", url: "https://b.org", title: "Paper B", start_index: 53, end_index: 61 },
+          ] }] }],
+          usage: {},
+        },
+      },
+    ])];
+    const response = await new OpenAIProvider(() => "chatgpt").generate({ ...request, model: "gpt-6.1-sol" });
+    expect(response.text).toBe("- Paper A reaches 81.2 AP ([a.org](https://a.org))\n- Paper B.");
+    // The annotation seen in the stream is not added again from the final response.
+    expect(response.citations).toEqual([
+      { start: 26, end: 50, url: "https://a.org", title: "Paper A" },
+      { start: 53, end: 61, url: "https://b.org", title: "Paper B" },
+    ]);
+    expect(response.text.slice(26, 50)).toBe("([a.org](https://a.org))");
+  });
+});

@@ -44,6 +44,14 @@ describe("turnsOf", () => {
     expect(answer).toContain("REVISED:\nNew text.");
     expect(turnsOf([q("Shorten method"), a("Proposed changes.", { edits: [edit], editStates: { 0: "applied" } })])[0].answer).toContain("paper edit 1: applied");
   });
+
+  it("records the web research an edit ran, like a searched answer", () => {
+    const edit = { path: "method.tex", original: "Old text.", revised: "Old text. Paper A reaches 81.2 AP.", evidence: ["W1"] };
+    const answer = turnsOf([q("Add recent results"), a("Proposed changes.", { edits: [edit], searches: ["ochuman 2026"], sources: [{ url: "https://example.org/a", title: "Paper A" }] })])[0].answer;
+    expect(answer.startsWith('[tool call] web search: "ochuman 2026"\nProposed changes.')).toBe(true);
+    expect(answer).toContain("REVISED:\nOld text. Paper A reaches 81.2 AP.");
+    expect(answer.endsWith("[web sources]\n- Paper A (https://example.org/a)")).toBe(true);
+  });
 });
 
 describe("capText", () => {

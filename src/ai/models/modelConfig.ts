@@ -37,6 +37,8 @@ export const MAX_OUTPUT_TOKENS = {
   // One self-contained request as plain text.
   refine: 8192,
   select: 4096,
+  // Findings for an edit, one line each, with their sources.
+  research: 8192,
   // Paper Chat answers; editing has its own task and tool call.
   answer: 16384,
   edit: 24576,
@@ -66,6 +68,8 @@ export const CHAT_MODELS: Record<ChatTask, { primary: ModelChoice; fallback: Mod
   reply: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
   refine: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
   select: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
+  // Searches the web before an edit, only when section selection asks for it.
+  research: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
   answer: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
   edit: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
   // Runs in the background once ten turns are not in the session summary, or they run long.

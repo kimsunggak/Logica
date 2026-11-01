@@ -27,8 +27,17 @@ export const CHAT_TOOLS: ToolDefinition[] = [
   CLARIFY_TOOL,
 ];
 
-/** @param sectionKeys the paper map's keys; "all" is always allowed, and is the only key without sections. */
-export function sectionTools(mode: ExecutionMode, sectionKeys: string[]): ToolDefinition[] {
+/** Whether the edit needs web research first, offered to Edit section selection when web search is on. */
+const webResearch = object({
+  needed: { type: "boolean", description: "Whether the change needs information from outside the paper, found on the web, before it is written." },
+  questions: { type: "array", items: { type: "string" }, description: "Up to three specific things to find out on the web, as questions rather than search keywords. [] when not needed." },
+});
+
+/**
+ * @param sectionKeys the paper map's keys; "all" is always allowed, and is the only key without sections.
+ * @param research Edit only: also decide whether the edit needs web research.
+ */
+export function sectionTools(mode: ExecutionMode, sectionKeys: string[], research = false): ToolDefinition[] {
   const allowed = [...new Set([ALL_SECTIONS, ...sectionKeys])];
   return [mode === "edit" ? {
     name: SELECT_EDIT_SECTIONS,
@@ -37,6 +46,7 @@ export function sectionTools(mode: ExecutionMode, sectionKeys: string[]): ToolDe
       reason,
       edit_sections: keys(allowed, 'Sections to modify, including any affected subsections. Must not be empty. ["all"] means the whole paper.'),
       reference_sections: keys(allowed, 'Additional sections needed word for word for terminology, facts or consistency. [] if unnecessary; ["all"] for all.'),
+      ...(research ? { web_research: webResearch } : {}),
     }),
   } : {
     name: SELECT_CHAT_SECTIONS,
@@ -45,19 +55,32 @@ export function sectionTools(mode: ExecutionMode, sectionKeys: string[]): ToolDe
   }, CLARIFY_TOOL];
 }
 
-export const EDIT_TOOLS: ToolDefinition[] = [{
-  name: APPLY_PAPER_EDITS,
-  description: "Propose exact replacements in the editable paper sources. The app shows a diff and executes these replacements when the author applies them. One call contains every change, including changes in multiple files.",
-  parameters: object({
-    summary: { type: "string", description: "Briefly explain the proposed changes in the user's language. They are awaiting application." },
-    edits: {
-      type: "array",
-      minItems: 1,
-      items: object({
-        path: { type: "string", description: "Exact project-relative path from an editable source block." },
-        original: { type: "string", description: "Exact, unique text copied from that editable source; include enough context to locate it." },
-        revised: { type: "string", description: "The complete replacement for original. An empty string deletes original." },
-      }),
-    },
-  }),
-}, CLARIFY_TOOL];
+/** @param evidenceIds the web evidence the edit may use; each edit then names the ids it relies on. */
+function applyPaperEdits(evidenceIds: string[]): ToolDefinition {
+  return {
+    name: APPLY_PAPER_EDITS,
+    description: "Propose exact replacements in the editable paper sources. The app shows a diff and executes these replacements when the author applies them. One call contains every change, including changes in multiple files.",
+    parameters: object({
+      summary: { type: "string", description: "Briefly explain the proposed changes in the user's language. They are awaiting application." },
+      edits: {
+        type: "array",
+        minItems: 1,
+        items: object({
+          path: { type: "string", description: "Exact project-relative path from an editable source block." },
+          original: { type: "string", description: "Exact, unique text copied from that editable source; include enough context to locate it." },
+          revised: { type: "string", description: "The complete replacement for original. An empty string deletes original." },
+          ...(evidenceIds.length
+            ? { evidence: { type: "array", items: { type: "string", enum: evidenceIds }, description: "Ids of the web_evidence findings this edit relies on; [] when it uses none." } }
+            : {}),
+        }),
+      },
+    }),
+  };
+}
+
+export const EDIT_TOOLS: ToolDefinition[] = [applyPaperEdits([]), CLARIFY_TOOL];
+
+/** The Edit tools; with web evidence, each edit names the findings it relies on. */
+export function editTools(evidenceIds: string[] = []): ToolDefinition[] {
+  return evidenceIds.length ? [applyPaperEdits(evidenceIds), CLARIFY_TOOL] : EDIT_TOOLS;
+}

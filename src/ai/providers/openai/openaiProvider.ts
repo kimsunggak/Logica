@@ -23,6 +23,7 @@ import type {
   FinishReason,
   ModelConfig,
   StreamHandlers,
+  TextCitation,
 } from "../../types";
 import { toToolCalls, type StreamedCall } from "../toolCalls";
 import { SourceList, withSearchHint } from "../webSearch";
@@ -138,11 +139,19 @@ export class OpenAIProvider implements AIProvider {
     const searches = new Set<string>();
     const queries: string[] = [];
     const sources = new SourceList();
+    // Where each text part (output item and content index) starts in `text`; citation indexes count from there.
+    const partStart = new Map<string, number>();
+    const partKey = (itemId: unknown, contentIndex: unknown) => `${itemId ?? ""}:${typeof contentIndex === "number" ? contentIndex : 0}`;
+    const spans: TextCitation[] = [];
+    const spanKeys = new Set<string>();
     const startSearch = (key: string) => {
       if (searches.has(key)) return;
       searches.add(key);
       // A note written before the search ("let me look that up") is not the answer.
       text = "";
+      partStart.clear();
+      spans.length = 0;
+      spanKeys.clear();
       handlers?.onSearch?.();
     };
     const searchDone = (key: string, item: any) => {
@@ -153,9 +162,19 @@ export class OpenAIProvider implements AIProvider {
         handlers?.onSearch?.(query);
       }
     };
-    const readCitations = (annotations: unknown) => {
+    const readCitations = (annotations: unknown, part: string) => {
       if (!Array.isArray(annotations)) return;
-      for (const a of annotations) if (a?.type === "url_citation") sources.add(a.url, a.title);
+      for (const a of annotations) {
+        if (a?.type !== "url_citation") continue;
+        sources.add(a.url, a.title);
+        const base = partStart.get(part);
+        if (base === undefined || typeof a.url !== "string" || typeof a.start_index !== "number" || typeof a.end_index !== "number") continue;
+        const span = { start: base + a.start_index, end: base + a.end_index, url: a.url, ...(typeof a.title === "string" && a.title ? { title: a.title } : {}) };
+        const key = `${span.start}:${span.end}:${span.url}`;
+        if (spanKeys.has(key)) continue;
+        spanKeys.add(key);
+        spans.push(span);
+      }
     };
     const readItem = (json: any, item: any) => {
       if (item?.type === "web_search_call") {
@@ -169,7 +188,7 @@ export class OpenAIProvider implements AIProvider {
         return;
       }
       if (item?.type === "message" && Array.isArray(item.content)) {
-        for (const part of item.content) readCitations(part?.annotations);
+        item.content.forEach((part: any, i: number) => readCitations(part?.annotations, partKey(item.id ?? json.item_id, i)));
         return;
       }
       if (item?.type !== "function_call") return;
@@ -192,6 +211,8 @@ export class OpenAIProvider implements AIProvider {
         case "response.output_text.delta":
         case "response.refusal.delta":
           if (typeof json.delta === "string") {
+            const part = partKey(json.item_id, json.content_index);
+            if (!partStart.has(part)) partStart.set(part, text.length);
             text += json.delta;
             handlers?.onDelta?.(json.delta, text);
           }
@@ -206,7 +227,7 @@ export class OpenAIProvider implements AIProvider {
           if (json.item_id !== undefined) startSearch(String(json.item_id));
           break;
         case "response.output_text.annotation.added":
-          readCitations([json.annotation]);
+          readCitations([json.annotation], partKey(json.item_id, json.content_index));
           break;
         case "response.function_call_arguments.delta":
           if (typeof json.delta === "string") callOf(keyOf(json)).args += json.delta;
@@ -270,6 +291,7 @@ export class OpenAIProvider implements AIProvider {
       usage,
       ...(sources.size ? { sources: sources.list() } : {}),
       ...(queries.length ? { searchQueries: queries } : {}),
+      ...(spans.length ? { citations: spans } : {}),
     };
   }
 
