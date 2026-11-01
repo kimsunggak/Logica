@@ -274,20 +274,18 @@ impl<'a> TransportTrace<'a> {
             started: Instant::now(),
             stats: Mutex::new(StreamStats::default()),
         };
-        trace.emit(
-            "span_start",
-            "running",
-            serde_json::json!({
-                "input": {
-                    "provider": request.provider,
-                    "endpoint": endpoint(&request.provider, "POST", &request.path).unwrap_or_default(),
-                    "auth": request.auth.as_deref().unwrap_or("api_key"),
-                    "model": request.body.get("model"),
-                    "body_bytes": request.body.to_string().len(),
-                    "web_search": web_search,
-                }
-            }),
-        );
+        let mut input = serde_json::json!({
+            "provider": request.provider,
+            "endpoint": endpoint(&request.provider, "POST", &request.path).unwrap_or_default(),
+            "auth": request.auth.as_deref().unwrap_or("api_key"),
+            "model": request.body.get("model"),
+            "body_bytes": request.body.to_string().len(),
+        });
+        // Only requests that offer the search tool carry the flag.
+        if web_search {
+            input["web_search"] = serde_json::json!(true);
+        }
+        trace.emit("span_start", "running", serde_json::json!({ "input": input }));
         trace
     }
 
@@ -593,6 +591,15 @@ mod tests {
         assert_eq!(trace.span_id, "rust-r");
         trace.observe(&StreamEvent::Chunk { data: "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"web_search_call\",\"id\":\"ws\"}}\n\n".into() });
         trace.finish(&Ok(()));
+
+        // No web search field anywhere: not in the input, the events or the output.
+        #[cfg(debug_assertions)]
+        {
+            let (history, _) = hub.subscribe();
+            let rust: Vec<&String> = history.iter().filter(|line| line.contains("\"rust-r\"")).collect();
+            assert!(rust.iter().any(|line| line.contains("span_start")) && rust.iter().any(|line| line.contains("span_end")));
+            assert!(rust.iter().all(|line| !line.contains("web_search")));
+        }
     }
 
     #[test]
