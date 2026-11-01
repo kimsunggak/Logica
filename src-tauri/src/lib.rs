@@ -13,7 +13,8 @@
 //! * `chats`, `papers`: chat history and the paper summary, in the app's local
 //!   data folder.
 //! * `debug_trace`: runtime trace events and the localhost visual debugger
-//!   (debug builds only).
+//!   (debug builds only); `web_search_trace` reads web searches from the raw
+//!   provider stream for it.
 
 use tauri::Manager;
 
@@ -27,6 +28,7 @@ mod debug_trace;
 mod error;
 mod papers;
 mod project;
+mod web_search_trace;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

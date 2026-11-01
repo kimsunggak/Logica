@@ -9,7 +9,7 @@
 :root {
   --bg: #f4f6f9; --panel: #ffffff; --ink: #18202e; --ink-2: #5a6578; --line: #d8dee8; --soft: #eef1f6;
   --run: #1f6feb; --run-soft: #e3edff; --ok: #1a7f4b; --ok-soft: #e1f4ea; --err: #c4302b; --err-soft: #fde7e6;
-  --wait: #9aa4b5; --llm: #8250df; --llm-soft: #f1eafe;
+  --wait: #9aa4b5; --llm: #8250df; --llm-soft: #f1eafe; --web: #b25e00; --web-soft: #fff0dc;
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "D2Coding", monospace;
   --sans: system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   color-scheme: light;
@@ -18,7 +18,7 @@
   :root {
     --bg: #0e1218; --panel: #151b24; --ink: #e5e9f0; --ink-2: #9aa5b8; --line: #2a3342; --soft: #1c2430;
     --run: #5b9dff; --run-soft: #17284a; --ok: #49c483; --ok-soft: #14301f; --err: #ff7b72; --err-soft: #3a1918;
-    --wait: #5e6a7d; --llm: #b48cff; --llm-soft: #271d3d;
+    --wait: #5e6a7d; --llm: #b48cff; --llm-soft: #271d3d; --web: #f3a64c; --web-soft: #3a2710;
     color-scheme: dark;
   }
 }
@@ -133,6 +133,20 @@ svg text { font-family: var(--sans); fill: var(--ink); }
 @media (prefers-reduced-motion: reduce) { .node.running rect, .edge.active { animation: none; } }
 .elabel { font: 10.5px var(--mono); fill: var(--ink-2); }
 .ah { fill: var(--wait); } .ah.done { fill: var(--ok); } .ah.active { fill: var(--run); }
+/* Web Search: the provider's own tool, run on its servers during a Paper Chat Module call. */
+.node.web rect { stroke: var(--web); stroke-dasharray: 6 4; }
+.node.web.running rect, .node.web.completed rect { stroke: var(--web); stroke-width: 2; fill: var(--web-soft); }
+.node.web.running rect { stroke-width: 2.5; }
+.node.web.skipped rect { stroke: var(--wait); stroke-dasharray: 2 4; }
+.node.web.inactive rect { stroke: var(--wait); }
+.node.web.sel rect { stroke-width: 3.5; }
+.node.web .route, .node.web .fn.completed { fill: var(--web); }
+.edge.web { stroke: var(--web); stroke-dasharray: 5 4; }
+.edge.web.done { stroke-dasharray: none; }
+.edge.web.active { stroke: var(--web); stroke-dasharray: 6 5; }
+.ah.web { fill: var(--web); }
+.webtag rect { fill: var(--web); }
+.webtag text { font: 700 10px var(--mono); fill: var(--panel); }
 .flow-frame { fill: var(--panel); stroke: var(--line); stroke-width: 1; rx: 16; }
 .flow-heading { fill: var(--ink-2); font: 600 15px var(--sans); }
 .flow-node .flow-shape { fill: var(--panel); stroke: var(--line); stroke-width: 1.8; }
@@ -249,6 +263,7 @@ pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid va
       <span><i style="border-color:var(--wait);border-style:dotted;opacity:.5"></i>skipped (이 갈래에서 건너뜀)</span>
       <span><i style="border-color:var(--wait);border-style:dashed;background:var(--soft);opacity:.55"></i>inactive (이번 턴 요약 실행 없음)</span>
       <span><i style="border-color:var(--llm)"></i>LLM 호출 (Gateway + Rust)</span>
+      <span><i style="border-color:var(--web);border-style:dashed;background:var(--web-soft)"></i>웹 검색 (API 서버 내부 도구 · Paper Chat 호출 중 실행)</span>
       <span><i style="border-color:var(--ink-2);background:var(--soft);border-radius:999px"></i>디버깅 모듈 (결과 기록만 함)</span>
     </div>
     <div class="legend" id="flowchartLegend" hidden>
@@ -332,6 +347,7 @@ const MODULES = {
   answer:       { title: "Paper Chat Module" },
   final:        { title: "💬 Final Answer", debug: true },
   llm:          { title: "LLM Gateway" },
+  web:          { title: "Web Search" },
   summary:      { title: "Session Summary Module" },
   sections:     { title: "Paper Summary Module" },
 };
@@ -468,6 +484,7 @@ function sectionsIdle(t) {
 
 function moduleStatus(t, module) {
   if (module === "llm") return llmStatus(t);
+  if (module === "web") return webStatus(t);
   const list = spansOf(t, module);
   if (module === "summary" && !list.length && !isSummary(t)) return summaryIdle(t).status;
   if (module === "sections" && !mainSpan(t, "sections")) return sectionsIdle(t).status;
@@ -479,9 +496,116 @@ function moduleStatus(t, module) {
   return "completed";
 }
 function moduleDuration(t, module) {
+  // Web Search: the time its searches took.
+  if (module === "web") return webSearchOf(t).searches.reduce((n, s) => n + (s.duration_ms || 0), 0) || null;
   const main = spansOf(t, module).filter((s) => module === "llm" ? s.fn === "aiService.generate" : s.fn === MAIN_FN[module]);
   if (!main.length) return null;
   return main.reduce((n, s) => n + (s.duration != null ? s.duration : (s.end || Date.now()) - s.start), 0);
+}
+
+// ------------------------------------------------------------ web search
+
+/**
+ * Web search runs on the provider's servers inside the Paper Chat Module's
+ * model calls. The Rust transport reads each call's raw stream: whether the
+ * request offered the tool (input.web_search), each search as it happens
+ * (span_data "web_search"), a paused Claude turn ("pause_turn"), and when the
+ * stream ends every search and cited source (output.web_search).
+ */
+function answerCalls(t) {
+  return t ? spansOf(t, "llm").filter((s) => s.source !== "rust" && s.fn === "aiService.generate" && s.input && s.input.task === "answer") : [];
+}
+/** The provider streams of these model calls, as the Rust transport saw them. */
+function streamsOf(t, calls) {
+  const ids = new Set(calls.map((s) => s.id));
+  return spansOf(t, "llm").filter((s) => s.source === "rust" && ids.has(s.parent));
+}
+/** Searches, cited sources and paused turns of some provider streams. */
+function searchesIn(streams) {
+  const searches = [], citations = new Map();
+  let pauses = 0;
+  for (const s of streams) {
+    const live = new Map();
+    for (const d of s.data) {
+      if (d.label === "web_search" && d.value) live.set(d.value.n, { ...live.get(d.value.n), ...d.value });
+      if (d.label === "pause_turn") pauses++;
+    }
+    // The full list at the end of the stream; the live updates until then.
+    const out = s.output && s.output.web_search;
+    searches.push(...(out && Array.isArray(out.searches) ? out.searches : [...live.values()]));
+    for (const c of (out && out.citations) || []) if (c && c.url && !citations.has(c.url)) citations.set(c.url, c);
+  }
+  return { searches, citations: [...citations.values()], pauses };
+}
+function webSearchOf(t) {
+  const calls = answerCalls(t);
+  const streams = t ? streamsOf(t, calls) : [];
+  return {
+    calls, streams, ...searchesIn(streams),
+    // What the request body offered; a webview flag counts too if the pipeline reports one.
+    enabled: streams.some((s) => s.input && s.input.web_search) || calls.some((s) => s.input && s.input.web_search),
+    running: calls.some((s) => s.status === "running"),
+  };
+}
+function webStatus(t) {
+  if (!t) return "waiting";
+  if (moduleStatus(t, "answer") === "skipped") return "skipped";
+  const w = webSearchOf(t);
+  if (!w.calls.length) return "waiting";
+  if (!w.enabled) return w.running && !w.streams.length ? "waiting" : "inactive";
+  return w.running ? "running" : "completed";
+}
+/** Monospace at 11px: about 6.7px a character, 11px for Hangul and symbols. */
+const textWidth = (s) => [...s].reduce((n, c) => n + (c.codePointAt(0) >= 0x1100 ? 11 : 6.7), 0);
+function fit(text, px) {
+  if (textWidth(text) <= px) return text;
+  let out = "";
+  for (const c of text) { if (textWidth(out + c + "…") > px) break; out += c; }
+  return out + "…";
+}
+function webLines(t) {
+  if (!t) return [{ status: "wait", text: "Paper Chat 호출 중 API 서버가 실행" }, { status: "wait", text: "검색 토글이 켜진 요청에만 도구 포함" }];
+  const status = webStatus(t);
+  if (status === "skipped" || status === "waiting") return [];
+  if (status === "inactive") return [{ status: "wait", text: "이번 턴: 웹 검색 꺼짐" }, { status: "wait", text: "요청에 웹 검색 도구가 없음" }];
+  const w = webSearchOf(t);
+  const n = w.searches.length;
+  const head = n
+    ? `검색 ${n}회${w.running ? "" : ` · 인용 ${w.citations.length}개`}${w.pauses ? ` · 이어받기 ${w.pauses}회` : ""}`
+    : w.running ? "검색 허용 · 모델이 판단 중" : "검색 허용 · 검색하지 않음 (모델 판단)";
+  const CIRCLED = "①②③④⑤⑥⑦⑧⑨";
+  return [{ status: "route", text: head }, ...w.searches.map((s, i) => {
+    const tail = s.status === "error" ? `  오류 ${s.error || ""}` : s.status === "done" ? (s.results != null ? `  결과 ${s.results}` : "") : "  …";
+    const query = s.query ? `"${s.query}"` : "검색어 받는 중";
+    return { status: s.status === "error" ? "error" : s.status === "done" ? "completed" : "running", text: `${CIRCLED[i] || "•"} ${fit(query, 236 - textWidth(tail))}${tail}` };
+  })];
+}
+/** How many searches a model call ran, for the LLM Gateway bar. */
+function webTail(t, call) {
+  const streams = streamsOf(t, [call]);
+  const enabled = streams.some((s) => s.input && s.input.web_search) || Boolean(call.input && call.input.web_search);
+  return enabled ? `  · 검색 ${searchesIn(streams).searches.length}회` : "";
+}
+/** Web Search and the Paper Chat Module: the request offers the tool; results and sources come back. */
+function webEdgeSvg(t) {
+  const status = t ? webStatus(t) : "waiting";
+  const c = status === "running" ? "web active"
+    : status === "completed" ? (webSearchOf(t).searches.length ? "web done" : "web")
+    : status === "skipped" || status === "inactive" ? "skip" : "";
+  const marker = c.startsWith("web") ? "web" : "wait";
+  return `<path class="edge ${c}" d="M64 614 V758" marker-start="url(#ah-${marker})" marker-end="url(#ah-${marker})"></path>`
+    + '<text class="elabel" x="74" y="680">↑ 검색 허용</text><text class="elabel" x="74" y="696">↓ 결과 · 출처</text>';
+}
+/** "WEB ON" on the Paper Chat Module when its request offered web search. */
+function webTagSvg(t, right, top) {
+  if (!t || !webSearchOf(t).enabled) return "";
+  return `<g class="webtag"><rect x="${right - 84}" y="${top - 9}" width="70" height="18" rx="9"></rect><text x="${right - 49}" y="${top + 4}" text-anchor="middle">WEB ON</text></g>`;
+}
+function webIdle(status) {
+  if (status === "skipped") return "이번 턴은 Chat 경로가 아니어서 Paper Chat Module을 호출하지 않았습니다.";
+  if (status === "waiting") return "Paper Chat Module 호출을 기다리는 중입니다.";
+  if (status === "inactive") return "요청에 웹 검색 도구가 없었습니다 (검색 토글 꺼짐).";
+  return "아직 provider 응답이 없습니다.";
 }
 
 // ------------------------------------------------------------ render
@@ -528,12 +652,13 @@ function keyList(keys, max = 4) {
 function nodeLines(t, module) {
   const fns = t ? spansOf(t, module) : [];
   const time = (s) => s.duration != null ? "  " + fmtMs(s.duration) : s.status === "running" ? "  …" : "";
+  if (module === "web") return webLines(t);
   if (module === "llm") {
     return fns.filter((s) => s.source !== "rust" && (s.fn === "aiService.generate" || s.fn === "fallback")).map((s) => ({
       status: s.status,
       text: s.fn === "fallback"
         ? `↪ fallback → ${s.output && s.output.model ? s.output.model : "skipped"}`
-        : `${(s.input && s.input.task) || ""}  ${(s.input && s.input.model) || ""}${time(s)}`,
+        : `${(s.input && s.input.task) || ""}  ${(s.input && s.input.model) || ""}${time(s)}${webTail(t, s)}`,
     }));
   }
   if (module === "summary" && !fns.length && t && !isSummary(t)) return summaryIdle(t).lines.map((text) => ({ status: "wait", text }));
@@ -635,7 +760,7 @@ function nodeSvg(t, module, x, y, w, h) {
   const empty = status === "waiting" ? "아직 실행 안 됨" : status === "skipped" ? "이 갈래에서는 건너뜀" : "";
   const debug = Boolean(MODULES[module].debug);
   const tag = debug ? `<g class="tag"><rect x="${x + w - 92}" y="${y - 8}" width="78" height="16" rx="8"></rect><text x="${x + w - 53}" y="${y + 3.5}" text-anchor="middle">디버깅 모듈</text></g>` : "";
-  return `<g class="node ${status} ${module === "llm" ? "llm" : ""} ${debug ? "debug" : ""} ${selModule === module ? "sel" : ""}" data-module="${module}" tabindex="0" role="button" aria-label="${esc(MODULES[module].title)} ${status}${debug ? " (디버깅 모듈)" : ""}">
+  return `<g class="node ${status} ${module === "llm" ? "llm" : ""} ${module === "web" ? "web" : ""} ${debug ? "debug" : ""} ${selModule === module ? "sel" : ""}" data-module="${module}" tabindex="0" role="button" aria-label="${esc(MODULES[module].title)} ${status}${debug ? " (디버깅 모듈)" : ""}">
     <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${debug ? 24 : 10}"></rect>${tag}
     <text class="title" x="${x + 12}" y="${y + 22}">${esc(MODULES[module].title)}</text>
     <text class="meta" x="${summaryHeader ? x + 12 : x + w - 12}" y="${y + 22 + headerExtra}" text-anchor="${summaryHeader ? "start" : "end"}">${statusText(status, dur)}</text>
@@ -653,7 +778,7 @@ function edgeClass(t, from, to) {
 }
 
 /** Arrowheads for the three edge states; a skipped edge fades with its path. */
-const MARKERS = `<defs>${["", "done", "active"].map((c) =>
+const MARKERS = `<defs>${["", "done", "active", "web"].map((c) =>
   `<marker id="ah-${c || "wait"}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah ${c}" d="M0,0 L10,5 L0,10 z"></path></marker>`).join("")}</defs>`;
 const edgeSvg = (c, d, label, lx, ly, background = false, anchor = "start") =>
   `<path class="edge ${c}${background ? " background" : ""}" d="${d}" marker-end="url(#ah-${c === "done" || c === "active" ? c : "wait"})"></path>` +
@@ -673,7 +798,7 @@ function gatewaySvg(t, x, y, w) {
   const rows = [[]];
   let used = 0;
   for (const it of items) {
-    const width = it.text.length * 6.7 + 18;
+    const width = textWidth(it.text) + 18;
     if (used + width > w - 24 && rows.at(-1).length) { rows.push([]); used = 0; }
     rows.at(-1).push({ ...it, x: x + 12 + used });
     used += width;
@@ -711,6 +836,8 @@ function renderGraph(t) {
     user: [360, 10, 84], refine: [360, 160, 128], orchestrator: [360, 350, 136],
     selection: [360, 550, 150], answer: [20, 760, 154], edit: [700, 760, 154],
     final: [360, 1000, 90], summary: [700, 990, 132], sections: [20, 10, 146],
+    // Above the Paper Chat Module, in the free column left of the selection edges.
+    web: [20, 452, 160],
   };
   const r = routeOf(t);
   const cls = (from, to) => {
@@ -739,11 +866,13 @@ function renderGraph(t) {
     edgeSvg(cls("selection", "final"), "M360 625 H328 V968 H390 V998", "대상 모호", 310, 746, false, "end"),
     edgeSvg(writeClass, "M160 156 V178", "저장", 174, 171),
     edgeSvg(readClass, "M160 260 V418 H358", "논문 섹션 요약", 170, 342),
-    edgeSvg(readClass, "M300 220 H326 V625 H358", "선택용 지도", 318, 535, false, "end"),
+    // Right of its line: the Web Search node covers the space to the left.
+    edgeSvg(readClass, "M300 220 H326 V625 H358", "선택용 지도", 334, 535),
     edgeSvg("", "M700 224 H642", "대화", 670, 213, true, "middle"),
     edgeSvg(t && spansOf(t, "summary").length ? edgeClass(t, "final", "summary") : t ? "skip" : "", "M640 1045 H698", "조건부 요약", 670, 1033, true, "middle"),
     edgeSvg(updated ? "done" : t ? "skip" : "", "M360 1075 H8 V82 H18", "적용 후 · 변경 섹션 요약", 165, 1110, true, "middle"),
     edgeSvg(t && spansOf(t, "summary").length ? "done" : t ? "skip" : "", "M980 1080 H994 V224 H982", "", 0, 0, true),
+    webEdgeSvg(t),
   ];
   const bar = gatewaySvg(t, 20, 1150, 960);
   graphSize(1000, 1150 + bar.h + 12);
@@ -751,7 +880,8 @@ function renderGraph(t) {
     MARKERS, ...edges,
     flowBox("architecture-paper-summary", "document", 160, 220, W, 80, ["paper-summary.yaml", "논문 요약 저장 · 재사용"], "", "paperSummary"),
     flowBox("architecture-session-history", "document", 840, 224, W, 80, ["Session History", "세션 요약 + 최근 대화"], "", "sessionSummary"),
-    ...[...CHAIN, "summary", "sections"].map((m) => nodeSvg(t, m, at[m][0], at[m][1], W, at[m][2])),
+    ...[...CHAIN, "summary", "sections", "web"].map((m) => nodeSvg(t, m, at[m][0], at[m][1], W, at[m][2])),
+    webTagSvg(t, at.answer[0] + W, at.answer[1]),
     '<text class="elabel" x="840" y="932" text-anchor="middle">apply_paper_edits: 적용 버튼으로 실행</text>',
     '<text class="elabel" x="500" y="1134" text-anchor="middle">Paper Orchestra: UI 고정 경로 / Auto만 intent LLM 호출</text>',
     bar.svg,
@@ -914,16 +1044,20 @@ function renderInspector(t) {
   shown.clear();
   if (!t) { box.innerHTML = '<div class="empty">노드를 누르면 입력, 중간값, 출력을 봅니다.</div>'; return; }
   const status = moduleStatus(t, selModule);
-  const list = spansOf(t, selModule);
+  // Web Search has no spans of its own: it shows the Paper Chat Module's provider streams.
+  const web = selModule === "web" ? webSearchOf(t) : null;
+  const list = web ? web.streams : spansOf(t, selModule);
   const head = `<div class="insp-head"><h2>${esc(MODULES[selModule].title)}</h2><span class="badge ${status}">${status}</span>
     <span class="dim">${list.length}개 함수 호출</span></div>`;
   if (!list.length) {
     const why = selModule === "summary" && !isSummary(t) ? summaryIdle(t).lines.join(", ")
-      : selModule === "sections" ? sectionsIdle(t).lines.join(", ") : "이 단계는 아직 실행되지 않았습니다.";
+      : selModule === "sections" ? sectionsIdle(t).lines.join(", ") : web ? webIdle(status) : "이 단계는 아직 실행되지 않았습니다.";
     box.innerHTML = head + `<div class="empty">${esc(why)}</div>`;
     return;
   }
-  box.innerHTML = head + list.map((s) => {
+  const summary = web ? `<div class="blk"><div class="lbl">검색과 인용 출처 (Paper Chat 호출 전체)</div>${valueHtml("web:summary",
+    { enabled: web.enabled, searches: web.searches, citations: web.citations, paused_turns: web.pauses }, "Web Search: summary")}</div>` : "";
+  box.innerHTML = head + summary + list.map((s) => {
     const callees = s.children.map((c) => t.spans.get(c)).filter(Boolean).map((c) => c.fn);
     const main = s.fn === MAIN_FN[selModule];
     const r = routeOf(t);
