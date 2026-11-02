@@ -27,8 +27,9 @@ pub fn offers_web_search(body: &Value) -> bool {
     })
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 enum Status {
+    #[default]
     Searching,
     Done,
     Error,
@@ -44,8 +45,16 @@ impl Status {
     }
 }
 
+/// One `web_search` call. Besides searching, an OpenAI call may open a page
+/// (`open_page`) or look for text in one (`find_in_page`).
+#[derive(Default)]
 struct Search {
-    query: Option<String>,
+    /// `search`, `open_page` or `find_in_page`; unknown until the call says.
+    action: Option<String>,
+    queries: Vec<String>,
+    /// The page an `open_page` / `find_in_page` call read, and the text it looked for.
+    url: Option<String>,
+    pattern: Option<String>,
     status: Status,
     results: Option<usize>,
     error: Option<String>,
@@ -133,8 +142,9 @@ impl WebSearchLog {
         match block["type"].as_str() {
             Some("server_tool_use") if block["name"] == "web_search" => {
                 let (i, _) = self.search(block["id"].as_str(), ms);
+                self.searches[i].action = Some("search".into());
                 if let Some(query) = block["input"]["query"].as_str() {
-                    self.searches[i].query = Some(clip(query));
+                    self.searches[i].queries = vec![clip(query)];
                 }
                 if let Some(index) = event["index"].as_u64() {
                     self.inputs.insert(index, (i, String::new()));
@@ -176,9 +186,11 @@ impl WebSearchLog {
     fn block_stop(&mut self, event: &Value, updates: &mut Vec<Update>) {
         let Some((i, input)) = event["index"].as_u64().and_then(|index| self.inputs.remove(&index)) else { return };
         let query = serde_json::from_str::<Value>(&input).ok().and_then(|v| v["query"].as_str().map(clip));
-        if query.is_some() && self.searches[i].query != query {
-            self.searches[i].query = query;
-            updates.push(self.update(i));
+        if let Some(query) = query {
+            if self.searches[i].queries != [query.as_str()] {
+                self.searches[i].queries = vec![query];
+                updates.push(self.update(i));
+            }
         }
     }
 
@@ -200,13 +212,7 @@ impl WebSearchLog {
             return;
         }
         let (i, new) = self.search(item["id"].as_str(), ms);
-        let mut changed = new;
-        let action = &item["action"];
-        let query = action["query"].as_str().or_else(|| action["queries"][0].as_str()).map(clip);
-        if query.is_some() && self.searches[i].query != query {
-            self.searches[i].query = query;
-            changed = true;
-        }
+        let mut changed = self.read_action(i, &item["action"]) || new;
         changed |= match item["status"].as_str() {
             Some("failed") => self.end(i, Status::Error, None, Some("failed".into()), ms),
             Some("completed") => self.end(i, Status::Done, None, None, ms),
@@ -216,6 +222,39 @@ impl WebSearchLog {
         if changed {
             updates.push(self.update(i));
         }
+    }
+
+    /// What an OpenAI call did: every query of a search (as the webview reads
+    /// them), or the page it opened or searched in. False when nothing is new.
+    fn read_action(&mut self, i: usize, action: &Value) -> bool {
+        let queries: Vec<String> = match &action["queries"] {
+            Value::Array(list) => list.iter().filter_map(Value::as_str).map(str::trim).filter(|q| !q.is_empty()).map(clip).collect(),
+            _ => action["query"].as_str().map(str::trim).filter(|q| !q.is_empty()).map(clip).into_iter().collect(),
+        };
+        let kind = match action["type"].as_str() {
+            // Older API versions name the in-page search `find`.
+            Some("find") => Some("find_in_page".to_string()),
+            Some(kind) => Some(kind.to_string()),
+            None => (!queries.is_empty()).then(|| "search".to_string()),
+        };
+        let search = &mut self.searches[i];
+        let mut changed = false;
+        if kind.is_some() && search.action != kind {
+            search.action = kind;
+            changed = true;
+        }
+        if !queries.is_empty() && search.queries != queries {
+            search.queries = queries;
+            changed = true;
+        }
+        for (field, key) in [(&mut search.url, "url"), (&mut search.pattern, "pattern")] {
+            let value = action[key].as_str().map(clip);
+            if value.is_some() && *field != value {
+                *field = value;
+                changed = true;
+            }
+        }
+        changed
     }
 
     /// The final response repeats every item; fill in anything the stream missed.
@@ -255,7 +294,7 @@ impl WebSearchLog {
         if let Some(&i) = id.and_then(|id| self.by_id.get(id)) {
             return (i, false);
         }
-        self.searches.push(Search { query: None, status: Status::Searching, results: None, error: None, started_ms: ms, ended_ms: None });
+        self.searches.push(Search { started_ms: ms, ..Search::default() });
         let i = self.searches.len() - 1;
         if let Some(id) = id {
             self.by_id.insert(id.to_string(), i);
@@ -283,14 +322,25 @@ impl WebSearchLog {
 
     fn search_json(&self, i: usize) -> Value {
         let search = &self.searches[i];
-        json!({
+        let mut value = json!({
             "n": i + 1,
+            "action": search.action,
             "status": search.status.as_str(),
-            "query": search.query,
+            "query": search.queries.first(),
             "results": search.results,
             "error": search.error,
             "duration_ms": search.ended_ms.map(|end| end.saturating_sub(search.started_ms) as u64),
-        })
+        });
+        if search.queries.len() > 1 {
+            value["queries"] = json!(search.queries);
+        }
+        if let Some(url) = &search.url {
+            value["url"] = json!(url);
+        }
+        if let Some(pattern) = &search.pattern {
+            value["pattern"] = json!(pattern);
+        }
+        value
     }
 }
 
@@ -357,6 +407,7 @@ mod tests {
         assert_eq!(summary["searches"].as_array().unwrap().len(), 1);
         assert_eq!(summary["searches"][0]["n"], 1);
         assert_eq!(summary["searches"][0]["query"], "latent diffusion 2026");
+        assert_eq!(summary["searches"][0]["action"], "search");
         assert_eq!(summary["citations"], json!([{ "url": "https://a.example/1", "title": "A" }]));
         assert_eq!(summary["billed_searches"], 1);
         assert_eq!(summary["stop_reason"], "end_turn");
@@ -425,6 +476,33 @@ mod tests {
         assert_eq!(summary["searches"][0]["query"], "guidance scale ablation");
         assert_eq!(summary["citations"].as_array().unwrap().len(), 2);
         assert_eq!(summary["billed_searches"], Value::Null);
+    }
+
+    #[test]
+    fn tells_openai_page_actions_from_searches_and_keeps_every_query() {
+        let call = |id: &str, action: Value| json!({ "type": "response.output_item.done", "item": { "type": "web_search_call", "id": id, "status": "completed", "action": action } });
+        let stream = sse(&[
+            call("ws_1", json!({ "type": "search", "queries": ["guidance scale ablation", " CFG 2026 ", ""] })),
+            call("ws_2", json!({ "type": "open_page", "url": "https://arxiv.org/abs/2601.00001" })),
+            call("ws_3", json!({ "type": "find", "url": "https://arxiv.org/abs/2601.00001", "pattern": "FID" })),
+            call("ws_4", Value::Null),
+        ]);
+        let mut log = WebSearchLog::default();
+        read(&mut log, &stream);
+        let summary = log.finish(0);
+        let s = &summary["searches"];
+        assert_eq!(s[0]["action"], "search");
+        assert_eq!(s[0]["query"], "guidance scale ablation");
+        assert_eq!(s[0]["queries"], json!(["guidance scale ablation", "CFG 2026"]));
+        assert_eq!(s[1]["action"], "open_page");
+        assert_eq!(s[1]["url"], "https://arxiv.org/abs/2601.00001");
+        assert_eq!(s[1]["query"], Value::Null);
+        assert_eq!(s[2]["action"], "find_in_page");
+        assert_eq!(s[2]["pattern"], "FID");
+        // No action reported: done, but what it did is unknown.
+        assert_eq!(s[3]["action"], Value::Null);
+        assert_eq!(s[3]["status"], "done");
+        assert!(s[3].get("url").is_none() && s[3].get("queries").is_none());
     }
 
     #[test]
