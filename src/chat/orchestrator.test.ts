@@ -352,6 +352,17 @@ describe("Web research before an edit", () => {
     expect(r.log.map((c) => c.task)).toEqual(["refine", "select", "research"]);
   });
 
+  it("researches the same way when Auto routes to Edit", async () => {
+    const r = run("auto", { judge: () => tool("route_edit"), select: research(true), research: found, edit: editWith(["W1"]) }, paper, on);
+    const result = await r.result;
+    expect(r.log.map((c) => c.task)).toEqual(["refine", "judge", "select", "research", "edit"]);
+    expect(r.log.find((c) => c.task === "select")!.request.mayResearch).toBe(true);
+    expect(r.log.find((c) => c.task === "research")!.request).toMatchObject({ webSearch: true, keepTextBeforeSearch: true });
+    expect(r.log.find((c) => c.task === "edit")!.request.webEvidence?.map((e) => e.id)).toEqual(["W1"]);
+    expect(result).toMatchObject({ outcome: "edit", searches: ["ochuman 2026"] });
+    expect(result.edits?.[0].evidence).toEqual(["W1"]);
+  });
+
   it("never offers research to Chat selection", async () => {
     const r = run("chat", {}, paper, on);
     await r.result;
