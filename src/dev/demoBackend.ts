@@ -213,7 +213,19 @@ function metadataField(question: string): "title" | "author" | null {
   return !field ? null : /title|제목/i.test(field) ? "title" : "author";
 }
 
-function simulateSelection(last: string, edit: boolean): DemoReply {
+/** Edit requests that need outside information, for the demo's web research decision. */
+const RESEARCH_REQUEST = /recent|latest|related work|state of the art|cite|citation|source|statistic|최신|최근|관련 연구|인용|근거|출처|통계/i;
+
+/** With web search on, Edit section selection also decides whether to research the web first. */
+function simulateSelection(last: string, edit: boolean, research = false): DemoReply {
+  const reply = selectSections(last, edit);
+  if (!research || !("tool" in reply) || reply.tool.name !== "select_edit_sections") return reply;
+  const question = between(last, "user_message") ?? "";
+  const needed = RESEARCH_REQUEST.test(question);
+  return { tool: { ...reply.tool, args: { ...reply.tool.args, web_research: { needed, questions: needed ? [question.trim()] : [] } } } };
+}
+
+function selectSections(last: string, edit: boolean): DemoReply {
   const question = between(last, "user_message") ?? "";
   if (/^(이거|그거|this|that)\s*\??$/i.test(question)) return demoClarify(question);
   const sections = namedSections(last, question);
@@ -227,7 +239,16 @@ function simulateSelection(last: string, edit: boolean): DemoReply {
   return { tool: { name: "select_chat_sections", args: { reason: "Read the sections named by the question.", sections } } };
 }
 
+/** With web evidence, each changed section gains the first finding, and the edit names it. */
 function simulatePaperEdit(all: string, last: string): DemoReply {
+  const reply = paperEdit(all, last);
+  const finding = /^\[W1\] (.+)$/m.exec(between(last, "web_evidence") ?? "")?.[1];
+  if (!finding || !("tool" in reply) || reply.tool.name !== "apply_paper_edits") return reply;
+  const edits = (reply.tool.args.edits as { path: string; original: string; revised: string }[]).map((e) => ({ ...e, revised: `${e.revised} ${finding}`, evidence: ["W1"] }));
+  return { tool: { ...reply.tool, args: { ...reply.tool.args, edits } } };
+}
+
+function paperEdit(all: string, last: string): DemoReply {
   const question = between(last, "user_message") ?? "";
   const field = metadataField(question);
   const quoted = /["“]([^"”]+)["”]|'([^']+)'/.exec(question);
@@ -336,7 +357,7 @@ function simulateReply(body: Record<string, any>, messages: { content: string }[
   if (tools.includes("write_section_summaries")) return simulateSectionSummaries(last);
   if (tools.includes("route_chat")) return simulateJudge(last);
   if (tools.includes("select_chat_sections")) return simulateSelection(last, false);
-  if (tools.includes("select_edit_sections")) return simulateSelection(last, true);
+  if (tools.includes("select_edit_sections")) return simulateSelection(last, true, JSON.stringify(body.tools).includes('"web_research"'));
   if (tools.includes("apply_paper_edits")) return simulatePaperEdit(all, last);
   if (last.includes("<task>\nReply to the user's message.")) {
     const question = between(last, "user_message") ?? "";
@@ -344,6 +365,7 @@ function simulateReply(body: Record<string, any>, messages: { content: string }[
   }
   const system = String(body.instructions ?? (Array.isArray(body.system) ? body.system.map((b: { text: string }) => b.text).join("\n") : body.system) ?? "");
   if (system.includes("Request Refinement Module")) return { text: simulateRefine(last) };
+  if (system.includes("Web Research Module")) return { text: simulateResearch(last) };
   if (last.includes("You are the Paper Chat Module")) return { text: simulateAnswerModule(all, last) };
   return { text: simulateAnswer(last) };
 }
@@ -365,6 +387,18 @@ const sseEvent = (data: Record<string, unknown>) => `event: ${data.type}\ndata: 
 interface DemoSearch {
   query: string;
   results: { url: string; title: string }[];
+  /** Add a closing note that cites the first result (answers; the research writes its own findings). */
+  note: boolean;
+}
+
+/** Web Research Module: one cited finding per line. */
+function simulateResearch(last: string): string {
+  const question = (between(last, "research_questions") ?? "").split("\n")[0]?.replace(/^\d+\.\s*/, "") ?? "";
+  return [
+    `- (demo) OpenPose (Cao et al., CVPR 2017) estimates multi-person 2D poses with Part Affinity Fields.`,
+    `- (demo) The LaTeX project documentation explains how to cite sources with BibTeX.`,
+    ...(question ? [`NOT FOUND: ${question} (demo: nothing more specific was found)`] : []),
+  ].join("\n");
 }
 
 const DEMO_RESULTS = [
@@ -377,12 +411,14 @@ function demoSearch(body: Record<string, any>, reply: DemoReply, messages: { con
   const offered = Array.isArray(body.tools) && body.tools.some((t: { type?: string }) => typeof t.type === "string" && t.type.startsWith("web_search"));
   if (!offered || !("text" in reply)) return null;
   const last = messages[messages.length - 1]?.content;
-  const question = typeof last === "string" ? between(last, "user_message") ?? "" : "";
-  return { query: question.replace(/\s+/g, " ").trim().slice(0, 60) || "related work", results: DEMO_RESULTS };
+  const text = typeof last === "string" ? last : "";
+  const research = between(text, "research_questions")?.split("\n")[0]?.replace(/^\d+\.\s*/, "");
+  const question = research ?? between(text, "user_message") ?? "";
+  return { query: question.replace(/\s+/g, " ").trim().slice(0, 60) || "related work", results: DEMO_RESULTS, note: research === undefined };
 }
 
 const searchNote = (reply: { text: string }) => (hangul(reply.text) ? "웹에서 찾아보겠습니다." : "Let me look that up on the web.");
-const webNote = (search: DemoSearch) => `\n\nFrom the web (demo): see ${search.results[0].title}.`;
+const webNote = (search: DemoSearch) => (search.note ? `\n\nFrom the web (demo): see ${search.results[0].title}.` : "");
 
 function openAIStream(reply: DemoReply, search: DemoSearch | null = null): string[] {
   const events = [sseEvent({ type: "response.created" })];
@@ -400,7 +436,7 @@ function openAIStream(reply: DemoReply, search: DemoSearch | null = null): strin
     );
     const text = reply.text + webNote(search);
     for (const delta of chunks(text)) events.push(sseEvent({ type: "response.output_text.delta", delta }));
-    const annotations = search.results.map((r) => ({ type: "url_citation", url: r.url, title: r.title, start_index: reply.text.length, end_index: text.length }));
+    const annotations = search.results.map((r) => ({ type: "url_citation", url: r.url, title: r.title, start_index: 0, end_index: text.length }));
     for (const annotation of annotations) events.push(sseEvent({ type: "response.output_text.annotation.added", output_index: 2, annotation }));
     events.push(sseEvent({
       type: "response.completed",

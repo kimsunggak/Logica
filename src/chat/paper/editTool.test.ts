@@ -22,6 +22,12 @@ describe("editing tool arguments", () => {
     expect(() => readEditProposal(response([{ ...edit, original: "An invented original." }]), sources)).toThrow();
     expect(() => readEditProposal(response([{ ...edit, path: "other.tex" }]), sources)).toThrow();
   });
+  it("keeps the web evidence ids each edit names, and only the ones it was given", () => {
+    const proposal = readEditProposal(response([{ ...edit, evidence: ["W2", "W9", "W2", 3] }]), sources, undefined, ["W1", "W2"]);
+    expect(proposal.edits[0].evidence).toEqual(["W2"]);
+    expect(readEditProposal(response([{ ...edit, evidence: [] }]), sources, undefined, ["W1"]).edits[0]).not.toHaveProperty("evidence");
+    expect(readEditProposal(response([{ ...edit, evidence: ["W1"] }]), sources).edits[0]).not.toHaveProperty("evidence");
+  });
   it("supports insertion anchors and deletion", () => {
     expect(readEditProposal(response([{ ...edit, revised: "" }]), sources).edits[0].revised).toBe("");
     expect(readEditProposal(response([{ ...edit, revised: edit.original + " Added sentence." }]), sources).edits[0].revised).toContain("Added sentence.");

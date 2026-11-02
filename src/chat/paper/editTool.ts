@@ -73,8 +73,11 @@ export function editableSources(paper: Paper, selected: string[]): SourceRange[]
   return (paper.units ?? []).filter((u) => keys.has(u.key)).flatMap((u) => u.sources);
 }
 
-/** `texts`: the files the sources were cut from, to place each edit in its file. */
-export function readEditProposal(response: AIResponse, sources: SourceRange[], texts?: ReadonlyMap<string, string>): EditProposal {
+/**
+ * `texts`: the files the sources were cut from, to place each edit in its file.
+ * `evidenceIds`: the web evidence the edit was given; each edit keeps the known ids it names.
+ */
+export function readEditProposal(response: AIResponse, sources: SourceRange[], texts?: ReadonlyMap<string, string>, evidenceIds: readonly string[] = []): EditProposal {
   const call = response.toolCalls?.[0];
   const invalid = () => new AIError("malformed_response", t("chat.invalidEdits"));
   if (response.finishReason !== "stop" || response.toolCalls?.length !== 1 || call?.name !== APPLY_PAPER_EDITS || call.argumentsError) throw invalid();
@@ -82,12 +85,13 @@ export function readEditProposal(response: AIResponse, sources: SourceRange[], t
   if (typeof summary !== "string" || !summary.trim() || !Array.isArray(edits) || !edits.length) throw invalid();
   const parsed: ProposedEdit[] = edits.map((item: unknown) => {
     if (!item || typeof item !== "object") throw invalid();
-    const { path, original, revised } = item as Record<string, unknown>;
+    const { path, original, revised, evidence } = item as Record<string, unknown>;
     if (typeof path !== "string" || !validEditPath(path) || typeof original !== "string" || !original.trim() || typeof revised !== "string" || original === revised) throw invalid();
     const matches = sources.filter((s) => s.path === path && locateExact(s.text, original));
     if (matches.length !== 1) throw invalid();
     const anchor = anchorOf(texts?.get(path), matches[0], original);
-    return { path, original, revised, ...(anchor ? { anchor } : {}) };
+    const used = Array.isArray(evidence) ? [...new Set(evidence.filter((id): id is string => typeof id === "string" && evidenceIds.includes(id)))] : [];
+    return { path, original, revised, ...(anchor ? { anchor } : {}), ...(used.length ? { evidence: used } : {}) };
   });
   return { callId: call.id, summary: summary.trim(), edits: parsed };
 }

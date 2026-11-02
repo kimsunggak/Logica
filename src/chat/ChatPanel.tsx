@@ -1,8 +1,8 @@
 import { Check, CheckCheck, FileText, Globe, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
 import { CHAT_MODELS } from "../ai/models/modelConfig";
-import type { ChatMode } from "../ai/types";
+import type { ChatMode, WebEvidence } from "../ai/types";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
 import { DiffView } from "../editor/inlineEdit/DiffView";
 import { validateRewrite } from "../latex/validation";
@@ -56,8 +56,27 @@ function MarkdownBlock(props: ChatMarkdownProps) {
   );
 }
 
-/** One proposed change: file, location, diff, checks, and Apply / Reject. */
-function EditCard({ messageId, index, edit, state, exact = false }: { messageId: string; index: number; edit: ProposedEdit; state?: EditState; exact?: boolean }) {
+/** A link to a web page, opened in the system browser. */
+function WebLink({ url, title, children, testId }: { url?: string; title?: string; children: ReactNode; testId?: string }) {
+  if (!url) return <span title={title}>{children}</span>;
+  return (
+    <a
+      href={url}
+      title={title ?? url}
+      className="break-words text-sky-700 underline decoration-sky-700/30 underline-offset-2 hover:decoration-sky-700 dark:text-sky-400 dark:decoration-sky-400/30"
+      onClick={(e) => {
+        e.preventDefault();
+        void openExternal(url);
+      }}
+      data-testid={testId}
+    >
+      {children}
+    </a>
+  );
+}
+
+/** One proposed change: file, location, diff, checks, the web evidence it relies on, and Apply / Reject. */
+function EditCard({ messageId, index, edit, state, exact = false, evidence = [] }: { messageId: string; index: number; edit: ProposedEdit; state?: EditState; exact?: boolean; evidence?: WebEvidence[] }) {
   const t = useT();
   const bibEntries = useProject((s) => s.bibEntries);
   useProject((s) => s.doc); // Recheck diff anchors when the author's source changes.
@@ -99,6 +118,16 @@ function EditCard({ messageId, index, edit, state, exact = false }: { messageId:
           </span>
         )}
       </div>
+      {evidence.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-1.5 border-b border-slate-100 px-2 py-0.5 text-[11px] text-slate-500 dark:border-slate-800" data-testid="agent-edit-evidence">
+          <Globe size={11} className="shrink-0" /> {t("chat.evidenceUsed")}
+          {evidence.map((e) => (
+            <WebLink key={e.id} url={e.sources[0]?.url} title={e.finding}>
+              {e.id}
+            </WebLink>
+          ))}
+        </div>
+      )}
       {state !== "rejected" && (
         <div className="max-h-60 overflow-auto px-2 py-1.5 text-[12px]">
           <DiffView original={edit.original} revised={edit.revised} mode="words" />
@@ -158,21 +187,56 @@ function SourceList({ message }: { message: ChatMessage }) {
       <ol className="list-decimal space-y-0.5 pl-5 text-slate-500">
         {message.sources.map((source) => (
           <li key={source.url}>
-            <a
-              href={source.url}
-              title={source.url}
-              className="break-words text-sky-700 underline decoration-sky-700/30 underline-offset-2 hover:decoration-sky-700 dark:text-sky-400 dark:decoration-sky-400/30"
-              onClick={(e) => {
-                e.preventDefault();
-                void openExternal(source.url);
-              }}
-              data-testid="chat-source"
-            >
+            <WebLink url={source.url} testId="chat-source">
               {source.title || source.url}
-            </a>
+            </WebLink>
           </li>
         ))}
       </ol>
+    </div>
+  );
+}
+
+/** An edit's web research: each finding with its sources, and what the search could not find. */
+function EvidenceList({ message }: { message: ChatMessage }) {
+  const t = useT();
+  const evidence = message.evidence ?? [];
+  const gaps = message.researchGaps ?? [];
+  if (message.status !== "done" || (!evidence.length && !gaps.length)) return null;
+  return (
+    <div className="space-y-1 border-t border-slate-100 pt-1.5 text-[11.5px] dark:border-slate-800" data-testid="chat-evidence">
+      {evidence.length > 0 && (
+        <>
+          <div className="flex items-center gap-1 text-slate-500">
+            <Globe size={11} /> {t("chat.evidence")}
+          </div>
+          <ul className="space-y-1 text-slate-600 dark:text-slate-300">
+            {evidence.map((e) => (
+              <li key={e.id} data-testid="chat-evidence-item">
+                <span className="mr-1.5 font-mono text-[10.5px] text-slate-400">{e.id}</span>
+                {e.finding}
+                <div className="flex flex-wrap gap-x-2 pl-6">
+                  {e.sources.map((s) => (
+                    <WebLink key={s.url} url={s.url} title={s.quote ? `"${s.quote}"` : s.url} testId="chat-source">
+                      {s.title || s.url}
+                    </WebLink>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {gaps.length > 0 && (
+        <div className="text-slate-500" data-testid="chat-research-gaps">
+          {t("chat.researchGaps")}
+          <ul className="list-disc pl-5">
+            {gaps.map((gap) => (
+              <li key={gap}>{gap}</li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -211,9 +275,9 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
           <span className="min-w-0 truncate">{message.searchQuery ? t("chat.searchingFor", { query: message.searchQuery }) : t("chat.searching")}</span>
         </div>
       )}
-      {(message.stage === "answer" || message.stage === "reply" || message.stage === "edit") && !message.content && !searching && (
+      {(message.stage === "answer" || message.stage === "reply" || message.stage === "edit" || message.stage === "research") && !message.content && !searching && (
         <div className="text-[11.5px] text-slate-500" data-testid="chat-stage">
-          {t(message.stage === "edit" ? "chat.stageEdit" : message.stage === "answer" ? "chat.stageAnswer" : "chat.stageReply")}
+          {t(message.stage === "edit" ? "chat.stageEdit" : message.stage === "research" ? "chat.stageResearch" : message.stage === "answer" ? "chat.stageAnswer" : "chat.stageReply")}
         </div>
       )}
       {allEdits.length > 1 && (
@@ -258,10 +322,18 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
         ),
       )}
       {toolEdits.map((edit, index) => (
-        <EditCard key={`tool-${index}`} messageId={message.id} index={index} edit={edit} state={message.editStates?.[index]} exact />
+        <EditCard
+          key={`tool-${index}`}
+          messageId={message.id}
+          index={index}
+          edit={edit}
+          state={message.editStates?.[index]}
+          exact
+          evidence={(edit.evidence ?? []).flatMap((id) => message.evidence?.filter((e) => e.id === id) ?? [])}
+        />
       ))}
       {message.status === "streaming" && <span className="inline-block h-3 w-1.5 animate-pulse bg-slate-400" />}
-      <SourceList message={message} />
+      {message.evidence?.length || message.researchGaps?.length ? <EvidenceList message={message} /> : <SourceList message={message} />}
       {message.status === "cancelled" && <div className="text-[11.5px] text-slate-400">{t("chat.stopped")}</div>}
       {message.fallbackFrom && message.status === "done" && (
         <div className="text-[11px] text-amber-700 dark:text-amber-400" data-testid="chat-fallback">
@@ -442,12 +514,12 @@ export function ChatPanel() {
         <button
           type="button"
           onClick={() => setWebSearch(!webSearch)}
-          disabled={running || mode === "edit"}
+          disabled={running}
           aria-pressed={webSearch}
           aria-label={t("chat.webSearch")}
-          title={t(mode === "edit" ? "chat.webSearchEditOnly" : webSearch ? "chat.webSearchOn" : "chat.webSearchOff")}
+          title={t(webSearch ? "chat.webSearchOn" : "chat.webSearchOff")}
           className={`flex h-6 items-center justify-center gap-1 rounded-md border text-[11px] disabled:cursor-not-allowed disabled:opacity-50 ${
-            webSearch && mode !== "edit"
+            webSearch
               ? "border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-700 dark:bg-sky-950/50 dark:text-sky-300"
               : "border-slate-200 text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
           }`}

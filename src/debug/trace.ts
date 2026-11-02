@@ -13,11 +13,12 @@
 import { call, isDesktop } from "../lib/backend";
 
 /**
- * Where a span runs: the steps of a chat turn, `llm` for model calls (LLM
- * Gateway, Rust), and the background modules that run after a turn:
- * `summary` (session summary) and `sections` (section summaries).
+ * Where a span runs: the steps of a chat turn (`research`: the web research
+ * before an edit), `llm` for model calls (LLM Gateway, Rust), and the
+ * background modules that run after a turn: `summary` (session summary) and
+ * `sections` (section summaries).
  */
-export type TraceModule = "pipeline" | "user" | "orchestrator" | "reply" | "refine" | "selection" | "answer" | "edit" | "llm" | "final" | "summary" | "sections";
+export type TraceModule = "pipeline" | "user" | "orchestrator" | "reply" | "refine" | "selection" | "research" | "answer" | "edit" | "llm" | "final" | "summary" | "sections";
 export type TraceStatus = "running" | "completed" | "error";
 
 export interface Span {

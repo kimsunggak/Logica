@@ -8,7 +8,7 @@
  * the fallback provider. Each attempt is reported to the runtime debugger.
  */
 import { AIError, toAIError } from "./errors";
-import { CHAT_MODELS, MAX_OUTPUT_TOKENS, type ModelChoice } from "./models/modelConfig";
+import { CHAT_MODELS, MAX_OUTPUT_TOKENS, MAX_SEARCHES, type ModelChoice } from "./models/modelConfig";
 import { buildPrompt } from "./prompts";
 import { aiService } from "./service";
 import type { AIRequest, AIResponse, ChatTask } from "./types";
@@ -43,7 +43,7 @@ export interface GatewayResult {
 }
 
 /** What the caller decides; the gateway adds the task, model and limits. */
-export type ChatRequest = Omit<AIRequest, "task" | "model" | "reasoningEffort" | "maxOutputTokens">;
+export type ChatRequest = Omit<AIRequest, "task" | "model" | "reasoningEffort" | "maxOutputTokens" | "maxSearches">;
 
 /** The exact system prompt and messages a provider receives, for the debugger. */
 export function promptText(request: AIRequest): string {
@@ -152,6 +152,7 @@ export async function callModel(task: ChatTask, request: ChatRequest, options: G
     model: choice.model,
     reasoningEffort: choice.reasoningEffort,
     maxOutputTokens: MAX_OUTPUT_TOKENS[task],
+    ...(MAX_SEARCHES[task] ? { maxSearches: MAX_SEARCHES[task] } : {}),
   });
   const report = (fn: string, input: unknown, output: unknown) => {
     if (options.trace) step(options.trace.traceId, options.trace.parent, "llm", fn, input, output);

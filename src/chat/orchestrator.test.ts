@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AIError } from "../ai/errors";
 import type { ChatRequest, GatewayOptions, GatewayResult } from "../ai/gateway";
 import { CHAT_MODELS } from "../ai/models/modelConfig";
+import { EDIT_TOOLS } from "../ai/tools/chatTools";
 import type { AIResponse, ChatMode, ChatTask } from "../ai/types";
 import { startSpan } from "../debug/trace";
 import { buildPaperDocument } from "../latex/parser/documentModel";
@@ -210,6 +211,8 @@ describe("Web search", () => {
     await r.result;
     expect(r.log.map((c) => [c.task, c.request.webSearch])).toEqual([["refine", undefined], ["judge", undefined], ["select", undefined], ["answer", true]]);
     expect(r.log.at(-1)!.options.onSearch).toBeTypeOf("function");
+    // An answer drops a note written before its search; only research keeps that text.
+    expect(r.log.at(-1)!.request).not.toHaveProperty("keepTextBeforeSearch");
   });
 
   it("leaves it off when the turn did not turn it on", async () => {
@@ -218,9 +221,10 @@ describe("Web search", () => {
     expect(r.log.find((c) => c.task === "answer")!.request.webSearch).toBe(false);
   });
 
-  it("never offers it to Edit", async () => {
+  it("does not search for an edit unless section selection asks for research", async () => {
     const r = run("edit", {}, paper, { ...turn, webSearch: true });
     await r.result;
+    expect(r.log.map((c) => c.task)).toEqual(["refine", "select", "edit"]);
     expect(r.log.some((c) => c.request.webSearch)).toBe(false);
   });
 
@@ -268,5 +272,91 @@ describe("Web search", () => {
     // The note was shown before the search; the section request never was.
     expect(text).toEqual(["Let me look this up.", "Detailed answer."]);
     expect(result).toMatchObject({ content: "Detailed answer.", sources: [{ url: "https://example.org/new" }] });
+  });
+});
+
+describe("Web research before an edit", () => {
+  const research = (needed: boolean, questions: string[] = needed ? ["Latest OCHuman results?"] : []) => () =>
+    tool("select_edit_sections", { reason: "Add recent results to the method", edit_sections: ["3.2"], reference_sections: [], web_research: { needed, questions } });
+  const findings = "- Paper A reaches 81.2 AP on OCHuman.\nNOT FOUND: the 2026 leaderboard";
+  const found = (): AIResponse => ({
+    ...response(findings), searchQueries: ["ochuman 2026"],
+    citations: [{ start: 2, end: 37, url: "https://example.org/a", title: "Paper A", quote: "81.2 AP" }],
+  });
+  const editWith = (evidence: string[]) => () => tool("apply_paper_edits", { summary: "Proposed changes.", edits: [{ ...edit, evidence }] });
+  const on = { ...turn, webSearch: true };
+
+  it("researches when selection asks for it, and gives the edit the findings as evidence", async () => {
+    const r = run("edit", { select: research(true), research: found, edit: editWith(["W1"]) }, paper, on);
+    const result = await r.result;
+    expect(r.log.map((c) => c.task)).toEqual(["refine", "select", "research", "edit"]);
+    expect(r.stages).toEqual(["refine", "select", "research", "edit"]);
+
+    const [, select, searched, edited] = r.log;
+    expect(select.request.mayResearch).toBe(true);
+    expect((select.request.tools![0].parameters as { properties: object }).properties).toHaveProperty("web_research");
+    expect(searched.request).toMatchObject({ webSearch: true, keepTextBeforeSearch: true, researchQuestions: ["Latest OCHuman results?"], refinedQuestion: turn.instruction });
+    expect(searched.request.researchSources?.map((s) => s.path)).toEqual([target.path]);
+    expect(searched.request.history).toBeUndefined();
+
+    const evidence = [{ id: "W1", finding: "Paper A reaches 81.2 AP on OCHuman.", sources: [{ url: "https://example.org/a", title: "Paper A", quote: "81.2 AP" }] }];
+    expect(edited.request.webSearch).toBeUndefined();
+    expect(edited.request).toMatchObject({ webEvidence: evidence, researchGaps: ["the 2026 leaderboard"] });
+    expect((edited.request.tools![0].parameters as any).properties.edits.items.properties.evidence.items.enum).toEqual(["W1"]);
+
+    expect(result).toMatchObject({
+      outcome: "edit", evidence, researchGaps: ["the 2026 leaderboard"], searches: ["ochuman 2026"],
+      sources: [{ url: "https://example.org/a", title: "Paper A" }],
+    });
+    expect(result.edits?.[0].evidence).toEqual(["W1"]);
+  });
+
+  it("asks the research the refined request when selection named no questions", async () => {
+    const r = run("edit", { select: research(true, []), research: found, edit: editWith(["W1"]) }, paper, on);
+    await r.result;
+    expect(r.log.find((c) => c.task === "research")!.request.researchQuestions).toEqual([turn.instruction]);
+  });
+
+  it("goes straight to the edit when selection finds no research needed", async () => {
+    const r = run("edit", { select: research(false) }, paper, on);
+    const result = await r.result;
+    expect(r.log.map((c) => c.task)).toEqual(["refine", "select", "edit"]);
+    expect(r.log.at(-1)!.request.tools).toBe(EDIT_TOOLS);
+    expect(r.log.at(-1)!.request).not.toHaveProperty("webEvidence");
+    expect(result).not.toHaveProperty("evidence");
+    expect(result).not.toHaveProperty("searches");
+  });
+
+  it("neither offers nor runs research with web search off", async () => {
+    const r = run("edit", { select: research(true) });
+    await r.result;
+    const select = r.log.find((c) => c.task === "select")!;
+    expect(select.request).not.toHaveProperty("mayResearch");
+    expect((select.request.tools![0].parameters as { properties: object }).properties).not.toHaveProperty("web_research");
+    expect(r.log.map((c) => c.task)).toEqual(["refine", "select", "edit"]);
+  });
+
+  it("tells the edit every question is a gap when the research found nothing", async () => {
+    const r = run("edit", { select: research(true), research: () => response("Nothing relevant came up.") }, paper, on);
+    const result = await r.result;
+    const edited = r.log.at(-1)!;
+    expect(edited.request).toMatchObject({ webEvidence: [], researchGaps: ["Latest OCHuman results?"] });
+    expect(edited.request.tools).toBe(EDIT_TOOLS);
+    expect(result).toMatchObject({ researchGaps: ["Latest OCHuman results?"] });
+    expect(result).not.toHaveProperty("evidence");
+  });
+
+  it("fails the turn when the research fails, before any edit", async () => {
+    const r = run("edit", { select: research(true), research: () => { throw new AIError("bad_request", "Web search is not enabled"); } }, paper, on);
+    await expect(r.result).rejects.toThrow("Web search is not enabled");
+    expect(r.log.map((c) => c.task)).toEqual(["refine", "select", "research"]);
+  });
+
+  it("never offers research to Chat selection", async () => {
+    const r = run("chat", {}, paper, on);
+    await r.result;
+    const select = r.log.find((c) => c.task === "select")!;
+    expect(select.request).not.toHaveProperty("mayResearch");
+    expect(r.log.map((c) => c.task)).toEqual(["refine", "select", "answer"]);
   });
 });
