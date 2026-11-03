@@ -1,0 +1,37 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{natbib}
+\usepackage{hyperref}
+
+% Custom macros: AI edits must keep these as macros.
+\newcommand{\method}{\textsc{STRoute}}
+\newcommand{\R}{\mathbb{R}}
+
+\title{Adaptive Spatiotemporal Routing for Occlusion-Robust Video Pose Estimation}
+\author{Anonymous Author}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Video-based human pose estimation degrades sharply when body parts are occluded.
+We present \method{}, which estimates per-joint uncertainty and routes each joint
+through spatial or temporal reasoning accordingly. On two benchmarks, \method{}
+reduces the error on occluded joints while keeping the cost of inference low.
+\end{abstract}
+
+\input{sections/introduction}
+\input{sections/related_work}
+\input{sections/method}
+\input{sections/experiments}
+
+\section{Conclusion}
+We introduced \method{}, an uncertainty-guided routing scheme for video pose
+estimation. Future work will study routing across longer temporal horizons.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+\end{document}

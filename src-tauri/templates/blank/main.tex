@@ -1,0 +1,40 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\title{Paper Title}
+\author{Author Name \\ Affiliation \\ \texttt{email@example.com}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+State the problem, the approach and the main result in three or four sentences.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+Explain why the problem matters and what is missing in existing work.
+Summarize the contributions of this paper.
+
+\section{Method}
+\label{sec:method}
+Describe the approach. Equations are numbered automatically:
+\begin{equation}
+  \label{eq:objective}
+  \mathcal{L}(\theta) = \frac{1}{N} \sum_{i=1}^{N} \ell\left(f_\theta(x_i), y_i\right).
+\end{equation}
+Refer to it as Equation~\eqref{eq:objective}.
+
+\section{Results}
+\label{sec:results}
+Report the main findings and compare them with the baselines.
+
+\section{Conclusion}
+\label{sec:conclusion}
+Summarize what was shown and what remains for future work.
+
+\end{document}

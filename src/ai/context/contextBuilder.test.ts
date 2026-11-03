@@ -1,0 +1,119 @@
+import { describe, expect, it } from "vitest";
+import { buildPaperDocument } from "../../latex/parser/documentModel";
+import { buildPrompt } from "../prompts";
+import { buildEditContext } from "./contextBuilder";
+import { paragraphContext } from "./paragraphs";
+
+const text = "First paragraph.\n\nSecond paragraph line one.\nline two.\n\n\nThird paragraph.";
+
+describe("paragraphContext", () => {
+  it("returns neighbours of the selection", () => {
+    const from = text.indexOf("Second");
+    const ctx = paragraphContext(text, from, from + 6);
+    expect(ctx.previous).toBe("First paragraph.");
+    expect(ctx.current).toBe("Second paragraph line one.\nline two.");
+    expect(ctx.next).toBe("Third paragraph.");
+  });
+  it("keeps headings and environments out of paragraphs", () => {
+    const src = "\\subsection{Motivation}\nProse line one.\nProse line two.\n\\begin{equation}\nx = y\n\\end{equation}\nAfter.";
+    const from = src.indexOf("Prose line two");
+    const ctx = paragraphContext(src, from, from);
+    expect(ctx.current).toBe("Prose line one.\nProse line two.");
+    expect(ctx.next).toBe("x = y");
+    expect(ctx.previous).toBeUndefined();
+  });
+  it("keeps the preamble and the title block out of paragraphs", () => {
+    const src = [
+      "\\documentclass{article}",
+      "\\usepackage{amsmath}",
+      "\\newcommand{\\method}{\\textsc{STRoute}}",
+      "\\title{Adaptive Routing for Occlusion-Robust Pose Estimation}",
+      "\\author{Anonymous Author}",
+      "\\date{}",
+      "\\begin{document}",
+      "\\maketitle",
+      "\\begin{abstract}",
+      "Pose estimation degrades under occlusion.",
+      "We present \\method{}.",
+      "\\end{abstract}",
+    ].join("\n");
+    for (const line of ["\\title{Adaptive", "\\author{", "\\usepackage", "\\newcommand"]) {
+      const at = src.indexOf(line) + 3;
+      expect(paragraphContext(src, at, at).current, line).toBeUndefined();
+    }
+    const at = src.indexOf("We present");
+    const ctx = paragraphContext(src, at, at);
+    expect(ctx.current).toBe("Pose estimation degrades under occlusion.\nWe present \\method{}.");
+    expect(ctx.previous).toBeUndefined();
+  });
+  it("keeps a title or author list spanning several lines out of paragraphs", () => {
+    const src = [
+      "\\begin{document}",
+      "\\title{A Long Title",
+      "  Continued Here}",
+      "\\author{First Author \\\\ Affiliation",
+      "  \\and Second Author \\{\\}}",
+      "Body text after the front matter.",
+    ].join("\n");
+    for (const line of ["Continued Here", "\\and Second"]) {
+      const at = src.indexOf(line);
+      expect(paragraphContext(src, at, at).current, line).toBeUndefined();
+    }
+    const at = src.indexOf("Body text");
+    expect(paragraphContext(src, at, at).current).toBe("Body text after the front matter.");
+  });
+  it("ends an unclosed title at the next blank line", () => {
+    const src = "\\title{Unclosed\n\nProse after a blank line.";
+    const at = src.indexOf("Prose");
+    expect(paragraphContext(src, at, at).current).toBe("Prose after a blank line.");
+  });
+  it("treats every line as body text in a file without a preamble", () => {
+    const src = "\\usepackageish is not a command here.\nIntro text.";
+    const at = src.indexOf("Intro");
+    expect(paragraphContext(src, at, at).current).toBe("\\usepackageish is not a command here.\nIntro text.");
+  });
+  it("handles a cursor in a blank gap", () => {
+    const pos = text.indexOf("\n\n\n") + 1;
+    const ctx = paragraphContext(text, pos, pos);
+    expect(ctx.current).toBeUndefined();
+    expect(ctx.previous).toContain("Second");
+    expect(ctx.next).toBe("Third paragraph.");
+  });
+});
+
+describe("context builder + prompts", () => {
+  const main = "\\documentclass{article}\\title{My Paper}\n\\begin{document}\n\\begin{abstract}An abstract.\\end{abstract}\n\\section{Method}\n\\subsection{Routing}\nPrev para.\n\nSelected sentence here.\n\nNext para.\n\\end{document}\n";
+  const files = new Map([["main.tex", main]]);
+  const doc = buildPaperDocument({ files });
+  const from = main.indexOf("Selected");
+  const snap = { projectName: "paper", filePath: "main.tex", text: main, selectionFrom: from, selectionTo: from + 23 };
+
+  it("builds edit context from the paper model", () => {
+    const ctx = buildEditContext(doc, snap);
+    expect(ctx.paperTitle).toBe("My Paper");
+    expect(ctx.abstract).toBe("An abstract.");
+    expect(ctx.currentSection).toBe("1 Method › 1.1 Routing");
+    expect(ctx.previousParagraph).toContain("Prev para.");
+    expect(ctx.nextParagraph).toContain("Next para.");
+    expect(ctx.outline).toContain("1.1 Routing");
+  });
+
+  it("produces the same semantic prompt for every provider", () => {
+    const ctx = buildEditContext(doc, snap);
+    const prompt = buildPrompt({
+      id: "r1",
+      task: "inline-edit",
+      instruction: "Make this more concise",
+      selectedText: "Selected sentence here.",
+      context: ctx,
+      model: "m",
+    });
+    expect(prompt.messages).toHaveLength(1);
+    const user = prompt.messages[0].content;
+    expect(user).toContain("<selected_text>\nSelected sentence here.\n</selected_text>");
+    expect(user).toContain("<current_section>");
+    expect(user.indexOf("<previous_paragraph>")).toBeLessThan(user.indexOf("<selected_text>"));
+    expect(user.indexOf("<selected_text>")).toBeLessThan(user.indexOf("<next_paragraph>"));
+    expect(prompt.system).toContain("\\label");
+  });
+});

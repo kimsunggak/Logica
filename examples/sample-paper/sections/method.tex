@@ -1,0 +1,23 @@
+\section{Method}
+\label{sec:method}
+
+\subsection{Overview}
+\method{} has two stages: a per-frame pose network that also predicts
+uncertainty, and a routing module that decides how much temporal context each
+joint receives.
+
+\subsection{Uncertainty Estimation}
+\label{sec:uncertainty}
+For each joint we predict a mean $\mu_{t,j}$ and a variance $\sigma^2_{t,j}$ and
+train with the Gaussian negative log-likelihood
+\begin{equation}
+  \mathcal{L}_{\text{nll}} = \sum_{t,j} \frac{\lVert \mathbf{p}_{t,j} - \mu_{t,j} \rVert^2}{2\sigma^2_{t,j}} + \log \sigma_{t,j}.
+  \label{eq:nll}
+\end{equation}
+
+\subsection{Temporal Routing}
+\label{sec:routing}
+Joints with high variance in Eq.~\eqref{eq:nll} are routed to a temporal
+transformer \citep{vaswani2017attention}; the others keep their per-frame
+estimate. This keeps the cost low because most joints are visible most of the
+time.

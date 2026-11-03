@@ -1,0 +1,1686 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOGICA Runtime Debugger</title>
+<style>
+/* Layout: 왼쪽 실행 목록, 가운데 실행 그래프와 타임라인, 오른쪽 데이터 인스펙터 */
+:root {
+  --bg: #f4f6f9; --panel: #ffffff; --ink: #18202e; --ink-2: #5a6578; --line: #d8dee8; --soft: #eef1f6;
+  --run: #1f6feb; --run-soft: #e3edff; --ok: #1a7f4b; --ok-soft: #e1f4ea; --err: #c4302b; --err-soft: #fde7e6;
+  --wait: #9aa4b5; --llm: #8250df; --llm-soft: #f1eafe; --web: #b25e00; --web-soft: #fff0dc;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "D2Coding", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1218; --panel: #151b24; --ink: #e5e9f0; --ink-2: #9aa5b8; --line: #2a3342; --soft: #1c2430;
+    --run: #5b9dff; --run-soft: #17284a; --ok: #49c483; --ok-soft: #14301f; --err: #ff7b72; --err-soft: #3a1918;
+    --wait: #5e6a7d; --llm: #b48cff; --llm-soft: #271d3d; --web: #f3a64c; --web-soft: #3a2710;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 13px/1.5 var(--sans); display: flex; flex-direction: column; }
+button { font: inherit; color: inherit; }
+header { display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+header h1 { font-size: 15px; margin: 0; letter-spacing: .01em; }
+header .sub { color: var(--ink-2); font-size: 12px; }
+.pill { font: 11px/1 var(--mono); padding: 4px 8px; border-radius: 999px; border: 1px solid var(--line); }
+.pill.on { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+.pill.off { color: var(--err); border-color: var(--err); background: var(--err-soft); }
+.spacer { flex: 1; }
+.ctl { display: flex; gap: 8px; align-items: center; }
+.ctl label { display: flex; gap: 6px; align-items: center; color: var(--ink-2); cursor: pointer; }
+.btn { border: 1px solid var(--line); background: var(--soft); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+.btn:hover { border-color: var(--ink-2); }
+:focus-visible { outline: 2px solid var(--run); outline-offset: 2px; }
+
+/* Panes: sizes are CSS variables the gutters change (see "layout" in the script). */
+.app { --left: 250px; --right: 420px; --graph-h: 75%; --inspector-h: 30%; flex: 1; min-height: 0; min-width: 0; display: grid; grid-template-columns: var(--left) 10px minmax(0, 1fr) 10px var(--right); grid-template-rows: minmax(0, 1fr); }
+.col { min-height: 0; min-width: 0; overflow: auto; }
+.pane-head { display: flex; align-items: center; gap: 6px; padding-right: 8px; }
+.pane-head .section-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pbtn { border: 1px solid var(--line); background: var(--soft); border-radius: 5px; min-width: 26px; height: 24px; padding: 0 6px; cursor: pointer; font: 600 12px/1 var(--mono); color: var(--ink); }
+.pbtn:hover { border-color: var(--ink-2); }
+.pbtn.wide { min-width: 52px; }
+.collapsed > :not(.pane-head) { display: none; }
+.collapsed .pane-head .section-title { display: none; }
+.collapsed .pane-head { flex-direction: column; padding: 8px 4px; }
+.gutter { background: var(--soft); position: relative; touch-action: none; user-select: none; }
+.gutter::after { content: ""; position: absolute; border-radius: 2px; background: var(--line); }
+.gutter.v { cursor: col-resize; } .gutter.v::after { top: 50%; left: 3px; width: 4px; height: 48px; margin-top: -24px; }
+.gutter.h { cursor: row-resize; height: 10px; flex: none; } .gutter.h::after { left: 50%; top: 3px; height: 4px; width: 48px; margin-left: -24px; }
+.gutter:hover, .gutter.drag, .gutter:focus-visible { background: var(--run-soft); } .gutter:hover::after, .gutter.drag::after { background: var(--run); }
+.gutter.off { pointer-events: none; } .gutter.off::after { display: none; }
+/* A pane shown over the whole window (⤢); Esc or ⤢ again puts it back. */
+.maxed { position: fixed !important; inset: 0; z-index: 40; height: auto !important; max-height: none !important; background: var(--panel); border: 0 !important; }
+.traces { border-right: 1px solid var(--line); background: var(--panel); }
+.inspector { border-left: 1px solid var(--line); background: var(--panel); }
+@media (max-width: 1100px) {
+  .app { grid-template-columns: var(--left) 10px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 10px var(--inspector-h); }
+  .gutter.right { grid-column: 1 / -1; grid-row: 2; cursor: row-resize; }
+  .gutter.right::after { left: 50%; top: 3px; width: 48px; height: 4px; margin: 0 0 0 -24px; }
+  .inspector { grid-column: 1 / -1; grid-row: 3; border-left: none; border-top: 1px solid var(--line); }
+  .inspector.collapsed .pane-head { flex-direction: row; padding: 0 8px 0 0; }
+  .inspector.collapsed .pane-head .section-title { display: block; }
+}
+@media (max-width: 700px) {
+  header .sub { display: none; }
+  header .ctl { flex-wrap: wrap; }
+}
+.section-title { font: 600 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); padding: 12px 14px 8px; }
+
+.trace { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: transparent; padding: 9px 14px; cursor: pointer; }
+.trace:hover { background: var(--soft); }
+.trace.sel { background: var(--run-soft); box-shadow: inset 3px 0 0 var(--run); }
+.trace .q { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.trace .m { display: flex; gap: 8px; color: var(--ink-2); font: 11px var(--mono); margin-top: 2px; }
+.empty { color: var(--ink-2); padding: 14px; }
+
+.center { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+/* Resizing always leaves the timeline at least 80px. */
+.graph-pane { height: var(--graph-h); min-height: 0; max-height: calc(100% - 90px); display: flex; flex-direction: column; flex: none; }
+.graph-pane > .pane-head { flex-wrap: wrap; }
+.graph-pane.maxed { display: flex; }
+.graph-tabs { flex: 1; display: flex; gap: 4px; padding: 8px 12px; }
+.graph-tab { border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink-2); padding: 4px 10px; white-space: nowrap; cursor: pointer; font: 600 12px var(--mono); }
+.graph-tab[aria-selected="true"] { color: var(--run); background: var(--run-soft); border-color: var(--run); }
+.graph-tab:hover { background: var(--soft); }
+.zoom { display: flex; gap: 4px; align-items: center; }
+.graph-wrap { flex: 1; min-height: 0; position: relative; overflow: hidden; cursor: grab; touch-action: none; }
+.graph-wrap.panning { cursor: grabbing; }
+.graph-wrap.panning .node { cursor: grabbing; }
+#graph { position: absolute; inset: 0; width: 100%; height: 100%; display: block; user-select: none; }
+svg text { font-family: var(--sans); fill: var(--ink); }
+.node rect { fill: var(--panel); stroke: var(--wait); stroke-width: 1.5; }
+.node.waiting rect { stroke-dasharray: 4 3; }
+.node.running rect { stroke: var(--run); stroke-width: 2.5; fill: var(--run-soft); }
+.node.completed rect { stroke: var(--ok); stroke-width: 2; }
+.node.error rect { stroke: var(--err); stroke-width: 2.5; fill: var(--err-soft); }
+.node.llm rect { stroke: var(--llm); }
+.node.llm.running rect { fill: var(--llm-soft); stroke: var(--llm); }
+.node.sel rect { stroke-width: 3.5; }
+.node.skipped { opacity: .45; }
+.node.skipped rect { stroke-dasharray: 2 4; }
+/* Session Summary Module before ten turns (or 40,000 characters) are left unsummarized: it does not run yet. */
+.node.inactive { opacity: .55; }
+.node.inactive rect { stroke-dasharray: 6 4; fill: var(--soft); }
+.node .route { font: 600 11px var(--mono); fill: var(--llm); }
+.node { cursor: pointer; }
+/* Final Answer only records the turn's result; the answer reaches the screen elsewhere. */
+.node.debug rect { fill: var(--soft); }
+.node.debug.running rect { fill: var(--run-soft); }
+.node g.tag rect { fill: var(--panel); stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: none; animation: none; }
+.node g.tag text { font: 600 10px var(--sans); fill: var(--ink-2); }
+.node .title { font-size: 14px; font-weight: 600; }
+.node .meta { font: 11px var(--mono); fill: var(--ink-2); }
+.node .fn { font: 11px var(--mono); fill: var(--ink-2); }
+.node .fn.running { fill: var(--run); } .node .fn.error { fill: var(--err); } .node .fn.completed { fill: var(--ok); }
+.node.running rect { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { stroke-opacity: .35; } }
+.edge { fill: none; stroke: var(--wait); stroke-width: 1.6; }
+.edge.done { stroke: var(--ok); }
+.edge.active { stroke: var(--run); stroke-width: 2.2; stroke-dasharray: 6 5; animation: flow .7s linear infinite; }
+.edge.call { stroke-dasharray: 3 4; }
+.edge.background { stroke-dasharray: 7 5; }
+.edge.skip { stroke-dasharray: 2 5; opacity: .35; }
+.edge.call.active { stroke: var(--llm); stroke-dasharray: 6 5; }
+@keyframes flow { to { stroke-dashoffset: -11; } }
+@media (prefers-reduced-motion: reduce) { .node.running rect, .edge.active { animation: none; } }
+.elabel { font: 10.5px var(--mono); fill: var(--ink-2); }
+.ah { fill: var(--wait); } .ah.done { fill: var(--ok); } .ah.active { fill: var(--run); }
+/* Web Search: the provider's own tool, run on its servers during a Paper Chat Module call. */
+.node.web rect { stroke: var(--web); stroke-dasharray: 6 4; }
+.node.web.running rect, .node.web.completed rect { stroke: var(--web); stroke-width: 2; fill: var(--web-soft); }
+.node.web.running rect { stroke-width: 2.5; }
+.node.web.skipped rect { stroke: var(--wait); stroke-dasharray: 2 4; }
+.node.web.inactive rect { stroke: var(--wait); }
+.node.web.sel rect { stroke-width: 3.5; }
+.node.web.error rect { stroke: var(--err); fill: var(--err-soft); }
+.node.web .route, .node.web .fn.completed { fill: var(--web); }
+.edge.web { stroke: var(--web); stroke-dasharray: 5 4; }
+.edge.web.done { stroke-dasharray: none; }
+.edge.web.active { stroke: var(--web); stroke-dasharray: 6 5; }
+.ah.web { fill: var(--web); }
+.webtag rect { fill: var(--web); }
+.webtag text { font: 700 10px var(--mono); fill: var(--panel); }
+.flow-frame { fill: var(--panel); stroke: var(--line); stroke-width: 1; rx: 16; }
+.flow-heading { fill: var(--ink-2); font: 600 15px var(--sans); }
+.flow-node .flow-shape { fill: var(--panel); stroke: var(--line); stroke-width: 1.8; }
+.flow-node .flow-label { font: 500 16px var(--sans); }
+.flow-node.module .flow-shape { fill: var(--run-soft); stroke: var(--run); }
+.flow-node.module .flow-label { font-weight: 600; }
+.flow-node.decision .flow-shape { fill: var(--llm-soft); stroke: var(--llm); }
+.flow-node.document .flow-shape { fill: var(--ok-soft); stroke: var(--ok); }
+.flow-node.terminal .flow-shape { fill: var(--soft); stroke: var(--ink-2); }
+.flow-node.sel .flow-shape { stroke-width: 3.5; }
+.flow-node[data-open-file] { cursor: pointer; }
+.flow-edge { fill: none; stroke: var(--ink-2); stroke-width: 1.8; }
+.flow-edge.background { stroke-dasharray: 7 5; }
+.flow-edge-label { font: 600 14px var(--sans); fill: var(--ink); stroke: var(--panel); stroke-width: 6px; paint-order: stroke; stroke-linejoin: round; }
+.flow-note { fill: var(--ink-2); font: 13px var(--sans); }
+.legend[hidden] { display: none; }
+
+.timeline { flex: 1; min-height: 80px; border-top: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; }
+.tabs { display: flex; gap: 4px; padding: 8px 12px 0; align-items: flex-end; }
+.tabs .spacer { flex: 1; } .tabs .pbtn { margin-bottom: 4px; }
+.tab { border: 1px solid var(--line); border-bottom: none; background: var(--soft); border-radius: 6px 6px 0 0; padding: 4px 10px; cursor: pointer; color: var(--ink-2); }
+.tab.on { background: var(--panel); color: var(--ink); font-weight: 600; }
+.tl-body { flex: 1; min-height: 0; overflow: auto; border-top: 1px solid var(--line); }
+.row { display: grid; grid-template-columns: 96px 70px minmax(160px, 260px) minmax(0, 1fr); gap: 8px; align-items: center; padding: 3px 12px; font: 11.5px var(--mono); cursor: pointer; border-bottom: 1px solid var(--soft); }
+.row:hover { background: var(--soft); }
+.row.sel { background: var(--run-soft); }
+.row .fnname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar-track { position: relative; height: 12px; }
+.bar { position: absolute; top: 1px; height: 10px; border-radius: 3px; min-width: 3px; background: var(--ok); }
+.bar.running { background: var(--run); } .bar.error { background: var(--err); } .bar.llm { background: var(--llm); }
+.dim { color: var(--ink-2); }
+.log { display: grid; grid-template-columns: 96px 64px 64px 60px minmax(140px, 220px) 90px minmax(0, 1fr); gap: 8px; padding: 3px 12px; font: 11.5px var(--mono); border-bottom: 1px solid var(--soft); cursor: pointer; }
+.log:hover { background: var(--soft); }
+.ev-start { color: var(--run); } .ev-end { color: var(--ok); } .ev-error { color: var(--err); } .ev-data { color: var(--llm); }
+
+.badge { font: 10.5px/1 var(--mono); padding: 2px 6px; border-radius: 4px; background: var(--soft); color: var(--ink-2); white-space: nowrap; }
+.badge.running { background: var(--run-soft); color: var(--run); } .badge.completed { background: var(--ok-soft); color: var(--ok); } .badge.error { background: var(--err-soft); color: var(--err); }
+.badge.rust { background: var(--llm-soft); color: var(--llm); }
+
+.insp-head { padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.insp-head h2 { margin: 0; font-size: 15px; }
+.span { border-bottom: 1px solid var(--line); padding: 10px 14px; }
+.span.sel { background: color-mix(in srgb, var(--run-soft) 55%, transparent); }
+.span-h { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.span-h .fnname { font: 600 12.5px var(--mono); }
+.kv { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 2px 8px; margin: 8px 0 4px; font: 11.5px var(--mono); }
+.kv dt { color: var(--ink-2); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+.blk { margin-top: 8px; }
+.blk > .lbl { font: 600 11px var(--mono); color: var(--ink-2); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 3px; }
+.blk.next > .lbl { color: var(--ok); }
+pre.val { margin: 0; padding: 8px; background: var(--soft); border: 1px solid var(--line); border-radius: 6px; font: 11.5px/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+.more { border: 0; background: none; color: var(--run); padding: 2px 0; cursor: pointer; font-size: 11.5px; }
+/* Full-window viewer for one long value (a prompt, an answer). */
+.viewer { position: fixed; inset: 0; z-index: 60; background: rgba(10, 14, 20, .45); display: flex; padding: 32px; }
+.viewer[hidden] { display: none; }
+.viewer-box { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.viewer-head { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.viewer-head b { flex: 1; font: 600 13px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer pre { flex: 1; margin: 0; padding: 14px; overflow: auto; font: 12.5px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.summary-meta { padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--ink-2); overflow-wrap: anywhere; }
+.summary-meta p { margin: 2px 0; }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn[aria-pressed="true"] { color: var(--run); border-color: var(--run); background: var(--run-soft); }
+@media (max-width: 700px) {
+  .viewer { padding: 12px; }
+  .viewer-head { flex-wrap: wrap; }
+  .viewer-head b { flex-basis: 100%; }
+}
+.legend { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; color: var(--ink-2); font-size: 11.5px; padding: 0 12px 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; border: 2px solid; }
+</style>
+</head>
+<body>
+<header>
+  <h1>LOGICA Runtime Debugger</h1>
+  <span class="sub">npm run tauri dev 로 실행 중인 앱의 채팅 한 턴이 어떤 갈래로 처리되는지 실시간으로 봅니다</span>
+  <span class="spacer"></span>
+  <span id="conn" class="pill off">연결 대기</span>
+  <div class="ctl">
+    <label><input type="checkbox" id="follow" checked> 최신 실행 따라가기</label>
+    <button class="btn" id="paperSummary" type="button">논문 요약 파일</button>
+    <button class="btn" id="sessionSummary" type="button">세션 요약 파일</button>
+    <button class="btn" id="resetLayout" type="button" title="패널 크기와 그래프 배율을 기본값으로 되돌립니다">레이아웃 초기화</button>
+    <button class="btn" id="clear" type="button">지우기</button>
+  </div>
+</header>
+<div class="app" id="app">
+  <aside class="col traces" id="paneTraces">
+    <div class="pane-head"><div class="section-title">실행 (질문 1개 = trace 1개)</div><button class="pbtn" type="button" data-collapse="traces" title="접기">«</button></div>
+    <div id="traceList"><div class="empty">앱에서 질문하면 여기에 나타납니다.</div></div>
+  </aside>
+  <div class="gutter v left" data-gutter="left" role="separator" aria-orientation="vertical" aria-label="실행 목록 너비" tabindex="0" title="드래그로 너비 조절, 더블클릭으로 기본값"></div>
+  <main class="center" id="center">
+  <section class="graph-pane" id="paneGraph">
+    <div class="pane-head">
+      <div class="graph-tabs" role="tablist" aria-label="다이어그램 보기">
+        <button class="graph-tab" id="architectureTab" type="button" role="tab" data-graph-view="architecture" aria-selected="true" aria-controls="graphWrap">Architecture</button>
+        <button class="graph-tab" id="flowchartTab" type="button" role="tab" data-graph-view="flowchart" aria-selected="false" aria-controls="graphWrap" tabindex="-1">Flow Chart</button>
+      </div>
+      <div class="zoom">
+        <button class="pbtn" type="button" data-zoom="out" title="축소 (-)">−</button>
+        <button class="pbtn wide" type="button" data-zoom="actual" id="zoomLevel" title="100%로">100%</button>
+        <button class="pbtn" type="button" data-zoom="in" title="확대 (+)">+</button>
+        <button class="pbtn wide" type="button" data-zoom="fit" title="전체가 보이게 (0, 더블클릭)">맞춤</button>
+        <button class="pbtn" type="button" data-max="paneGraph" title="화면 전체로 (Esc로 복귀)">⤢</button>
+      </div>
+    </div>
+    <div class="graph-wrap" id="graphWrap" role="tabpanel" aria-labelledby="architectureTab" title="휠: 확대/축소, 드래그: 이동, 더블클릭: 맞춤"><svg id="graph" viewBox="0 0 840 680" role="img" aria-label="Architecture: 실행 모듈과 LLM 호출 상태"></svg></div>
+    <div class="legend" id="architectureLegend">
+      <span><i style="border-color:var(--wait);border-style:dashed"></i>waiting</span>
+      <span><i style="border-color:var(--run);background:var(--run-soft)"></i>running</span>
+      <span><i style="border-color:var(--ok)"></i>completed</span>
+      <span><i style="border-color:var(--err);background:var(--err-soft)"></i>error</span>
+      <span><i style="border-color:var(--wait);border-style:dotted;opacity:.5"></i>skipped (이 갈래에서 건너뜀)</span>
+      <span><i style="border-color:var(--wait);border-style:dashed;background:var(--soft);opacity:.55"></i>inactive (이번 턴 요약 실행 없음)</span>
+      <span><i style="border-color:var(--llm)"></i>LLM 호출 (Gateway + Rust)</span>
+      <span><i style="border-color:var(--web);border-style:dashed;background:var(--web-soft)"></i>웹 검색 (API 서버 내부 도구 · Paper Chat 답변과 Edit 전 Web Research 호출 중 실행)</span>
+      <span><i style="border-color:var(--ink-2);background:var(--soft);border-radius:999px"></i>디버깅 모듈 (결과 기록만 함)</span>
+    </div>
+    <div class="legend" id="flowchartLegend" hidden>
+      <span>마름모: 조건·모드 분기 · Yes / No: 검사 결과 · 점선: 요약 처리·사용자 적용 이벤트</span>
+      <span>전체 흐름 설명 · 드래그로 이동 · 맞춤으로 전체 보기 · 모듈 클릭 시 선택한 실행의 데이터 확인</span>
+    </div>
+  </section>
+    <div class="gutter h" data-gutter="graph" role="separator" aria-orientation="horizontal" aria-label="그래프 높이" tabindex="0" title="드래그로 높이 조절, 더블클릭으로 기본값"></div>
+    <section class="timeline" id="paneTimeline">
+      <div class="tabs">
+        <button class="tab on" data-tab="calls" type="button">함수 호출 순서</button>
+        <button class="tab" data-tab="log" type="button">이벤트 로그</button>
+        <span class="spacer"></span>
+        <button class="pbtn" type="button" data-max="paneTimeline" title="화면 전체로 (Esc로 복귀)">⤢</button>
+      </div>
+      <div class="tl-body" id="timeline"></div>
+    </section>
+  </main>
+  <div class="gutter v right" data-gutter="right" role="separator" aria-orientation="vertical" aria-label="인스펙터 너비" tabindex="0" title="드래그로 너비 조절, 더블클릭으로 기본값"></div>
+  <aside class="col inspector" id="paneInspector">
+    <div class="pane-head">
+      <div class="section-title">Data Inspector</div>
+      <button class="pbtn" type="button" data-max="paneInspector" title="화면 전체로 (Esc로 복귀)">⤢</button>
+      <button class="pbtn" type="button" data-collapse="inspector" title="접기">»</button>
+    </div>
+    <div id="inspector"></div>
+  </aside>
+</div>
+<div class="viewer" id="viewer" hidden role="dialog" aria-modal="true" aria-labelledby="viewerTitle">
+  <div class="viewer-box">
+    <div class="viewer-head"><b id="viewerTitle"></b><button class="btn" type="button" id="viewerCopy">복사</button><button class="btn" type="button" id="viewerClose">닫기 (Esc)</button></div>
+    <pre id="viewerBody"></pre>
+  </div>
+</div>
+<div class="viewer" id="paperSummaryViewer" hidden role="dialog" aria-modal="true" aria-labelledby="paperSummaryTitle">
+  <div class="viewer-box">
+    <div class="viewer-head">
+      <b id="paperSummaryTitle">논문 요약 파일 · paper-summary.yaml</b>
+      <button class="btn" type="button" id="paperSummaryRefresh">새로고침</button>
+      <button class="btn" type="button" id="paperSummaryCopy" disabled>복사</button>
+      <button class="btn" type="button" id="paperSummaryClose">닫기 (Esc)</button>
+    </div>
+    <div class="summary-meta" aria-live="polite">
+      <p id="paperSummaryStatus"></p>
+      <p id="paperSummaryProject"></p>
+      <p id="paperSummaryPath"></p>
+      <p>현재 열린 프로젝트의 저장 파일을 1초마다 확인합니다. 이 창은 요약을 생성하거나 파일을 변경하지 않습니다.</p>
+    </div>
+    <pre id="paperSummaryBody" tabindex="0"></pre>
+  </div>
+</div>
+<div class="viewer" id="sessionSummaryViewer" hidden role="dialog" aria-modal="true" aria-labelledby="sessionSummaryTitle">
+  <div class="viewer-box">
+    <div class="viewer-head">
+      <b id="sessionSummaryTitle">세션 요약 파일</b>
+      <button class="btn" type="button" id="sessionSummarySummaryMode" aria-pressed="true">요약만</button>
+      <button class="btn" type="button" id="sessionSummaryFileMode" aria-pressed="false">전체 파일</button>
+      <button class="btn" type="button" id="sessionSummaryRefresh">새로고침</button>
+      <button class="btn" type="button" id="sessionSummaryCopy" disabled>복사</button>
+      <button class="btn" type="button" id="sessionSummaryClose">닫기 (Esc)</button>
+    </div>
+    <div class="summary-meta" aria-live="polite">
+      <p id="sessionSummaryStatus"></p>
+      <p id="sessionSummaryProject"></p>
+      <p id="sessionSummarySession"></p>
+      <p id="sessionSummaryPath"></p>
+      <p>앱에서 현재 선택한 대화의 저장 파일을 1초마다 확인합니다. 요약은 세션 JSON의 summary 필드에 저장됩니다.</p>
+    </div>
+    <pre id="sessionSummaryBody" tabindex="0"></pre>
+  </div>
+</div>
+<script>
+"use strict";
+const MODULES = {
+  user:         { title: "👤 User Input" },
+  orchestrator: { title: "Paper Orchestra" },
+  reply:        { title: "Reply Module" },
+  refine:       { title: "Request Refinement Module" },
+  selection:    { title: "Section Selection" },
+  edit:         { title: "Paper Edit Module" },
+  answer:       { title: "Paper Chat Module" },
+  final:        { title: "💬 Final Answer", debug: true },
+  llm:          { title: "LLM Gateway" },
+  web:          { title: "Web Search · Chat" },
+  research:     { title: "Web Research Module" },
+  summary:      { title: "Session Summary Module" },
+  sections:     { title: "Paper Summary Module" },
+};
+// The modules of a turn; a turn runs through some of them (its route).
+const CHAIN = ["user", "refine", "orchestrator", "selection", "answer", "edit", "final"];
+// Top-level span of each module: its output is what the module hands on.
+const MAIN_FN = { selection: "runSectionSelection", edit: "runPaperEditModule", user: "receiveUserInput", orchestrator: "runOrchestrator", reply: "runReplyModule", refine: "runRefineModule", answer: "runAnswerModule", research: "runResearchModule", final: "showFinalAnswer", summary: "runSessionSummaryModule", sections: "runPaperSummaryModule" };
+const ROUTE_LABEL = { chat: "Chat → 질의응답", edit: "Edit → 논문 수정", clarify: "의도 확인 · 되묻기", reply: "이전 Reply 경로", answer: "이전 Answer 경로", refine: "이전 Refine 경로" };
+const PREVIEW = 1500;
+
+let traces = new Map();   // trace_id -> trace
+let seen = new Set();     // seq numbers of this connection
+let clearedAt = 0;
+let selTrace = null, selModule = "orchestrator", selSpan = null, tab = "calls";
+const GRAPH_MODE_KEY = "logica-debugger-graph-mode";
+let graphMode = "architecture";
+try { if (localStorage.getItem(GRAPH_MODE_KEY) === "flowchart") graphMode = "flowchart"; } catch { /* storage unavailable */ }
+const expanded = new Set();
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pad = (n, w = 2) => String(n).padStart(w, "0");
+const clock = (ms) => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`; };
+const fmtMs = (ms) => ms == null ? "" : ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${Math.round(ms)}ms`;
+
+function trace(id) {
+  let t = traces.get(id);
+  if (!t) { t = { id, spans: new Map(), order: [], events: [], start: Infinity, end: 0, question: "" }; traces.set(id, t); }
+  return t;
+}
+
+function apply(ev) {
+  if (!ev.trace_id || (ev.timestamp || 0) < clearedAt) return;
+  const t = trace(ev.trace_id);
+  t.events.push(ev);
+  t.start = Math.min(t.start, ev.timestamp);
+  t.end = Math.max(t.end, ev.timestamp);
+  let s = t.spans.get(ev.span_id);
+  if (!s) {
+    s = { id: ev.span_id, parent: null, module: ev.module, fn: ev.function, source: ev.source, status: "running", start: ev.timestamp, end: null, data: [], children: [] };
+    t.spans.set(ev.span_id, s);
+    t.order.push(ev.span_id);
+  }
+  if (ev.event_type === "span_start") {
+    Object.assign(s, { parent: ev.parent_id || null, caller: ev.caller, module: ev.module, fn: ev.function, source: ev.source, start: ev.timestamp, input: ev.input, request_id: ev.request_id });
+    if (s.parent) { const p = t.spans.get(s.parent); if (p && !p.children.includes(s.id)) p.children.push(s.id); }
+    if (!s.parent && ev.input && ev.input.question) t.question = ev.input.question;
+  } else if (ev.event_type === "span_data") {
+    s.data.push({ label: ev.data && ev.data.label, value: ev.data && ev.data.value, ts: ev.timestamp });
+  } else if (ev.event_type === "span_end" || ev.event_type === "span_error") {
+    s.status = ev.status || (ev.event_type === "span_end" ? "completed" : "error");
+    s.end = ev.timestamp; s.duration = ev.duration_ms; s.output = ev.output; s.error = ev.error;
+  }
+  // A session summary runs right after a turn; following it would hide the turn just watched.
+  if (followLatest() && !s.parent && ev.event_type === "span_start" && ev.module !== "summary") { selTrace = ev.trace_id; selSpan = null; selModule = "orchestrator"; }
+  if (!selTrace) { selTrace = ev.trace_id; if (ev.module === "summary") selModule = "summary"; }
+}
+
+const followLatest = () => $("follow").checked;
+
+function rootOf(t) { return t.order.map((id) => t.spans.get(id)).find((s) => !s.parent); }
+/** A Session Summary Module run (its own trace, after a turn) rather than a chat turn. */
+function isSummary(t) { const root = t && rootOf(t); return Boolean(root && root.module === "summary"); }
+function spansOf(t, module) { return t.order.map((id) => t.spans.get(id)).filter((s) => s.module === module); }
+function depth(t, s) { let d = 0, p = s.parent; while (p && t.spans.get(p)) { d++; p = t.spans.get(p).parent; } return d; }
+function mainSpan(t, module) { return spansOf(t, module).find((s) => s.fn === MAIN_FN[module]); }
+/** The route the judge chose, and the modules the turn runs through. */
+function routeOf(t) {
+  const orch = t && mainSpan(t, "orchestrator");
+  const route = orch && orch.output && orch.output.route;
+  if (!route) return null;
+  const selection = mainSpan(t, "selection");
+  const final = mainSpan(t, "final");
+  const clarify = route === "clarify" || Boolean(selection && selection.output && selection.output.clarify) || Boolean(final && final.output && final.output.outcome === "clarify");
+  let path;
+  if (route === "chat" || route === "edit") {
+    path = ["user", "refine", "orchestrator", "selection"];
+    if (!(selection && selection.output && selection.output.clarify)) path.push(route === "edit" ? "edit" : "answer");
+    path.push("final");
+  } else if (route === "clarify") path = ["user", "refine", "orchestrator", "final"];
+  else path = ["user", "orchestrator", route === "reply" ? "reply" : "answer", "final"];
+  return { route, clarify, path, reason: orch.output.reason, mode: orch.input && orch.input.ui_mode };
+}
+
+/** Model calls: a failed attempt that Claude took over does not make the call fail. */
+function llmStatus(t) {
+  const attempts = spansOf(t, "llm").filter((s) => s.fn === "aiService.generate");
+  if (!attempts.length) return "waiting";
+  const last = new Map();
+  for (const s of attempts) last.set(s.parent, s);
+  const ends = [...last.values()];
+  if (ends.some((s) => s.status === "running")) return "running";
+  if (ends.some((s) => s.status === "error")) return "error";
+  return "completed";
+}
+/**
+ * The Session Summary Module in a turn's graph before it runs: it starts after the
+ * turn, once ten turns are not in the summary or they pass 40,000 characters
+ * as the modules read them. Counts come from the turn's input; the length
+ * leaves out the turn itself, which has not ended yet.
+ */
+function summaryIdle(t) {
+  const root = rootOf(t);
+  if (!root || root.status === "running") return { status: "waiting", lines: ["턴이 끝나면 요약 조건 확인"] };
+  const input = (mainSpan(t, "user") || {}).output || {};
+  const open = (input.session_turns || 0) + 1 - (input.summary_covered_turns || 0);
+  const chars = input.unsummarized_chars || 0;
+  const counts = [`미요약 턴 ${open}/${FOLD_AT}`, `이전 턴 미요약 ${chars.toLocaleString()}/${FOLD_CHARS.toLocaleString()}자`];
+  if (open >= FOLD_AT || chars > FOLD_CHARS) return { status: "waiting", lines: [...counts, "이전 요약이 끝나면 실행"] };
+  return { status: "inactive", lines: [...counts, `${FOLD_AT}턴이 쌓이거나 ${FOLD_CHARS.toLocaleString()}자를 넘으면 실행`] };
+}
+const FOLD_AT = 10;
+const FOLD_CHARS = 40000;
+
+/** A section check is not a summary run; keep it inactive when nothing needs updating. */
+function sectionsIdle(t) {
+  const check = spansOf(t, "sections").find((s) => s.fn === "checkSectionSummaries");
+  if (check && check.output) {
+    const count = check.output.to_summarize.length;
+    return count
+      ? { status: "waiting", lines: [`변경·누락 ${count}개 섹션 갱신 대기`] }
+      : { status: "inactive", lines: ["이번 턴 요약 실행 없음", "모든 섹션 요약이 최신 상태"] };
+  }
+  const orch = mainSpan(t, "orchestrator");
+  const map = orch && orch.input && orch.input.paper_map;
+  const root = rootOf(t);
+  if (!orch && (!root || root.status === "running")) return { status: "waiting", lines: ["최초 요약 생성 또는 기존 요약 확인 대기"] };
+  const lines = ["이번 턴 요약 실행 없음", map && map.summarized ? "저장된 논문 요약 사용" : "판단에 사용한 섹션 요약 없음"];
+  if (root && root.status === "running") return { status: "inactive", lines: [...lines, "답변 후 변경·누락 섹션 확인"] };
+  const r = routeOf(t);
+  if (r && r.route === "reply") return { status: "inactive", lines: [...lines, "잡담 경로: 답변 후 갱신 확인 생략"] };
+  return { status: "inactive", lines: [...lines, "변경·누락 섹션 확인 전"] };
+}
+
+function moduleStatus(t, module) {
+  if (module === "llm") return llmStatus(t);
+  if (module === "web") return webStatus(t);
+  if (module === "research" && !mainSpan(t, "research")) return researchIdle(t).status;
+  const list = spansOf(t, module);
+  if (module === "summary" && !list.length && !isSummary(t)) return summaryIdle(t).status;
+  if (module === "sections" && !mainSpan(t, "sections")) return sectionsIdle(t).status;
+  const r = routeOf(t);
+  if (!list.length && r && !r.path.includes(module)) return "skipped";
+  if (!list.length) return "waiting";
+  if (list.some((s) => s.status === "error")) return "error";
+  if (list.some((s) => s.status === "running")) return "running";
+  return "completed";
+}
+function moduleDuration(t, module) {
+  // Web Search: the time its searches took.
+  if (module === "web") return webSearchOf(t).searches.reduce((n, s) => n + (s.duration_ms || 0), 0) || null;
+  const main = spansOf(t, module).filter((s) => module === "llm" ? s.fn === "aiService.generate" : s.fn === MAIN_FN[module]);
+  if (!main.length) return null;
+  return main.reduce((n, s) => n + (s.duration != null ? s.duration : (s.end || Date.now()) - s.start), 0);
+}
+
+// ------------------------------------------------------------ web search
+
+/**
+ * Web search runs on the provider's servers inside two kinds of model calls:
+ * Paper Chat answers (task "answer": the Web Search node) and the web research
+ * before an edit (task "research": the Web Research Module). The Rust
+ * transport reads each call's raw stream: whether the request offered the
+ * tool (input.web_search), each search or page action as it happens
+ * (span_data "web_search"), a paused Claude turn ("pause_turn"), and when the
+ * stream ends every search and cited source (output.web_search).
+ */
+function callsOf(t, task) {
+  return t ? spansOf(t, "llm").filter((s) => s.source !== "rust" && s.fn === "aiService.generate" && s.input && s.input.task === task) : [];
+}
+/** The provider streams of these model calls, as the Rust transport saw them. */
+function streamsOf(t, calls) {
+  const ids = new Set(calls.map((s) => s.id));
+  return spansOf(t, "llm").filter((s) => s.source === "rust" && ids.has(s.parent));
+}
+/** One stream's searches: the full list once it ends, the live updates until then. */
+function streamSearches(s) {
+  const out = s.output && s.output.web_search;
+  if (out && Array.isArray(out.searches)) return out.searches;
+  const live = new Map();
+  for (const d of s.data) if (d.label === "web_search" && d.value) live.set(d.value.n, { ...live.get(d.value.n), ...d.value });
+  return [...live.values()];
+}
+/** Searches, cited sources and paused turns of some provider streams, and whether one is searching now. */
+function searchesIn(streams) {
+  const searches = [], citations = new Map();
+  let pauses = 0, searching = false;
+  for (const s of streams) {
+    const list = streamSearches(s);
+    searches.push(...list);
+    pauses += s.data.filter((d) => d.label === "pause_turn").length;
+    if (s.status === "running" && list.some((x) => x.status === "searching")) searching = true;
+    const out = s.output && s.output.web_search;
+    for (const c of (out && out.citations) || []) if (c && c.url && !citations.has(c.url)) citations.set(c.url, c);
+  }
+  return { searches, citations: [...citations.values()], pauses, searching };
+}
+function webSearchOf(t, task = "answer") {
+  const calls = callsOf(t, task);
+  const streams = t ? streamsOf(t, calls) : [];
+  const running = calls.some((s) => s.status === "running");
+  // The call the turn kept: the last that succeeded (after a fallback, or the re-call with more sections).
+  const kept = [...calls].reverse().find((s) => s.status === "completed");
+  const last = calls.at(-1);
+  return {
+    calls, streams, running, ...searchesIn(streams),
+    // What the user sees is cited by the kept call; a discarded earlier call may have cited others.
+    citations: kept ? searchesIn(streamsOf(t, [kept])).citations : [],
+    // Calls that searched: more than one when a call was redone.
+    searchCalls: calls.filter((c) => searchesIn(streamsOf(t, [c])).searches.length).length,
+    // What the request body offered; the webview flags it too.
+    enabled: streams.some((s) => s.input && s.input.web_search) || calls.some((s) => s.input && s.input.web_search),
+    // Every call ended without success: it failed or was stopped.
+    failure: last && !running && !kept ? String(last.error || "호출 실패").split("\n")[0] : "",
+  };
+}
+function webStatus(t) {
+  if (!t) return "waiting";
+  if (moduleStatus(t, "answer") === "skipped") return "skipped";
+  const w = webSearchOf(t);
+  if (!w.calls.length) return "waiting";
+  if (!w.enabled) return w.running && !w.streams.length ? "waiting" : "inactive";
+  if (w.failure) return "error";
+  // Running only while a search runs: writing the answer after it is not searching.
+  if (w.searching) return "running";
+  if (w.running) return w.searches.length ? "completed" : "waiting";
+  return "completed";
+}
+/** Monospace at 11px: about 6.7px a character, 11px for Hangul and symbols. */
+const textWidth = (s) => [...s].reduce((n, c) => n + (c.codePointAt(0) >= 0x1100 ? 11 : 6.7), 0);
+function fit(text, px) {
+  if (textWidth(text) <= px) return text;
+  let out = "";
+  for (const c of text) { if (textWidth(out + c + "…") > px) break; out += c; }
+  return out + "…";
+}
+const CIRCLED = "①②③④⑤⑥⑦⑧⑨";
+/** An OpenAI call that opened a page or searched in one, rather than searching the web. */
+const isPageAction = (s) => s.action === "open_page" || s.action === "find_in_page";
+/** "검색 2회 · 페이지 1회" */
+function searchCount(searches) {
+  const pages = searches.filter(isPageAction).length;
+  return `검색 ${searches.length - pages}회${pages ? ` · 페이지 ${pages}회` : ""}`;
+}
+function pageName(url) {
+  try { const u = new URL(url); return u.host + (u.pathname.length > 1 ? u.pathname : ""); } catch { return url || ""; }
+}
+/** One search or page action as a node line. */
+function searchLine(s, i) {
+  const tail = s.status === "error" ? `  오류 ${s.error || ""}` : s.status === "done" ? (s.results != null ? `  결과 ${s.results}` : "") : "  …";
+  const more = !isPageAction(s) && s.queries && s.queries.length > 1 ? ` 외 ${s.queries.length - 1}개` : "";
+  const what = s.action === "open_page" ? `페이지 열기 ${pageName(s.url)}`
+    : s.action === "find_in_page" ? `페이지 내 찾기 "${s.pattern || ""}"`
+    : s.query ? `"${s.query}"`
+    : s.status === "searching" ? "검색어 받는 중" : "검색어 미공개";
+  return {
+    status: s.status === "error" ? "error" : s.status === "done" ? "completed" : "running",
+    text: `${CIRCLED[i] || "•"} ${fit(what, 236 - textWidth(more) - textWidth(tail))}${more}${tail}`,
+  };
+}
+function webLines(t) {
+  if (!t) return [{ status: "wait", text: "Paper Chat 답변 호출 중 API 서버가 실행" }, { status: "wait", text: "Edit 전 검색은 Web Research Module" }];
+  const status = webStatus(t);
+  const w = webSearchOf(t);
+  if (status === "skipped" || !w.calls.length) return [];
+  if (status === "inactive") return [{ status: "wait", text: "이번 턴: 웹 검색 꺼짐" }, { status: "wait", text: "요청에 웹 검색 도구가 없음" }];
+  if (!w.enabled) return [];
+  const n = w.searches.length;
+  const now = w.searching ? " · 검색 중" : w.running ? " · 답변 작성 중" : ` · 인용 ${w.citations.length}개`;
+  const head = status === "error" ? `호출 실패 · ${n ? `${searchCount(w.searches)} 확인됨` : "검색 여부 알 수 없음"}`
+    : !n ? (w.running ? "검색 허용 · 모델이 판단 중" : "검색 허용 · 검색하지 않음 (모델 판단)")
+    : `${searchCount(w.searches)}${w.searchCalls > 1 ? ` (호출 ${w.searchCalls}번)` : ""}${now}${w.pauses ? ` · 이어받기 ${w.pauses}회` : ""}`;
+  return [
+    { status: status === "error" ? "error" : "route", text: fit(head, 256) },
+    ...(status === "error" ? [{ status: "error", text: fit(w.failure, 256) }] : []),
+    ...w.searches.map(searchLine),
+  ];
+}
+/** How many searches a model call ran, for the LLM Gateway bar. */
+function webTail(t, call) {
+  const streams = streamsOf(t, [call]);
+  const enabled = streams.some((s) => s.input && s.input.web_search) || Boolean(call.input && call.input.web_search);
+  return enabled ? `  · ${searchCount(searchesIn(streams).searches)}` : "";
+}
+/** Web Search and the Paper Chat Module: the request offers the tool; results and sources come back. */
+function webEdgeSvg(t) {
+  const status = t ? webStatus(t) : "waiting";
+  const w = t ? webSearchOf(t) : null;
+  const c = status === "running" ? "web active"
+    : status === "completed" ? (w.searches.length ? "web done" : "web")
+    : status === "waiting" && w && w.enabled ? "web"
+    : status === "skipped" || status === "inactive" ? "skip" : "";
+  const marker = c.startsWith("web") ? "web" : "wait";
+  return `<path class="edge ${c}" d="M64 614 V758" marker-start="url(#ah-${marker})" marker-end="url(#ah-${marker})"></path>`
+    + '<text class="elabel" x="74" y="680">↑ 검색 허용</text><text class="elabel" x="74" y="696">↓ 결과 · 출처</text>';
+}
+/** "WEB ON" on the Paper Chat Module when its request offered web search. */
+function webTagSvg(t, right, top) {
+  if (!t || !webSearchOf(t).enabled) return "";
+  return `<g class="webtag"><rect x="${right - 84}" y="${top - 9}" width="70" height="18" rx="9"></rect><text x="${right - 49}" y="${top + 4}" text-anchor="middle">WEB ON</text></g>`;
+}
+function webIdle(status) {
+  if (status === "skipped") return "이번 턴은 Chat 경로가 아니어서 Paper Chat Module을 호출하지 않았습니다.";
+  if (status === "waiting") return "Paper Chat Module 호출을 기다리는 중입니다.";
+  if (status === "inactive") return "요청에 웹 검색 도구가 없었습니다 (검색 토글 꺼짐).";
+  if (status === "error") return "웹 검색을 허용한 호출이 provider 응답 전에 실패했습니다.";
+  return "아직 provider 응답이 없습니다.";
+}
+
+/** The web research before an edit, when it did not run: why not. */
+function researchIdle(t) {
+  const r = routeOf(t);
+  if (!r) return { status: "waiting", lines: [] };
+  if (!r.path.includes("edit")) return { status: "skipped", lines: [] };
+  const sel = mainSpan(t, "selection");
+  if (sel && sel.status === "error") return { status: "skipped", lines: [] };
+  if (!sel || sel.status === "running") return { status: "waiting", lines: [] };
+  if (!(sel.input && sel.input.web_research_offered)) return { status: "inactive", lines: ["이번 턴: 웹 검색 꺼짐", "웹 검색이 켜진 Edit만 리서치"] };
+  const plan = sel.output && sel.output.research;
+  if (!(plan && plan.needed)) return { status: "inactive", lines: ["웹 검색 켜짐 · 리서치 불필요", "(Section Selection 판단)"] };
+  return { status: "waiting", lines: [] };
+}
+function researchLines(t) {
+  if (!t) return [{ status: "wait", text: "웹 검색이 켜진 Edit에서 선택 단계가" }, { status: "wait", text: "요청하면 수정 전에 웹 검색" }];
+  const main = mainSpan(t, "research");
+  if (!main) return researchIdle(t).lines.map((text) => ({ status: "wait", text }));
+  const w = webSearchOf(t, "research");
+  const questions = (main.input && main.input.research_questions) || [];
+  const out = main.output;
+  return [
+    { status: "route", text: fit(`질문 ${questions.length}개 · ${searchCount(w.searches)}`, 256) },
+    ...(out ? [{ status: "route", text: `근거 ${out.evidence || 0}개${out.gaps && out.gaps.length ? ` · 못 찾음 ${out.gaps.length}개` : ""}` }] : []),
+    ...(main.status === "error" && main.error ? [{ status: "error", text: fit(String(main.error).split("\n")[0], 256) }] : []),
+    ...w.searches.map(searchLine),
+  ];
+}
+/** Section Selection → Web Research → Paper Edit, when the research runs. */
+function researchEdgesSvg(t) {
+  const rs = t ? moduleStatus(t, "research") : "waiting";
+  const pass = (a, b) => !t ? "" : rs === "skipped" || rs === "inactive" ? "skip" : b === "running" ? "active" : a === "completed" && b !== "waiting" ? "done" : "";
+  const toResearch = pass(t ? moduleStatus(t, "selection") : "", rs);
+  const toEdit = pass(rs, t ? moduleStatus(t, "edit") : "");
+  const marker = (c) => (c === "done" || c === "active" ? c : "wait");
+  return `<path class="edge ${toResearch}" d="M640 590 H698" marker-end="url(#ah-${marker(toResearch)})"></path>`
+    + `<path class="edge ${toEdit}" d="M880 614 V758" marker-end="url(#ah-${marker(toEdit)})"></path>`
+    + '<text class="elabel" x="888" y="690">웹 근거</text>';
+}
+
+// ------------------------------------------------------------ render
+
+function render() {
+  renderTraces();
+  const t = traces.get(selTrace);
+  // Keep the chosen view when switching runs or receiving live events.
+  document.querySelectorAll("[data-graph-view]").forEach((button) => {
+    const selected = button.dataset.graphView === graphMode;
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  });
+  $("graphWrap").setAttribute("aria-labelledby", graphMode === "architecture" ? "architectureTab" : "flowchartTab");
+  $("graph").setAttribute("aria-label", graphMode === "architecture" ? "Architecture: 실행 모듈과 LLM 호출 상태" : "Flow Chart: 섹션 해시 비교와 대화 처리, 논문·세션 요약의 조건 분기");
+  $("architectureLegend").hidden = graphMode !== "architecture";
+  $("flowchartLegend").hidden = graphMode !== "flowchart";
+  if (graphMode === "flowchart") renderFlowChart();
+  else { renderGraph(t); $("graph").dataset.diagram = "architecture"; }
+  applyView();
+  renderTimeline(t);
+  renderInspector(t);
+}
+
+function renderTraces() {
+  const list = [...traces.values()].sort((a, b) => b.start - a.start);
+  if (!list.length) { $("traceList").innerHTML = '<div class="empty">앱에서 질문하면 여기에 나타납니다.</div>'; return; }
+  $("traceList").innerHTML = list.map((t) => {
+    const root = rootOf(t);
+    const status = root ? root.status : "running";
+    const dur = root && root.duration != null ? fmtMs(root.duration) : status === "running" ? "…" : "";
+    return `<button type="button" class="trace ${t.id === selTrace ? "sel" : ""}" data-trace="${esc(t.id)}">
+      <span class="q">${esc(t.question || t.id)}</span>
+      <span class="m"><span>${clock(t.start)}</span><span class="badge ${status}">${status}</span>${isSummary(t) ? '<span class="badge rust">요약</span>' : ""}<span>${dur}</span></span></button>`;
+  }).join("");
+}
+
+/** Section keys for a node line, shortened when there are many. */
+function keyList(keys, max = 4) {
+  return keys.length > max ? `${keys.slice(0, max).join(", ")} 외 ${keys.length - max}개` : keys.join(", ");
+}
+
+/** What a node lists: function calls, or for the LLM node one line per model call. */
+function nodeLines(t, module) {
+  const fns = t ? spansOf(t, module) : [];
+  const time = (s) => s.duration != null ? "  " + fmtMs(s.duration) : s.status === "running" ? "  …" : "";
+  if (module === "web") return webLines(t);
+  if (module === "research") return researchLines(t);
+  if (module === "llm") {
+    return fns.filter((s) => s.source !== "rust" && (s.fn === "aiService.generate" || s.fn === "fallback")).map((s) => ({
+      status: s.status,
+      text: s.fn === "fallback"
+        ? `↪ fallback → ${s.output && s.output.model ? s.output.model : "skipped"}`
+        : `${(s.input && s.input.task) || ""}  ${(s.input && s.input.model) || ""}${time(s)}${webTail(t, s)}`,
+    }));
+  }
+  if (module === "summary" && !fns.length && t && !isSummary(t)) return summaryIdle(t).lines.map((text) => ({ status: "wait", text }));
+  if (module === "sections" && t && !mainSpan(t, "sections")) return sectionsIdle(t).lines.map((text) => ({ status: "wait", text }));
+  const lines = fns.map((s) => ({ status: s.status, text: (s.source === "rust" ? "rust  " : "") + s.fn + time(s) }));
+  const main = t && (module === "sections" ? fns.filter((s) => s.fn === MAIN_FN.sections).at(-1) : mainSpan(t, module));
+  if (module === "summary" && main && main.output) {
+    lines.unshift({ status: "route", text: `턴 1~${main.output.covered_turns} 요약됨, 변경 ${main.output.ops}개, 무시 ${main.output.ignored}개` });
+  }
+  if (module === "sections") {
+    const check = fns.find((s) => s.fn === "checkSectionSummaries");
+    const head = [];
+    const runs = fns.filter((s) => s.fn === MAIN_FN.sections);
+    const latest = runs.at(-1);
+    const orch = t && mainSpan(t, "orchestrator");
+    if (latest) head.push({ status: "route", text: !orch || latest.start <= orch.start ? "최초 논문 요약 생성" : "변경·누락 섹션 요약 갱신" });
+    if (check && check.output) {
+      const c = check.output;
+      head.push({ status: "route", text: `요약 ${c.summarized}/${c.sections}개 있음${c.to_summarize.length ? `, ${c.to_summarize.length}개 요약` : ", 모두 최신"}` });
+    }
+    if (main && main.output) {
+      const missing = main.output.missing || [];
+      head.push({ status: missing.length ? "error" : "route", text: `${main.output.summarized}개 생성${missing.length ? `, 누락 ${missing.join(", ")}` : ""}` });
+    }
+    lines.unshift(...head);
+  }
+  // What the module reads of the paper: the whole paper, or sections word for word (the abstract
+  // always) and the rest as summaries; and the sections an answer asked for before answering.
+  const views = (module === "edit" || module === "answer") ? fns.filter((s) => s.fn === "paperView" && s.output) : [];
+  const asked = fns.find((s) => s.fn === "askForSections");
+  if (asked) lines.unshift({ status: "route", text: `추가 요청 ${keyList(asked.input || [])} → 재호출` });
+  if (views.length) {
+    const v = views[views.length - 1].output;
+    const full = (v.full || []).filter((k) => k !== "abstract");
+    lines.unshift({ status: "route", text: v.kind === "full" ? `논문: 원문 전체 (${v.why === "all" ? "전체 요청" : "섹션 요약 없음"})` : `논문: 원문 ${full.length ? keyList(full) : "초록만"} + 요약 ${v.summarized}개` });
+  }
+  // What the judge sees of the paper (its map) and the sections it chose.
+  const orch = module === "orchestrator" && main;
+  if (orch && orch.input) {
+    const map = orch.input.paper_map;
+    const chosen = orch.output && orch.output.sections;
+    const text = !map ? "논문 지도 없음" : !map.summarized ? "지도: 섹션 요약 없음, 원문 전체 읽음"
+      : `지도: 요약 ${map.summarized}/${map.sections}${chosen ? `, 원문 선택 ${chosen.length ? keyList(chosen) : "없음"}` : ""}`;
+    lines.unshift({ status: "route", text });
+  }
+  // What the call reads of the conversation: the summary (L1) and the turns word for word (L2).
+  const judgeCall = module === "orchestrator" && t && spansOf(t, "llm").find((s) => s.fn === "aiService.generate" && s.input && s.input.task === "judge");
+  const history = judgeCall ? judgeCall.input : main && main.input;
+  if (history && Array.isArray(history.turn_numbers)) {
+    const turns = history.turn_numbers;
+    const orchestrator = mainSpan(t, "orchestrator");
+    const covered = orchestrator && orchestrator.input && orchestrator.input.summary_covered_turns;
+    const reads = `${covered ? `요약 턴 1~${covered}` : "요약 없음"} + 원문 ${turns.length ? `턴 ${turns.join(", ")}` : "없음"}`;
+    lines.unshift({ status: history.clipped ? "error" : "route", text: reads + (history.clipped ? `  (${history.clipped.length}개 메시지 잘림)` : "") });
+  }
+  if (module === "selection" && main && main.output) {
+    const pick = main.output;
+    if (pick.clarify) lines.unshift({ status: "route", text: "대상 불명확 → 되묻기" });
+    else {
+      lines.unshift({ status: "route", text: "참고 원문: " + (keyList(pick.reference || []) || "없음") });
+      if (pick.edit && pick.edit.length) lines.unshift({ status: "route", text: "수정 대상: " + keyList(pick.edit) });
+      // Edit with web search on: whether the edit needs web research first.
+      if (main.input && main.input.web_research_offered) {
+        const plan = pick.research;
+        const text = plan && plan.needed ? `웹 리서치: 필요 (질문 ${(plan.questions || []).length}개)` : "웹 리서치: 불필요";
+        lines.splice(pick.edit && pick.edit.length ? 2 : 1, 0, { status: "route", text });
+      }
+    }
+  }
+  if (module === "edit") {
+    // The web evidence the research handed to the edit.
+    const input = main && main.input;
+    if (input && Array.isArray(input.web_evidence)) {
+      const gaps = (input.research_gaps || []).length;
+      lines.unshift({ status: "route", text: `웹 근거 ${input.web_evidence.length}개${gaps ? ` · 못 찾음 ${gaps}개` : ""}` });
+    }
+    const queued = fns.find((s) => s.fn === "queuePaperEdits");
+    const applied = fns.filter((s) => s.fn === "apply_paper_edits");
+    if (queued && queued.output) {
+      const count = applied.reduce((n, call) => n + (call.output && call.output.applied || 0), 0);
+      lines.unshift({ status: "route", text: "수정안 " + (queued.output.edits || []).length + "개 · " + (count ? "적용 " + count + "개" : "Diff 검토 대기") });
+    }
+    if (applied.length) {
+      const last = applied.at(-1);
+      lines.unshift({ status: last.status, text: last.output && last.output.applied ? "원문 적용 " + last.output.applied + "개" : last.error ? "원문 적용 실패" : "원문 검증·적용 중" });
+    }
+  }
+  const r = module === "orchestrator" && routeOf(t);
+  if (r) {
+    if (r.reasonIssue) lines.unshift({ status: "error", text: r.reasonIssue === "arguments_unreadable" ? "⚠ 툴 인자 파싱 실패 (reason 없음)" : "⚠ reason 비어 있음" });
+    lines.unshift({ status: "route", text: (r.mode === "auto" ? "Auto 판단: " : "UI 고정: ") + ROUTE_LABEL[r.route] });
+  }
+  return lines;
+}
+
+/** The border already shows a completed step, so it shows only its time. */
+function statusText(status, dur) {
+  const time = dur != null ? fmtMs(dur) : "";
+  return status === "completed" ? time : `${status}${time ? "  " + time : ""}`;
+}
+
+function nodeSvg(t, module, x, y, w, h) {
+  const status = t ? moduleStatus(t, module) : "waiting";
+  const dur = t ? moduleDuration(t, module) : null;
+  // Summary module names need the title row; put status and duration below it.
+  const summaryHeader = module === "summary" || module === "sections" || module === "refine";
+  const headerExtra = summaryHeader ? 16 : 0;
+  const max = Math.floor((h - 40 - headerExtra) / 14);
+  const lines = nodeLines(t, module).slice(0, max).map((l, i) =>
+    `<text class="${l.status === "route" ? "route" : "fn " + l.status}" x="${x + 12}" y="${y + 50 + headerExtra + i * 14}">${esc(l.text)}</text>`).join("");
+  const empty = status === "waiting" ? "아직 실행 안 됨" : status === "skipped" ? "이 갈래에서는 건너뜀" : "";
+  const debug = Boolean(MODULES[module].debug);
+  const tag = debug ? `<g class="tag"><rect x="${x + w - 92}" y="${y - 8}" width="78" height="16" rx="8"></rect><text x="${x + w - 53}" y="${y + 3.5}" text-anchor="middle">디버깅 모듈</text></g>` : "";
+  return `<g class="node ${status} ${module === "llm" ? "llm" : ""} ${module === "web" ? "web" : ""} ${debug ? "debug" : ""} ${selModule === module ? "sel" : ""}" data-module="${module}" tabindex="0" role="button" aria-label="${esc(MODULES[module].title)} ${status}${debug ? " (디버깅 모듈)" : ""}">
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${debug ? 24 : 10}"></rect>${tag}
+    <text class="title" x="${x + 12}" y="${y + 22}">${esc(MODULES[module].title)}</text>
+    <text class="meta" x="${summaryHeader ? x + 12 : x + w - 12}" y="${y + 22 + headerExtra}" text-anchor="${summaryHeader ? "start" : "end"}">${statusText(status, dur)}</text>
+    <line x1="${x + 12}" y1="${y + 32 + headerExtra}" x2="${x + w - 12}" y2="${y + 32 + headerExtra}" stroke="var(--line)"></line>
+    ${lines || `<text class="fn" x="${x + 12}" y="${y + 50 + headerExtra}">${empty}</text>`}
+  </g>`;
+}
+
+function edgeClass(t, from, to) {
+  if (!t) return "";
+  const a = moduleStatus(t, from), b = moduleStatus(t, to);
+  if (b === "running") return "active";
+  if (a === "completed" && b !== "waiting") return "done";
+  return "";
+}
+
+/** Arrowheads for the three edge states; a skipped edge fades with its path. */
+const MARKERS = `<defs>${["", "done", "active", "web"].map((c) =>
+  `<marker id="ah-${c || "wait"}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah ${c}" d="M0,0 L10,5 L0,10 z"></path></marker>`).join("")}</defs>`;
+const edgeSvg = (c, d, label, lx, ly, background = false, anchor = "start") =>
+  `<path class="edge ${c}${background ? " background" : ""}" d="${d}" marker-end="url(#ah-${c === "done" || c === "active" ? c : "wait"})"></path>` +
+  (label ? `<text class="elabel" x="${lx}" y="${ly}" text-anchor="${anchor}">${esc(label)}</text>` : "");
+
+/**
+ * The LLM Gateway as a bar under the graph: every model call of the turn in
+ * order (judge, then the module calls), with the fallbacks between them.
+ */
+function gatewaySvg(t, x, y, w) {
+  const status = t ? moduleStatus(t, "llm") : "waiting";
+  const dur = t ? moduleDuration(t, "llm") : null;
+  const CIRCLED = "①②③④⑤⑥⑦⑧⑨";
+  let n = 0;
+  const items = nodeLines(t, "llm").map((l) => ({ ...l, text: l.text.startsWith("↪") ? l.text : `${CIRCLED[n++] || "•"} ${l.text}` }));
+  // Monospace at 11px is about 6.7px a character; wrap the calls to fit the bar.
+  const rows = [[]];
+  let used = 0;
+  for (const it of items) {
+    const width = textWidth(it.text) + 18;
+    if (used + width > w - 24 && rows.at(-1).length) { rows.push([]); used = 0; }
+    rows.at(-1).push({ ...it, x: x + 12 + used });
+    used += width;
+  }
+  const h = 40 + Math.max(1, rows.length) * 15;
+  const lines = items.length
+    ? rows.flatMap((row, i) => row.map((it) => `<text class="fn ${it.status}" x="${it.x}" y="${y + 50 + i * 15}">${esc(it.text)}</text>`)).join("")
+    : `<text class="fn" x="${x + 12}" y="${y + 50}">아직 호출 없음</text>`;
+  return { h, svg: `<g class="node ${status} llm ${selModule === "llm" ? "sel" : ""}" data-module="llm" tabindex="0" role="button" aria-label="LLM Gateway ${status}">
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10"></rect>
+    <text class="title" x="${x + 12}" y="${y + 22}">${esc(MODULES.llm.title)}</text>
+    <text class="meta" x="${x + w - 12}" y="${y + 22}" text-anchor="end">${statusText(status, dur)}</text>
+    <line x1="${x + 12}" y1="${y + 32}" x2="${x + w - 12}" y2="${y + 32}" stroke="var(--line)"></line>
+    ${lines}</g>` };
+}
+
+/** A Session Summary Module run: the module and the model calls it makes. */
+function renderSummaryGraph(t) {
+  const X = 20, W = 800;
+  const bar = gatewaySvg(t, X, 190, W);
+  graphSize(840, 190 + bar.h + 12);
+  $("graph").innerHTML = [
+    MARKERS,
+    nodeSvg(t, "summary", 300, 20, 240, 130),
+    edgeSvg(spansOf(t, "llm").length ? "done" : "", "M420 150 V186"),
+    bar.svg,
+  ].join("");
+}
+
+/** Fixed module positions: paper summaries supply the judge, and updates loop back after an answer. */
+function renderGraph(t) {
+  if (isSummary(t)) return renderSummaryGraph(t);
+  const W = 280;
+  const at = {
+    user: [360, 10, 84], refine: [360, 160, 128], orchestrator: [360, 350, 136],
+    selection: [360, 550, 150], answer: [20, 760, 154], edit: [700, 760, 154],
+    final: [360, 1000, 90], summary: [700, 990, 132], sections: [20, 10, 146],
+    // Above the Paper Chat Module, in the free column left of the selection edges.
+    web: [20, 452, 160],
+    // Its mirror on the Edit side: the web research before the Paper Edit Module.
+    research: [700, 452, 160],
+  };
+  const r = routeOf(t);
+  const cls = (from, to) => {
+    if (!r) return edgeClass(t, from, to);
+    const i = r.path.indexOf(from);
+    return i >= 0 && r.path[i + 1] === to ? edgeClass(t, from, to) : "skip";
+  };
+  const mid = (m) => at[m][0] + W / 2;
+  const top = (m) => at[m][1];
+  const bottom = (m) => at[m][1] + at[m][2];
+  const sectionsRuns = t ? spansOf(t, "sections").filter((s) => s.fn === MAIN_FN.sections) : [];
+  const orch = t && mainSpan(t, "orchestrator");
+  const updated = sectionsRuns.some((s) => orch && s.start > orch.start);
+  const writeClass = !t ? "" : sectionsRuns.length ? moduleStatus(t, "sections") === "running" ? "active" : "done" : "skip";
+  const map = orch && orch.input && orch.input.paper_map;
+  const readClass = !t ? "" : map && map.summarized ? "done" : "skip";
+  const edges = [
+    edgeSvg(cls("user", "refine"), "M500 94 V158", "원래 요청 · UI Mode", 510, 125),
+    edgeSvg(cls("refine", "orchestrator"), "M500 288 V348", "정제 요청 + 원래 요청", 510, 322),
+    edgeSvg(cls("orchestrator", "selection"), "M500 486 V548", "Chat/Edit 경로 확정", 510, 522),
+    edgeSvg(cls("selection", "answer"), "M430 700 V728 H160 V758", "Chat", 220, 720),
+    edgeSvg(cls("selection", "edit"), "M570 700 V728 H840 V758", "Edit · 대상/참고 분리", 730, 720),
+    edgeSvg(cls("answer", "final"), "M160 914 V960 H430 V998", "질의응답", 170, 949),
+    edgeSvg(cls("edit", "final"), "M840 914 V960 H570 V998", "수정안 · Diff", 850, 949),
+    // Labelled above the Web Research Module, which takes the space it had.
+    edgeSvg(cls("orchestrator", "final"), "M640 418 H674 V968 H610 V998", "의도 모호: 되묻기", 690, 440),
+    edgeSvg(cls("selection", "final"), "M360 625 H328 V968 H390 V998", "대상 모호", 310, 746, false, "end"),
+    edgeSvg(writeClass, "M160 156 V178", "저장", 174, 171),
+    edgeSvg(readClass, "M160 260 V418 H358", "논문 섹션 요약", 170, 342),
+    // Right of its line: the Web Search node covers the space to the left.
+    edgeSvg(readClass, "M300 220 H326 V625 H358", "선택용 지도", 334, 535),
+    edgeSvg("", "M700 224 H642", "대화", 670, 213, true, "middle"),
+    edgeSvg(t && spansOf(t, "summary").length ? edgeClass(t, "final", "summary") : t ? "skip" : "", "M640 1045 H698", "조건부 요약", 670, 1033, true, "middle"),
+    edgeSvg(updated ? "done" : t ? "skip" : "", "M360 1075 H8 V82 H18", "적용 후 · 변경 섹션 요약", 165, 1110, true, "middle"),
+    edgeSvg(t && spansOf(t, "summary").length ? "done" : t ? "skip" : "", "M980 1080 H994 V224 H982", "", 0, 0, true),
+    webEdgeSvg(t),
+    researchEdgesSvg(t),
+  ];
+  const bar = gatewaySvg(t, 20, 1150, 960);
+  graphSize(1000, 1150 + bar.h + 12);
+  $("graph").innerHTML = [
+    MARKERS, ...edges,
+    flowBox("architecture-paper-summary", "document", 160, 220, W, 80, ["paper-summary.yaml", "논문 요약 저장 · 재사용"], "", "paperSummary"),
+    flowBox("architecture-session-history", "document", 840, 224, W, 80, ["Session History", "세션 요약 + 최근 대화"], "", "sessionSummary"),
+    ...[...CHAIN, "summary", "sections", "web", "research"].map((m) => nodeSvg(t, m, at[m][0], at[m][1], W, at[m][2])),
+    webTagSvg(t, at.answer[0] + W, at.answer[1]),
+    '<text class="elabel" x="840" y="932" text-anchor="middle">apply_paper_edits: 적용 버튼으로 실행</text>',
+    '<text class="elabel" x="500" y="1134" text-anchor="middle">Paper Orchestra: UI 고정 경로 / Auto만 intent LLM 호출</text>',
+    bar.svg,
+  ].join("");
+}
+
+/** Static control flow: decision diamonds describe code, not inferred trace results. */
+function flowBox(id, kind, x, y, w, h, lines, module = "", file = "") {
+  const left = x - w / 2, top = y - h / 2;
+  const shape = kind === "decision"
+    ? `<polygon class="flow-shape" points="${x},${top} ${left + w},${y} ${x},${top + h} ${left},${y}"></polygon>`
+    : kind === "document"
+      ? `<path class="flow-shape" d="M${left} ${top} H${left + w - 18} L${left + w} ${top + 18} V${top + h} H${left} Z M${left + w - 18} ${top} V${top + 18} H${left + w}"></path>`
+      : `<rect class="flow-shape" x="${left}" y="${top}" width="${w}" height="${h}" rx="${kind === "terminal" ? 26 : 10}"></rect>`;
+  const action = module ? `data-module="${module}"` : file ? `data-open-file="${file}"` : "";
+  const accessible = action ? `tabindex="0" role="button" aria-label="${esc(lines.join(" "))}"` : "";
+  return `<g class="flow-node ${kind} ${module ? "node" : ""} ${module && selModule === module ? "sel" : ""}" data-flow-id="${id}" ${action} ${accessible}>
+    ${shape}<text class="flow-label" text-anchor="middle">${lines.map((line, i) => `<tspan x="${x}" y="${y - (lines.length - 1) * 11 + 5 + i * 22}">${esc(line)}</tspan>`).join("")}</text>
+    </g>`;
+}
+
+function flowEdge(path, label = "", x = 0, y = 0, background = false) {
+  return `<path class="flow-edge ${background ? "background" : ""}" d="${path}" marker-end="url(#flow-arrow)"></path>`
+    + (label ? `<text class="flow-edge-label" x="${x}" y="${y}" text-anchor="middle">${esc(label)}</text>` : "");
+}
+
+function renderFlowChart() {
+  graphSize(1800, 2800);
+  const graph = $("graph");
+  if (graph.dataset.diagram === "flowchart" && graph.dataset.flowSelection === selModule) return;
+  graph.dataset.diagram = "flowchart";
+  graph.dataset.flowSelection = selModule;
+  graph.innerHTML = [
+    '<defs><marker id="flow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="var(--ink-2)"></path></marker></defs>',
+    ...[[20, 410, "1 · 논문 요약 준비"], [445, 1260, "2 · 공통 정제 → 모드별 경로 → 섹션 선택 → 실행"], [1730, 1020, "3 · 턴 종료 후 요약 / 사용자의 수정안 적용"]].map(([y, h, title]) =>
+      `<rect class="flow-frame" x="30" y="${y}" width="1740" height="${h}" rx="16"></rect><text class="flow-heading" x="55" y="${y + 28}">${title}</text>`),
+    flowEdge("M900 115 V155"),
+    flowEdge("M650 230 H455", "No", 550, 218),
+    flowEdge("M300 280 V330"),
+    flowEdge("M900 305 V330", "Yes", 933, 321),
+    flowEdge("M300 400 V435 H900 V475"),
+    flowEdge("M900 400 V475"),
+    flowEdge("M1320 520 H1080", "대화 정보", 1200, 508),
+    flowEdge("M900 565 V620"),
+    flowEdge("M700 690 H300 V800", "Chat", 500, 678),
+    flowEdge("M900 760 V800", "Edit", 930, 785),
+    flowEdge("M1100 690 H1500 V795", "Auto", 1300, 678),
+    flowEdge("M300 880 V960 H830 V1065"),
+    flowEdge("M900 880 V1065"),
+    flowEdge("M1500 885 V940"),
+    flowEdge("M1335 1000 H1160 V1120 H1100", "Yes · Chat/Edit", 1235, 988),
+    flowEdge("M1500 1060 V1420", "No", 1530, 1105),
+    flowEdge("M900 1175 V1220"),
+    flowEdge("M1100 1290 H1190 V1460 H1320", "No", 1140, 1278),
+    flowEdge("M900 1360 V1385 H300 V1410", "Yes · Chat", 530, 1373),
+    flowEdge("M900 1360 V1410", "Yes · Edit", 955, 1390),
+    // Web research hands its evidence to the edit, only when it runs.
+    flowEdge("M690 1460 H718", "", 0, 0, true),
+    flowEdge("M300 1510 V1570 H830 V1610"),
+    flowEdge("M900 1510 V1610"),
+    flowEdge("M1500 1500 V1570 H970 V1610"),
+    flowEdge("M830 1690 V1770 H300 V1825", "턴 종료 후 해시 확인", 495, 1758, true),
+    flowEdge("M900 1690 V1825", "Edit 제안", 950, 1805, true),
+    flowEdge("M970 1690 V1770 H1500 V1825", "세션 요약 확인", 1340, 1758, true),
+    flowEdge("M300 1975 V2045", "Yes", 335, 2010, true),
+    flowEdge("M50 1900 H25 V2670 H200", "No", 72, 1888, true),
+    flowEdge("M300 2115 V2180", "", 0, 0, true),
+    flowEdge("M300 2280 V2330", "", 0, 0, true),
+    flowEdge("M300 2410 V2643", "", 0, 0, true),
+    flowEdge("M900 1975 V2030", "Yes", 934, 2010),
+    flowEdge("M900 2190 V2300", "Yes", 934, 2240),
+    flowEdge("M1110 2110 H1175 V2610 H1070", "No", 1145, 2098),
+    flowEdge("M1090 1900 H1160 V2610 H1070", "No", 1125, 1888),
+    flowEdge("M720 2350 H640 V1900 H552", "적용 성공 → 해시 재확인", 640, 2280, true),
+    flowEdge("M900 2400 V2460"),
+    flowEdge("M1500 1975 V2075", "Yes", 1535, 2010, true),
+    flowEdge("M1750 1900 H1775 V2670 H1600", "No", 1725, 1888, true),
+    flowEdge("M1500 2185 V2260", "", 0, 0, true),
+    flowEdge("M1500 2340 V2643", "", 0, 0, true),
+
+    flowBox("user", "terminal", 900, 85, 280, 60, ["User Input + UI Mode"], "user"),
+    flowBox("initial-summary-check", "decision", 900, 230, 500, 150, ["현재 섹션 해시와 일치하는", "저장 요약이 하나라도 있는가?"]),
+    flowBox("paper-initial", "module", 300, 230, 310, 100, ["Paper Summary Module", "최초 논문 요약 생성"], "sections"),
+    flowBox("paper-initial-save", "document", 300, 365, 340, 70, ["paper-summary.yaml", "논문 요약 저장"], "", "paperSummary"),
+    flowBox("paper-reuse", "document", 900, 365, 340, 70, ["저장된 논문 요약 재사용", "LLM 호출 없음"], "", "paperSummary"),
+    flowBox("conversation-data", "document", 1500, 520, 360, 80, ["Session History", "저장된 세션 요약 + 최근 대화"], "", "sessionSummary"),
+    flowBox("refine", "module", 900, 520, 360, 90, ["Request Refinement Module", "문맥 복원 · 요청 문자열 출력"], "refine"),
+    flowBox("ui-mode", "decision", 900, 690, 400, 140, ["선택한 UI Mode는?"]),
+    flowBox("fixed-chat", "process", 300, 840, 300, 80, ["Chat 경로 확정", "코드로 지정 · intent LLM 없음"]),
+    flowBox("fixed-edit", "process", 900, 840, 300, 80, ["Edit 경로 확정", "코드로 지정 · intent LLM 없음"]),
+    flowBox("auto-router", "module", 1500, 840, 360, 90, ["Auto Router", "Chat / Edit 의도 판단"], "orchestrator"),
+    flowBox("auto-intent", "decision", 1500, 1000, 330, 120, ["Chat/Edit 의도가", "분명한가?"]),
+    flowBox("selection", "module", 900, 1120, 400, 110, ["Section Selection", "Chat: 원문이 필요한 섹션", "Edit: 수정 대상 + 참고 섹션", "Edit + 웹 검색: 리서치 필요 여부"], "selection"),
+    flowBox("target-check", "decision", 900, 1290, 400, 140, ["필요한 대상과 요청이", "명확한가?"]),
+    flowBox("answer", "module", 300, 1460, 360, 100, ["Paper Chat Module", "선택한 원문 + 나머지 요약", "질의응답 · 웹 검색 ON이면 검색 허용"], "answer"),
+    flowBox("research", "module", 595, 1460, 190, 100, ["Web Research", "Edit 전 웹 검색", "선택 단계가 요청할 때"], "research"),
+    flowBox("edit", "module", 900, 1460, 360, 100, ["Paper Edit Module", "수정·참고 원문 + 논문 요약", "변경안을 tool 인자로 반환"], "edit"),
+    flowBox("clarify", "process", 1500, 1460, 360, 80, ["사용자에게 되묻기"]),
+    flowBox("final", "terminal", 900, 1650, 360, 80, ["Final Answer", "Chat 답변 / Edit 수정안 Diff"], "final"),
+    flowBox("changed-hash-check", "decision", 300, 1900, 500, 150, ["현재 섹션 중 저장 요약과", "해시가 일치하지 않는", "섹션이 있는가?"]),
+    flowBox("apply-check", "decision", 900, 1900, 380, 150, ["사용자가 수정안의", "적용 버튼을 눌렀는가?"]),
+    flowBox("session-fold-check", "decision", 1500, 1900, 500, 150, ["미요약 대화가 10턴 이상", "또는 40,000자 초과인가?"]),
+    flowBox("changed-sections", "process", 300, 2080, 360, 70, ["변경·추가·누락된 섹션 식별"]),
+    flowBox("paper-update", "module", 300, 2230, 380, 100, ["Paper Summary Module", "해당 섹션만 재요약"], "sections"),
+    flowBox("paper-update-save", "document", 300, 2370, 360, 80, ["paper-summary.yaml 갱신", "다음 요청부터 재사용"], "", "paperSummary"),
+    flowBox("apply-validate", "decision", 900, 2110, 420, 160, ["현재 원문이 유일하게 일치하고", "수정 구간이", "겹치지 않는가?"]),
+    flowBox("apply-tool", "module", 900, 2350, 360, 100, ["apply_paper_edits", "검증을 통과한 원문만 교체"], "edit"),
+    flowBox("applied", "terminal", 900, 2490, 300, 60, ["적용 완료"]),
+    flowBox("pending", "terminal", 900, 2610, 340, 60, ["대기 / 거절 / 원문 검증 실패"]),
+    flowBox("session-summary", "module", 1500, 2130, 390, 110, ["Session Summary Module", "최근 4턴을 남기고", "한 번에 최대 6턴씩 요약"], "summary"),
+    flowBox("session-save", "document", 1500, 2300, 360, 80, ["세션 JSON의 summary 갱신", "다음 요청부터 재사용"], "", "sessionSummary"),
+    flowBox("paper-end", "terminal", 300, 2670, 200, 54, ["논문 후처리 종료"]),
+    flowBox("session-end", "terminal", 1500, 2670, 200, 54, ["세션 후처리 종료"]),
+    '<text class="flow-note" x="1500" y="2230" text-anchor="middle">질문·답변 각각 최대 4,000자로 계산</text>',
+    '<text class="flow-note" x="900" y="2780" text-anchor="middle">턴 종료 후 요약과 수동 적용은 독립 경로입니다. 실제 호출·검증·적용 결과는 Architecture에서 확인합니다.</text>',
+  ].join("");
+}
+
+function renderTimeline(t) {
+  document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+  if (!t) { $("timeline").innerHTML = '<div class="empty">선택된 실행이 없습니다.</div>'; return; }
+  const now = Date.now();
+  const span0 = t.start, total = Math.max(1, Math.max(t.end, ...[...t.spans.values()].map((s) => s.end || (s.status === "running" ? now : s.start))) - span0);
+  if (tab === "calls") {
+    $("timeline").innerHTML = t.order.map((id) => {
+      const s = t.spans.get(id);
+      const d = depth(t, s);
+      const end = s.end || (s.status === "running" ? now : s.start);
+      const left = ((s.start - span0) / total) * 100, width = Math.max(0.4, ((end - s.start) / total) * 100);
+      return `<div class="row ${selSpan === id ? "sel" : ""}" data-span="${esc(id)}" data-module="${esc(s.module)}">
+        <span class="dim">${clock(s.start)}</span>
+        <span class="badge ${s.status}">${s.status}</span>
+        <span class="fnname" style="padding-left:${d * 14}px" title="${esc(s.caller ? s.caller + " → " + s.fn : s.fn)}">${d ? "↳ " : ""}${esc(s.fn)}${s.source === "rust" ? ' <span class="badge rust">rust</span>' : ""}</span>
+        <span class="bar-track"><span class="bar ${s.status} ${s.module === "llm" && s.status === "completed" ? "llm" : ""}" style="left:${left}%;width:${width}%"></span></span>
+      </div>`;
+    }).join("");
+  } else {
+    $("timeline").innerHTML = [...t.events].sort((a, b) => a.timestamp - b.timestamp || a.seq - b.seq).map((ev) => {
+      const cls = ev.event_type === "span_start" ? "ev-start" : ev.event_type === "span_end" ? "ev-end" : ev.event_type === "span_error" ? "ev-error" : "ev-data";
+      return `<div class="log" data-span="${esc(ev.span_id)}" data-module="${esc(ev.module)}">
+        <span>${clock(ev.timestamp)}</span><span class="dim">+${ev.timestamp - span0}ms</span><span class="dim">${esc(ev.source || "")}</span>
+        <span>${esc(ev.module || "")}</span><span class="fnname">${esc(ev.function || "")}</span><span class="${cls}">${esc(ev.event_type)}</span>
+        <span class="dim">${ev.duration_ms != null ? fmtMs(ev.duration_ms) : ev.data ? esc(ev.data.label) : ev.error ? esc(ev.error) : ""}</span></div>`;
+    }).join("");
+  }
+}
+
+/** Values the inspector shows, for the full-window viewer. */
+const shown = new Map();
+
+function valueHtml(key, value, label = "") {
+  if (value === undefined) return '<pre class="val dim">(없음)</pre>';
+  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  const long = text.length > PREVIEW && !expanded.has(key);
+  shown.set(key, { text, label });
+  const big = text.length > 300 ? `<button class="more" type="button" data-view="${esc(key)}">크게 보기</button>` : "";
+  return `<pre class="val">${esc(long ? text.slice(0, PREVIEW) + "…" : text)}</pre>` +
+    (long ? `<button class="more" type="button" data-expand="${esc(key)}">전체 ${text.length.toLocaleString()}자 보기</button> ` : "") + big;
+}
+
+function renderInspector(t) {
+  const box = $("inspector");
+  shown.clear();
+  if (!t) { box.innerHTML = '<div class="empty">노드를 누르면 입력, 중간값, 출력을 봅니다.</div>'; return; }
+  const status = moduleStatus(t, selModule);
+  // Web Search has no spans of its own: it shows the Paper Chat Module's provider streams.
+  // The Web Research Module shows its own spans and its model call's streams.
+  const web = selModule === "web" ? webSearchOf(t) : selModule === "research" ? webSearchOf(t, "research") : null;
+  const list = selModule === "web" ? web.streams : selModule === "research" ? [...spansOf(t, "research"), ...web.streams] : spansOf(t, selModule);
+  // A module this page does not know yet still opens.
+  const title = (MODULES[selModule] || { title: selModule }).title;
+  const head = `<div class="insp-head"><h2>${esc(title)}</h2><span class="badge ${status}">${status}</span>
+    <span class="dim">${list.length}개 함수 호출</span></div>`;
+  if (!list.length) {
+    const idle = selModule === "research" ? researchIdle(t).lines.join(" ") : "";
+    const why = selModule === "summary" && !isSummary(t) ? summaryIdle(t).lines.join(", ")
+      : selModule === "sections" ? sectionsIdle(t).lines.join(", ") : selModule === "web" ? webIdle(status)
+      : idle || "이 단계는 아직 실행되지 않았습니다.";
+    box.innerHTML = head + `<div class="empty">${esc(why)}</div>`;
+    return;
+  }
+  const summary = web && web.streams.length ? `<div class="blk"><div class="lbl">웹 검색 요약 (${selModule === "web" ? "Paper Chat" : "Web Research"} 호출 전체)</div>${valueHtml(`${selModule}:summary`, {
+    enabled: web.enabled,
+    calls: web.calls.map((c) => ({ request: c.request_id, status: c.status, searches: searchesIn(streamsOf(t, [c])).searches.length })),
+    searches: web.searches,
+    // The answer the user sees cites these: the last call that succeeded.
+    citations: web.citations,
+    paused_turns: web.pauses,
+  }, `${title}: web search`)}</div>` : "";
+  box.innerHTML = head + summary + list.map((s) => {
+    const callees = s.children.map((c) => t.spans.get(c)).filter(Boolean).map((c) => c.fn);
+    const main = s.fn === MAIN_FN[selModule];
+    const r = routeOf(t);
+    const path = r ? r.path : ["user", "refine", "orchestrator"];
+    const after = path.includes(selModule) ? path[path.indexOf(selModule) + 1] : null;
+    const next = main && after && MODULES[after].title;
+    const data = s.data.map((d, i) => `<div class="blk"><div class="lbl">중간값: ${esc(d.label)} <span class="dim">${clock(d.ts)}</span></div>${valueHtml(s.id + ":d" + i, d.value, `${s.fn}: ${d.label}`)}</div>`).join("");
+    return `<div class="span ${selSpan === s.id ? "sel" : ""}" id="span-${esc(s.id)}">
+      <div class="span-h"><span class="fnname">${esc(s.fn)}</span><span class="badge ${s.status}">${s.status}</span>${s.source === "rust" ? '<span class="badge rust">rust</span>' : '<span class="badge">webview</span>'}</div>
+      <dl class="kv">
+        <dt>caller</dt><dd>${esc(s.caller || (s.parent && t.spans.get(s.parent) ? t.spans.get(s.parent).fn : "(없음)"))}</dd>
+        <dt>callee</dt><dd>${esc(callees.join(", ") || "(없음)")}</dd>
+        <dt>시작</dt><dd>${clock(s.start)}</dd>
+        <dt>종료</dt><dd>${s.end ? clock(s.end) : "실행 중"}</dd>
+        <dt>실행 시간</dt><dd>${s.duration != null ? fmtMs(s.duration) : "…"}</dd>
+        ${s.request_id ? `<dt>request</dt><dd>${esc(s.request_id)}</dd>` : ""}
+      </dl>
+      <div class="blk"><div class="lbl">Input</div>${valueHtml(s.id + ":in", s.input, `${s.fn}: input`)}</div>
+      ${data}
+      ${s.error ? `<div class="blk"><div class="lbl" style="color:var(--err)">Error</div>${valueHtml(s.id + ":err", s.error, `${s.fn}: error`)}</div>` : ""}
+      ${s.output !== undefined || s.status === "completed" ? `<div class="blk ${next ? "next" : ""}"><div class="lbl">${next ? `Output → ${esc(next)} 로 전달` : "Output"}</div>${valueHtml(s.id + ":out", s.output, `${s.fn}: output`)}</div>` : ""}
+    </div>`;
+  }).join("");
+  if (selSpan) document.getElementById("span-" + selSpan)?.scrollIntoView({ block: "nearest" });
+}
+
+// ------------------------------------------------------------ zoom and pan
+
+/**
+ * The graph's view: `k` screen pixels per graph unit, (x, y) the graph point
+ * at the top left. Start at readable 100%; fitting the whole graph is opt-in.
+ * Manual zoom and pan survive live events, trace changes and page reloads.
+ */
+const K_MIN = 0.2, K_MAX = 4;
+const minimumZoom = (mode = graphMode) => mode === "flowchart" ? 0.02 : K_MIN;
+const VIEW_KEY = "logica-debugger-view";
+const VIEW_KEYS = { architecture: VIEW_KEY, flowchart: "logica-debugger-flowchart-view" };
+const graphViews = {
+  architecture: { x: 0, y: 0, k: 1, mode: "readable", w: 840, h: 680, dragged: false },
+  flowchart: { x: 0, y: 0, k: 0.8, mode: "readable", w: 1440, h: 2100, dragged: false },
+};
+for (const mode of Object.keys(graphViews)) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(VIEW_KEYS[mode]) || "{}");
+    if (["readable", "fit", "manual"].includes(saved.mode) && [saved.x, saved.y, saved.k].every(Number.isFinite)) {
+      Object.assign(graphViews[mode], { mode: saved.mode, x: saved.x, y: saved.y, k: Math.min(Math.max(saved.k, minimumZoom(mode)), K_MAX) });
+    }
+  } catch { /* storage unavailable or invalid */ }
+}
+let zoom = graphViews[graphMode];
+
+function saveView(mode = graphMode) {
+  const { x, y, k, mode: viewMode } = graphViews[mode];
+  try { localStorage.setItem(VIEW_KEYS[mode], JSON.stringify({ x, y, k, mode: viewMode })); } catch { /* storage unavailable */ }
+}
+
+function setGraphMode(mode) {
+  if (!Object.hasOwn(graphViews, mode) || mode === graphMode) return;
+  saveView();
+  graphMode = mode;
+  zoom = graphViews[mode];
+  try { localStorage.setItem(GRAPH_MODE_KEY, mode); } catch { /* storage unavailable */ }
+  render();
+}
+
+document.querySelectorAll("[data-graph-view]").forEach((button) => button.addEventListener("keydown", (e) => {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+  e.preventDefault(); e.stopPropagation();
+  const mode = e.key === "Home" ? "architecture" : e.key === "End" ? "flowchart" : graphMode === "architecture" ? "flowchart" : "architecture";
+  setGraphMode(mode);
+  $(mode === "architecture" ? "architectureTab" : "flowchartTab").focus();
+}));
+
+function graphSize(w, h) { zoom.w = w; zoom.h = h; }
+
+function fitView() {
+  const box = $("graphWrap").getBoundingClientRect();
+  if (!box.width || !box.height) return;
+  const k = Math.min(box.width / zoom.w, box.height / zoom.h) * 0.96;
+  zoom.k = Math.min(Math.max(k, minimumZoom()), 1.6);
+  zoom.x = (zoom.w - box.width / zoom.k) / 2;
+  zoom.y = (zoom.h - box.height / zoom.k) / 2;
+}
+
+function applyView() {
+  const box = $("graphWrap").getBoundingClientRect();
+  if (!box.width || !box.height) return;
+  if (zoom.mode === "fit") fitView();
+  if (zoom.mode === "readable") {
+    zoom.k = graphMode === "flowchart" ? 0.8 : 1;
+    zoom.x = (zoom.w - box.width / zoom.k) / 2;
+    zoom.y = Math.min(-16, (zoom.h - box.height / zoom.k) / 2);
+  }
+  $("graph").setAttribute("viewBox", `${zoom.x} ${zoom.y} ${box.width / zoom.k} ${box.height / zoom.k}`);
+  $("zoomLevel").textContent = `${Math.round(zoom.k * 100)}%`;
+}
+
+/** Zoom by `factor` keeping the graph point under (px, py) (pixels in the pane) where it is. */
+function zoomAt(factor, px, py) {
+  const k = Math.min(Math.max(zoom.k * factor, minimumZoom()), K_MAX);
+  zoom.x += px / zoom.k - px / k;
+  zoom.y += py / zoom.k - py / k;
+  zoom.k = k;
+  zoom.mode = "manual";
+  applyView();
+  saveView();
+}
+
+function zoomBy(how) {
+  const box = $("graphWrap").getBoundingClientRect();
+  if (how === "fit") { zoom.mode = "fit"; applyView(); saveView(); return; }
+  if (how === "actual") { zoomAt(1 / zoom.k, box.width / 2, box.height / 2); return; }
+  zoomAt(how === "in" ? 1.25 : 0.8, box.width / 2, box.height / 2);
+}
+
+(() => {
+  const wrap = $("graphWrap");
+  wrap.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const box = wrap.getBoundingClientRect();
+    // Pixel deltas from a trackpad are small and many; line deltas from a wheel are few.
+    const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+    zoomAt(Math.exp(-dy * 0.0015), e.clientX - box.left, e.clientY - box.top);
+  }, { passive: false });
+  let start = null;
+  wrap.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    start = { id: e.pointerId, cx: e.clientX, cy: e.clientY, x: zoom.x, y: zoom.y, moving: false };
+  });
+  wrap.addEventListener("pointermove", (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const dx = e.clientX - start.cx, dy = e.clientY - start.cy;
+    // Below 4px it is a click on a node, not a pan.
+    if (!start.moving && Math.hypot(dx, dy) < 4) return;
+    if (!start.moving) { start.moving = true; wrap.setPointerCapture(e.pointerId); wrap.classList.add("panning"); }
+    zoom.x = start.x - dx / zoom.k;
+    zoom.y = start.y - dy / zoom.k;
+    zoom.mode = "manual";
+    applyView();
+  });
+  const end = (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    if (start.moving) { saveView(); zoom.dragged = true; wrap.classList.remove("panning"); setTimeout(() => { zoom.dragged = false; }, 0); }
+    start = null;
+  };
+  wrap.addEventListener("pointerup", end);
+  wrap.addEventListener("pointercancel", end);
+  wrap.addEventListener("dblclick", () => zoomBy("fit"));
+  new ResizeObserver(() => applyView()).observe(wrap);
+})();
+
+// ------------------------------------------------------------ layout
+
+/** Pane sizes, collapsed panes and the pane shown over the window; sizes are kept in the browser. */
+const LAYOUT_KEY = "logica-debugger-layout";
+const DEFAULTS = { left: 250, right: 420, graph: null, inspector: null };
+const GUTTER = 10, COLLAPSED = 36, CENTER_MIN = 360;
+const narrowLayout = matchMedia("(max-width: 1100px)");
+const layout = { ...DEFAULTS, collapsed: { traces: false, inspector: false }, max: null };
+try {
+  const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}");
+  for (const k of Object.keys(DEFAULTS)) if (Number.isFinite(saved[k])) layout[k] = saved[k];
+  for (const k of ["traces", "inspector"]) if (typeof saved.collapsed?.[k] === "boolean") layout.collapsed[k] = saved.collapsed[k];
+} catch { /* no saved layout */ }
+
+function saveLayout() {
+  try { localStorage.setItem(LAYOUT_KEY, JSON.stringify({ left: layout.left, right: layout.right, graph: layout.graph, inspector: layout.inspector, collapsed: layout.collapsed })); } catch { /* storage unavailable */ }
+}
+
+const clampSize = (value, lo, hi) => Math.round(Math.min(Math.max(value, lo), hi));
+
+/** Clamp the displayed sizes, preserving preferred sizes for a larger window. */
+function measureLayout() {
+  const { width, height } = $("app").getBoundingClientRect();
+  const narrow = narrowLayout.matches;
+  const leftMax = Math.max(0, narrow
+    ? width - GUTTER - Math.min(CENTER_MIN, width * 0.65)
+    : width - GUTTER * 2 - CENTER_MIN - (layout.collapsed.inspector ? COLLAPSED : 260));
+  const leftMin = Math.min(160, leftMax);
+  const left = layout.collapsed.traces ? COLLAPSED : clampSize(layout.left, leftMin, leftMax);
+  const rightMax = Math.max(260, width - GUTTER * 2 - CENTER_MIN - left);
+  const right = layout.collapsed.inspector ? COLLAPSED : clampSize(layout.right, 260, rightMax);
+  const inspectorMax = Math.max(0, height - GUTTER - 240);
+  const inspectorMin = Math.min(120, inspectorMax);
+  const inspector = layout.collapsed.inspector ? COLLAPSED : clampSize(layout.inspector ?? height * 0.3, inspectorMin, inspectorMax);
+  const centerHeight = narrow ? Math.max(0, height - GUTTER - inspector) : height;
+  const graphMax = Math.max(0, centerHeight - GUTTER - 80);
+  const graphMin = Math.min(180, graphMax);
+  const graph = clampSize(layout.graph ?? centerHeight * 0.75, graphMin, graphMax);
+  return { left, right, inspector, graph, bounds: {
+    left: [leftMin, narrow ? leftMax : Math.max(leftMin, width - GUTTER * 2 - CENTER_MIN - right)],
+    right: [260, rightMax], inspector: [inspectorMin, inspectorMax], graph: [graphMin, graphMax],
+  } };
+}
+
+const gutterName = (g) => g.dataset.gutter === "right" && narrowLayout.matches ? "inspector" : g.dataset.gutter;
+
+function applyLayout() {
+  const app = $("app");
+  const sizes = measureLayout();
+  app.style.setProperty("--left", `${sizes.left}px`);
+  app.style.setProperty("--right", `${sizes.right}px`);
+  app.style.setProperty("--graph-h", `${sizes.graph}px`);
+  app.style.setProperty("--inspector-h", `${sizes.inspector}px`);
+  $("paneTraces").classList.toggle("collapsed", layout.collapsed.traces);
+  $("paneInspector").classList.toggle("collapsed", layout.collapsed.inspector);
+  document.querySelector('[data-collapse="traces"]').textContent = layout.collapsed.traces ? "»" : "«";
+  document.querySelector('[data-collapse="traces"]').title = layout.collapsed.traces ? "펼치기" : "접기";
+  document.querySelector('[data-collapse="inspector"]').textContent = narrowLayout.matches
+    ? (layout.collapsed.inspector ? "↑" : "↓") : (layout.collapsed.inspector ? "«" : "»");
+  document.querySelector('[data-collapse="inspector"]').title = layout.collapsed.inspector ? "펼치기" : "접기";
+  document.querySelectorAll("[data-gutter]").forEach((g) => {
+    const name = gutterName(g), horizontal = name === "graph" || name === "inspector";
+    const off = g.dataset.gutter === "left" ? layout.collapsed.traces : g.dataset.gutter === "right" && layout.collapsed.inspector;
+    g.classList.toggle("off", off);
+    g.tabIndex = off ? -1 : 0;
+    g.setAttribute("aria-disabled", String(off));
+    g.setAttribute("aria-orientation", horizontal ? "horizontal" : "vertical");
+    g.setAttribute("aria-valuemin", sizes.bounds[name][0]);
+    g.setAttribute("aria-valuemax", sizes.bounds[name][1]);
+    g.setAttribute("aria-valuenow", sizes[name]);
+    if (g.dataset.gutter === "right") g.setAttribute("aria-label", horizontal ? "인스펙터 높이" : "인스펙터 너비");
+    g.title = `드래그 또는 방향키로 ${horizontal ? "높이" : "너비"} 조절, 더블클릭으로 기본값`;
+  });
+}
+
+function toggleCollapse(pane) {
+  layout.collapsed[pane] = !layout.collapsed[pane];
+  applyLayout();
+  saveLayout();
+}
+
+function toggleMax(id) {
+  const was = layout.max;
+  if (was) $(was).classList.remove("maxed");
+  layout.max = was === id ? null : id;
+  if (layout.max) $(layout.max).classList.add("maxed");
+  document.querySelectorAll("[data-max]").forEach((b) => { b.textContent = b.dataset.max === layout.max ? "✕" : "⤢"; b.title = b.dataset.max === layout.max ? "원래 크기로 (Esc)" : "화면 전체로 (Esc로 복귀)"; });
+  applyView();
+}
+
+/** Drag a gutter to resize the panes beside it; arrow keys move it by 20px, a double click resets it. */
+(() => {
+  const set = (name, v) => { layout[name] = clampSize(v, ...measureLayout().bounds[name]); applyLayout(); };
+  document.querySelectorAll("[data-gutter]").forEach((g) => {
+    let start = null;
+    g.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || g.classList.contains("off")) return;
+      e.preventDefault();
+      g.setPointerCapture(e.pointerId);
+      g.classList.add("drag");
+      const name = gutterName(g);
+      start = { id: e.pointerId, name, x: e.clientX, y: e.clientY, size: measureLayout()[name] };
+    });
+    g.addEventListener("pointermove", (e) => {
+      if (!start || start.id !== e.pointerId || start.name !== gutterName(g)) return;
+      const { name } = start;
+      const d = name === "graph" ? e.clientY - start.y : name === "inspector" ? start.y - e.clientY : name === "left" ? e.clientX - start.x : start.x - e.clientX;
+      set(name, start.size + d);
+    });
+    const end = () => {
+      if (!start) return;
+      const { id } = start; start = null;
+      if (g.hasPointerCapture(id)) g.releasePointerCapture(id);
+      g.classList.remove("drag"); saveLayout();
+    };
+    g.addEventListener("pointerup", end);
+    g.addEventListener("pointercancel", end);
+    g.addEventListener("lostpointercapture", end);
+    g.addEventListener("dblclick", () => { const name = gutterName(g); layout[name] = DEFAULTS[name]; applyLayout(); saveLayout(); });
+    g.addEventListener("keydown", (e) => {
+      if (g.classList.contains("off")) return;
+      const name = gutterName(g);
+      const grow = { left: ["ArrowRight", "ArrowLeft"], right: ["ArrowLeft", "ArrowRight"], graph: ["ArrowDown", "ArrowUp"], inspector: ["ArrowUp", "ArrowDown"] }[name];
+      const step = e.key === grow[0] ? 20 : e.key === grow[1] ? -20 : 0;
+      if (!step) return;
+      e.preventDefault();
+      set(name, measureLayout()[name] + step);
+      saveLayout();
+    });
+  });
+  applyLayout();
+  new ResizeObserver(() => applyLayout()).observe($("app"));
+  narrowLayout.addEventListener("change", () => applyLayout());
+})();
+
+$("resetLayout").addEventListener("click", () => {
+  if (layout.max) toggleMax(layout.max);
+  Object.assign(layout, DEFAULTS);
+  layout.collapsed = { traces: false, inspector: false };
+  for (const mode of Object.keys(graphViews)) { graphViews[mode].mode = "readable"; saveView(mode); }
+  applyLayout(); applyView();
+  saveLayout(); saveView();
+});
+
+// ------------------------------------------------------------ value viewer
+
+function paperSummaryContent(file) {
+  const statuses = { no_project: "프로젝트가 열려 있지 않습니다.", missing: "파일 없음 (none)", ready: "저장된 파일", error: "파일을 읽을 수 없습니다." };
+  const text = file.status === "ready" ? (file.text || "(파일이 비어 있습니다.)")
+    : file.status === "missing" ? "none\n\npaper-summary.yaml 파일이 아직 없습니다.\n첫 질문에서 논문 요약이 성공적으로 저장되면 여기에 표시됩니다."
+    : file.status === "no_project" ? "앱에서 논문 프로젝트를 열어 주세요."
+    : file.error || "앱과 디버거의 연결을 확인해 주세요.";
+  return { status: statuses[file.status] || "파일을 확인할 수 없습니다.", text, copy: file.status === "ready" ? file.text : null };
+}
+
+function sessionSummaryContent(file, mode) {
+  const statuses = { no_project: "프로젝트가 열려 있지 않습니다.", no_session: "선택한 대화가 없습니다.", missing: "세션 파일 없음 (none)", ready: "저장된 세션 파일", error: "세션 파일을 읽을 수 없습니다." };
+  let text, copy = null;
+  if (file.status === "ready") {
+    if (mode === "file") copy = text = JSON.stringify(JSON.parse(file.text), null, 2);
+    else if (file.summary != null) copy = text = JSON.stringify(file.summary, null, 2);
+    else text = "null\n\n세션 파일은 저장되어 있지만 summary 필드는 아직 없습니다.\n세션 요약이 생성되어 저장되면 여기에 표시됩니다.";
+  } else {
+    text = file.status === "missing" ? "none\n\n현재 대화의 세션 JSON이 아직 저장되지 않았습니다.\n첫 답변이 끝나고 대화가 저장되면 파일을 확인할 수 있습니다."
+      : file.status === "no_project" ? "앱에서 논문 프로젝트를 열어 주세요."
+      : file.status === "no_session" ? "앱에서 대화를 선택하거나 새 대화를 시작해 주세요."
+      : file.error || "앱과 디버거의 연결을 확인해 주세요.";
+  }
+  const status = file.status === "ready" && file.summary == null ? "세션 파일 있음 · summary 없음" : statuses[file.status];
+  return { status: status || "파일을 확인할 수 없습니다.", text, copy };
+}
+
+/** Both saved-file viewers poll only while open and never invoke a save. */
+function setupFileViewer(prefix, endpoint, content) {
+  const el = (suffix) => $(prefix + suffix);
+  let timer, request = null, file = null, mode = "summary", copy = null;
+  const isOpen = () => !el("Viewer").hidden;
+  function show(next) {
+    file = next;
+    const result = content(file, mode);
+    copy = result.copy;
+    const updated = file.modified_at ? ` · 수정: ${new Date(file.modified_at).toLocaleString()}` : "";
+    el("Status").textContent = result.status + updated;
+    el("Project").textContent = file.project ? `프로젝트: ${file.project}` : "";
+    el("Path").textContent = file.path ? `저장 경로: ${file.path}` : "";
+    if (el("Session")) el("Session").textContent = file.session_id ? `대화 ID: ${file.session_id}` : "";
+    // Keep scroll and text selection stable while polling an unchanged file.
+    if (el("Body").textContent !== result.text) el("Body").textContent = result.text;
+    el("Copy").disabled = typeof copy !== "string";
+    el("Copy").textContent = "복사";
+    for (const [suffix, value] of [["SummaryMode", "summary"], ["FileMode", "file"]]) {
+      if (el(suffix)) el(suffix).setAttribute("aria-pressed", String(mode === value));
+    }
+  }
+  async function refresh() {
+    clearTimeout(timer);
+    if (request) request.abort();
+    const current = new AbortController();
+    request = current;
+    try {
+      const response = await fetch(endpoint, { cache: "no-store", signal: current.signal });
+      if (!response.ok) throw new Error(`파일 확인 실패 (HTTP ${response.status}). 앱을 최신 빌드로 재시작해 주세요.`);
+      const next = await response.json();
+      if (request === current && isOpen()) show(next);
+    } catch (err) {
+      if (err.name !== "AbortError" && request === current && isOpen()) show({ status: "error", error: err.message });
+    } finally {
+      if (request === current) {
+        request = null;
+        if (isOpen()) timer = setTimeout(refresh, 1000);
+      }
+    }
+  }
+  function close() {
+    el("Viewer").hidden = true;
+    clearTimeout(timer);
+    if (request) request.abort();
+    request = null;
+    $(prefix).focus();
+  }
+  $(prefix).addEventListener("click", () => {
+    el("Viewer").hidden = false;
+    mode = "summary";
+    show({ status: "loading" });
+    el("Status").textContent = "저장 파일 확인 중…";
+    el("Body").textContent = "";
+    el("Close").focus();
+    void refresh();
+  });
+  el("Refresh").addEventListener("click", refresh);
+  el("Close").addEventListener("click", close);
+  el("Viewer").addEventListener("click", (e) => { if (e.target === el("Viewer")) close(); });
+  el("Copy").addEventListener("click", async () => {
+    if (typeof copy !== "string") return;
+    try { await navigator.clipboard.writeText(copy); el("Copy").textContent = "복사됨"; }
+    catch { const r = document.createRange(); r.selectNodeContents(el("Body")); getSelection().removeAllRanges(); getSelection().addRange(r); el("Copy").textContent = "선택됨, Ctrl+C"; }
+  });
+  for (const [suffix, value] of [["SummaryMode", "summary"], ["FileMode", "file"]]) {
+    if (el(suffix)) el(suffix).addEventListener("click", () => { mode = value; if (file) show(file); });
+  }
+  return { isOpen, close, element: el("Viewer") };
+}
+
+const fileViewers = [
+  setupFileViewer("paperSummary", "/paper-summary", paperSummaryContent),
+  setupFileViewer("sessionSummary", "/session-summary", sessionSummaryContent),
+];
+
+let viewing = null;
+function openViewer(key) {
+  const v = shown.get(key);
+  if (!v) return;
+  viewing = v;
+  $("viewerTitle").textContent = `${v.label || "값"}  (${v.text.length.toLocaleString()}자)`;
+  $("viewerBody").textContent = v.text;
+  $("viewerCopy").textContent = "복사";
+  $("viewer").hidden = false;
+  $("viewerClose").focus();
+}
+function closeViewer() { $("viewer").hidden = true; viewing = null; }
+$("viewerClose").addEventListener("click", closeViewer);
+$("viewer").addEventListener("click", (e) => { if (e.target === $("viewer")) closeViewer(); });
+$("viewerCopy").addEventListener("click", async () => {
+  if (!viewing) return;
+  try { await navigator.clipboard.writeText(viewing.text); $("viewerCopy").textContent = "복사됨"; }
+  catch { const r = document.createRange(); r.selectNodeContents($("viewerBody")); getSelection().removeAllRanges(); getSelection().addRange(r); $("viewerCopy").textContent = "선택됨, Ctrl+C"; }
+});
+
+// ------------------------------------------------------------ events
+
+let pending = false;
+function schedule() { if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; render(); }); } }
+setInterval(() => { const t = traces.get(selTrace); if (t && [...t.spans.values()].some((s) => s.status === "running")) schedule(); }, 250);
+
+document.addEventListener("click", (e) => {
+  if (zoom.dragged) { zoom.dragged = false; if (e.target.closest("#graphWrap")) { e.stopPropagation(); return; } }
+  const diagram = e.target.closest("[data-graph-view]");
+  if (diagram) { setGraphMode(diagram.dataset.graphView); return; }
+  const file = e.target.closest("[data-open-file]");
+  if (file) { $(file.dataset.openFile).click(); return; }
+  const zb = e.target.closest("[data-zoom]");
+  if (zb) { zoomBy(zb.dataset.zoom); return; }
+  const mb = e.target.closest("[data-max]");
+  if (mb) { toggleMax(mb.dataset.max); return; }
+  const cb = e.target.closest("[data-collapse]");
+  if (cb) { toggleCollapse(cb.dataset.collapse); return; }
+  const vb = e.target.closest("[data-view]");
+  if (vb) { openViewer(vb.dataset.view); return; }
+  const tr = e.target.closest("[data-trace]");
+  if (tr) {
+    selTrace = tr.dataset.trace; selSpan = null; $("follow").checked = false;
+    if (isSummary(traces.get(selTrace))) selModule = "summary";
+    schedule(); return;
+  }
+  const ex = e.target.closest("[data-expand]");
+  if (ex) { expanded.add(ex.dataset.expand); schedule(); return; }
+  const tb = e.target.closest("[data-tab]");
+  if (tb) { tab = tb.dataset.tab; schedule(); return; }
+  const node = e.target.closest(".node");
+  if (node) { selModule = node.dataset.module; selSpan = null; schedule(); return; }
+  const row = e.target.closest("[data-span]");
+  if (row) { selModule = row.dataset.module; selSpan = row.dataset.span; schedule(); }
+});
+document.addEventListener("keydown", (e) => {
+  const fileViewer = fileViewers.find((viewer) => viewer.isOpen());
+  if (fileViewer) {
+    if (e.key === "Escape") { e.preventDefault(); fileViewer.close(); }
+    if (e.key === "Tab") {
+      const focusable = [...fileViewer.element.querySelectorAll("button:not(:disabled), [tabindex='0']")];
+      const first = focusable[0], last = focusable.at(-1);
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+    return;
+  }
+  if (e.key === "Escape") {
+    if (!$("viewer").hidden) { closeViewer(); return; }
+    if (layout.max) { toggleMax(layout.max); return; }
+  }
+  const typing = e.target.closest && e.target.closest("input, textarea, [contenteditable]");
+  if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && $("viewer").hidden) {
+    if (e.key === "+" || e.key === "=") { zoomBy("in"); return; }
+    if (e.key === "-" || e.key === "_") { zoomBy("out"); return; }
+    if (e.key === "0") { zoomBy("fit"); return; }
+  }
+  const node = e.target.closest && e.target.closest(".node");
+  const file = e.target.closest && e.target.closest("[data-open-file]");
+  if (file && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); $(file.dataset.openFile).click(); return; }
+  if (node && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); selModule = node.dataset.module; selSpan = null; schedule(); }
+});
+$("clear").addEventListener("click", () => { clearedAt = Date.now(); traces = new Map(); selTrace = null; schedule(); });
+
+function connect() {
+  const es = new EventSource("/events");
+  es.onopen = () => {
+    // The server replays its whole history on every connection.
+    traces = new Map(); seen = new Set();
+    $("conn").textContent = "연결됨"; $("conn").className = "pill on";
+    schedule();
+  };
+  es.onmessage = (m) => {
+    let ev; try { ev = JSON.parse(m.data); } catch { return; }
+    if (seen.has(ev.seq)) return;
+    seen.add(ev.seq);
+    apply(ev);
+    schedule();
+  };
+  es.onerror = () => { $("conn").textContent = "앱 연결 끊김, 재연결 중"; $("conn").className = "pill off"; };
+}
+connect();
+render();
+</script>
+</body>
+</html>

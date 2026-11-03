@@ -1,0 +1,15 @@
+CVPR paper template
+
+The CVPR template in LOGICA (templates/cvpr) is based on the official
+CVPR/ICCV/3DV LaTeX author kit:
+
+  https://github.com/cvpr-org/author-kit
+
+cvpr.sty, preamble.tex and the @String abbreviations in main.bib are copied
+from the author kit unchanged. ieeenat_fullname.bst is a modification of
+abbrvnat.bst by Patrick W Daly, distributed under the LaTeX Project Public
+License (see the header of that file). The author kit is maintained by the
+CVPR organizers and contributors listed in its README.
+
+main.tex and the files in sec/ follow the structure of the author kit with
+short placeholder text in place of the author guidelines.

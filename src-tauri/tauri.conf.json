@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LOGICA",
+  "version": "0.0.1",
+  "identifier": "app.logica.desktop",
+  "build": {
+    "beforeDevCommand": "npm run tectonic && npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run tectonic && npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "LOGICA",
+        "width": 1480,
+        "height": 920,
+        "minWidth": 960,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self' 'wasm-unsafe-eval'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob:",
+        "font-src": "'self' data:",
+        "worker-src": "'self' blob:",
+        "connect-src": "'self' ipc: http://ipc.localhost"
+      },
+      "dangerousDisableAssetCspModification": ["style-src"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "externalBin": ["binaries/tectonic"],
+    "resources": {
+      "licenses/tectonic-LICENSE.txt": "licenses/tectonic-LICENSE.txt",
+      "licenses/cvpr-author-kit-NOTICE.txt": "licenses/cvpr-author-kit-NOTICE.txt"
+    },
+    "shortDescription": "AI-native LaTeX writing workspace",
+    "icon": [
+      "icons/icon.png",
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

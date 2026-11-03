@@ -1,0 +1,248 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Chat answers are rendered by Streamdown (src/chat/markdown); let Tailwind see its classes. */
+@source "../node_modules/streamdown/dist/*.js";
+
+/*
+ * The design tokens Streamdown's components are written against, mapped onto
+ * the app's own slate and sky palette (values in :root / :root.dark below).
+ */
+@theme inline {
+  --color-background: var(--md-background);
+  --color-foreground: var(--md-foreground);
+  --color-muted: var(--md-muted);
+  --color-muted-foreground: var(--md-muted-foreground);
+  --color-border: var(--md-border);
+  --color-primary: var(--md-primary);
+  --color-primary-foreground: var(--md-primary-foreground);
+  --color-sidebar: var(--md-sidebar);
+}
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  @apply bg-white text-slate-800 antialiased dark:bg-[#0f141b] dark:text-slate-200;
+}
+
+:root {
+  color-scheme: light;
+  /* Slate and sky, as Tailwind defines them (see @theme inline above). */
+  --md-background: #ffffff;
+  --md-foreground: #1e293b;
+  --md-muted: #f1f5f9;
+  --md-muted-foreground: #64748b;
+  --md-border: #e2e8f0;
+  --md-primary: #0284c7;
+  --md-primary-foreground: #ffffff;
+  --md-sidebar: #f8fafc;
+  /*
+   * Button text size follows the window width: 12.5px from about 1500px wide
+   * down to 11px at about 1060px. Padding, gap, height and icon size are set
+   * in em below, so the whole button shrinks in proportion with its text.
+   */
+  --ui-font: clamp(11px, calc(7.5px + 0.33vw), 12.5px);
+}
+:root.dark {
+  color-scheme: dark;
+  --md-background: #0f141b;
+  --md-foreground: #e2e8f0;
+  --md-muted: #1e293b;
+  --md-muted-foreground: #94a3b8;
+  --md-border: #334155;
+  --md-primary: #38bdf8;
+  --md-primary-foreground: #0f172a;
+  --md-sidebar: #121820;
+}
+
+@layer components {
+  /* Shared shape of every text button: one line, scaled by its font size. */
+  .btn,
+  .btn-primary,
+  .btn-danger,
+  .btn-ghost {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.45em;
+    height: 2.24em;
+    padding-inline: 0.65em;
+    border-radius: 0.375rem;
+    font-size: var(--ui-font);
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .btn svg,
+  .btn-primary svg,
+  .btn-danger svg,
+  .btn-ghost svg {
+    width: 1.12em;
+    height: 1.12em;
+    flex-shrink: 0;
+  }
+  /* A label that may give way to the icon alone (see the top bar container rules). */
+  .btn-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .btn {
+    @apply border border-slate-200 bg-white font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700;
+  }
+  .btn-primary {
+    @apply bg-sky-600 font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-danger {
+    @apply border border-red-200 bg-white font-medium text-red-700 hover:bg-red-50 dark:border-red-900 dark:bg-transparent dark:text-red-300 dark:hover:bg-red-950;
+  }
+  .btn-ghost {
+    @apply text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800;
+    padding-inline: 0.55em;
+  }
+  .icon-btn {
+    @apply inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-500 hover:bg-slate-200/70 hover:text-slate-800 disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100;
+  }
+  .input {
+    @apply h-7 rounded-md border border-slate-300 bg-white px-2 text-[12.5px] text-slate-800 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100;
+  }
+  .select {
+    @apply h-7 min-w-0 rounded-md border border-slate-300 bg-white px-1.5 text-slate-800 outline-none focus:border-sky-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100;
+    font-size: var(--ui-font);
+    text-overflow: ellipsis;
+  }
+  .panel-title {
+    @apply text-[11px] font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-400;
+  }
+  .kbd {
+    @apply rounded border border-slate-300 bg-slate-50 px-1 font-mono text-[10.5px] text-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400;
+  }
+}
+
+/* CodeMirror host fills its container. */
+.cm-editor {
+  height: 100%;
+}
+.cm-editor.cm-focused {
+  outline: none;
+}
+.cm-cite-info {
+  max-width: 360px;
+  padding: 2px 4px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+/* PDF pages */
+/*
+ * Top bar: as the bar narrows, labels give way to icons in two steps (the
+ * tooltip and aria-label keep their meaning), the language switch shortens to
+ * 한 | EN and the provider picker narrows. Measured on the bar itself, not the
+ * window, so it also holds when the bar's content changes.
+ */
+.topbar {
+  container: topbar / inline-size;
+}
+.lang-short {
+  display: none;
+}
+.topbar-provider {
+  max-width: 12rem;
+}
+@container topbar (max-width: 1120px) {
+  .btn-label[data-collapse="early"] {
+    display: none;
+  }
+}
+@container topbar (max-width: 920px) {
+  .btn-label[data-collapse] {
+    display: none;
+  }
+  .lang-full {
+    display: none;
+  }
+  .lang-short {
+    display: inline;
+  }
+  .topbar-provider {
+    max-width: 8.5rem;
+  }
+}
+
+/* Selectable text over the rendered PDF page (subset of pdf.js's viewer CSS). */
+.pdf-page {
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+}
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 0;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+}
+.textLayer > :not(.markedContent),
+.textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.textLayer .markedContent {
+  display: contents;
+}
+.textLayer ::selection {
+  background: rgb(0 100 255 / 0.3);
+  color: transparent;
+}
+.textLayer br::selection {
+  background: transparent;
+}
+.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+.textLayer.selecting .endOfContent {
+  top: 0;
+}
+
+.pdf-page {
+  box-shadow:
+    0 1px 3px rgba(15, 23, 42, 0.16),
+    0 6px 20px rgba(15, 23, 42, 0.1);
+}
