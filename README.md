@@ -5,8 +5,7 @@
 <h1 align="center">LOGICA</h1>
 
 <p align="center">
-  <b>Logical Guidance for Intelligent Critical Academic-writing</b><br>
-  연구자가 직접 쓰고, AI는 요청할 때만 고치는 로컬 LaTeX 논문 작성 도구
+  <b>Prism 너무 답답해서 직접 만드는 논문 에이전트</b><br>
 </p>
 
 <p align="center">
