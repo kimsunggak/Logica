@@ -1,6 +1,6 @@
 [package]
 name = "logica"
-version = "0.1.0"
+version = "0.0.1"
 description = "LOGICA: a local, AI-native LaTeX writing workspace"
 edition = "2021"
 rust-version = "1.82"
