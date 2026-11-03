@@ -1,4 +1,4 @@
-import { Clock, FilePlus, FolderOpen, X } from "lucide-react";
+import { Clock, FilePlus, FolderOpen, Pencil, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState, type ComponentType } from "react";
 import logo from "../assets/logo.png";
 import { t as translateNow, useT } from "../i18n";
@@ -50,10 +50,51 @@ async function removeFromList(root: string, name: string) {
   if (await confirmDialog(translateNow("home.removeConfirm", { name }))) useWorkspace.getState().forgetProject(root);
 }
 
+function displayName(root: string, memory: ProjectMemory): string {
+  return memory.name || memory.title || folderName(root);
+}
+
+/** Inline editor for the card's name; Enter or leaving the field saves, Escape cancels. */
+function NameEditor({ root, memory, onDone }: { root: string; memory: ProjectMemory; onDone: () => void }) {
+  const t = useT();
+  const [value, setValue] = useState(displayName(root, memory));
+  const finished = useRef(false);
+  const finish = (save: boolean) => {
+    if (finished.current) return;
+    finished.current = true;
+    if (save) {
+      const name = value.trim();
+      // A name equal to the paper title is not a custom name; keep following the title.
+      useWorkspace.getState().updateProject(root, { name: name && name !== memory.title ? name : undefined });
+    }
+    onDone();
+  };
+  return (
+    <input
+      autoFocus
+      onFocus={(e) => e.currentTarget.select()}
+      className="relative z-10 w-full rounded border border-sky-400 bg-white px-1.5 py-0.5 text-[13px] font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-sky-300 dark:border-sky-600 dark:bg-slate-900 dark:text-slate-100"
+      value={value}
+      placeholder={memory.title || folderName(root)}
+      title={t("home.renameHint")}
+      aria-label={t("home.rename")}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") finish(true);
+        else if (e.key === "Escape") finish(false);
+      }}
+      onBlur={() => finish(true)}
+      data-testid="recent-name-input"
+    />
+  );
+}
+
 function ProjectCard({ root, memory }: { root: string; memory: ProjectMemory }) {
   const t = useT();
   const files = useProjectFiles(root, memory);
   const missing = files?.missing ?? false;
+  const [editing, setEditing] = useState(false);
+  const name = displayName(root, memory);
   return (
     <div
       className={`group relative flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md dark:border-slate-700 dark:bg-[#151c26] dark:hover:border-sky-700 ${
@@ -61,31 +102,54 @@ function ProjectCard({ root, memory }: { root: string; memory: ProjectMemory }) 
       }`}
       data-testid="recent-project"
     >
-      <button className="flex flex-1 flex-col text-left" onClick={() => void openProject(root)} disabled={missing} title={root}>
-        <div className="h-40 w-full border-b border-slate-100 bg-slate-100 dark:border-slate-800 dark:bg-slate-900">
-          <PdfThumbnail root={root} pdfPath={files?.pdfPath ?? null} width={THUMB_WIDTH} />
-        </div>
-        <div className="space-y-0.5 px-3 py-2.5">
-          <div className="line-clamp-2 text-[13px] leading-snug font-semibold text-slate-800 dark:text-slate-100">
-            {memory.title || folderName(root)}
-          </div>
-          <div className="truncate font-mono text-[11px] text-slate-400">{root}</div>
-          <div className="flex items-center gap-1 pt-0.5 text-[11.5px] text-slate-500">
-            {missing ? (
-              <span className="text-amber-600">{t("home.missing")}</span>
-            ) : (
-              <>
-                <Clock size={11} /> {timeAgo(memory.lastOpened)}
-              </>
-            )}
-          </div>
-        </div>
-      </button>
+      {/* Covers the whole card so any click opens it; the name controls sit above it. */}
       <button
-        className="absolute top-1.5 right-1.5 hidden h-6 w-6 items-center justify-center rounded-md bg-white/90 text-slate-500 shadow-sm group-hover:flex hover:text-red-600 dark:bg-slate-800/90"
+        className="absolute inset-0 z-0"
+        onClick={() => void openProject(root)}
+        disabled={missing || editing}
+        title={root}
+        aria-label={name}
+      />
+      <div className="pointer-events-none h-40 w-full border-b border-slate-100 bg-slate-100 dark:border-slate-800 dark:bg-slate-900">
+        <PdfThumbnail root={root} pdfPath={files?.pdfPath ?? null} width={THUMB_WIDTH} />
+      </div>
+      <div className="pointer-events-none space-y-0.5 px-3 py-2.5">
+        {editing ? (
+          <div className="pointer-events-auto">
+            <NameEditor root={root} memory={memory} onDone={() => setEditing(false)} />
+          </div>
+        ) : (
+          <div className="flex items-start gap-1">
+            <div className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-snug font-semibold text-slate-800 dark:text-slate-100" data-testid="recent-name">
+              {name}
+            </div>
+            <button
+              className="pointer-events-auto relative z-10 -mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-sky-600 dark:hover:bg-slate-800"
+              title={t("home.rename")}
+              aria-label={t("home.rename")}
+              onClick={() => setEditing(true)}
+              data-testid="recent-rename"
+            >
+              <Pencil size={12} />
+            </button>
+          </div>
+        )}
+        <div className="truncate font-mono text-[11px] text-slate-400">{root}</div>
+        <div className="flex items-center gap-1 pt-0.5 text-[11.5px] text-slate-500">
+          {missing ? (
+            <span className="text-amber-600">{t("home.missing")}</span>
+          ) : (
+            <>
+              <Clock size={11} /> {timeAgo(memory.lastOpened)}
+            </>
+          )}
+        </div>
+      </div>
+      <button
+        className="absolute top-1.5 right-1.5 z-10 hidden h-6 w-6 items-center justify-center rounded-md bg-white/90 text-slate-500 shadow-sm group-hover:flex hover:text-red-600 dark:bg-slate-800/90"
         title={t("home.remove")}
         aria-label={t("home.remove")}
-        onClick={() => void removeFromList(root, memory.title || folderName(root))}
+        onClick={() => void removeFromList(root, name)}
         data-testid="recent-remove"
       >
         <X size={13} />
