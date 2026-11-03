@@ -38,7 +38,7 @@ const en = {
   "home.recent": "Recent work",
   "home.empty": "No work yet. Create a new paper to begin.",
   "home.remove": "Remove from the list (files stay on disk)",
-  "home.missing": "Folder not found",
+  "home.missing": "Main file not found",
   "home.rename": "Rename",
   "home.renameHint": "Name shown in recent work (empty: use the paper title)",
   "home.removeConfirm": "Remove \"{name}\" from recent work?\n\nThe paper files stay on your computer.",
@@ -102,6 +102,7 @@ const en = {
 
   // project notices
   "project.openError": "Could not open project: {error}",
+  "project.goneRemoved": "\"{name}\" was deleted or moved, so it was removed from recent work.",
   "project.newError": "Could not create a new paper: {error}",
   "project.truncated": "Large folder: only the first 5000 files are listed.",
   "project.noMain": "No main.tex found. Choose the main file in the Files tab.",
@@ -386,7 +387,7 @@ const ko: Record<MessageKey, string> = {
   "home.recent": "최근 작업",
   "home.empty": "아직 작업이 없습니다. 새 논문을 만들어 시작하세요.",
   "home.remove": "목록에서 지우기 (파일은 그대로 남음)",
-  "home.missing": "폴더를 찾을 수 없음",
+  "home.missing": "메인 파일을 찾을 수 없음",
   "home.rename": "이름 수정",
   "home.renameHint": "최근 작업에 표시할 이름 (비우면 논문 제목 사용)",
   "home.removeConfirm": "정말 삭제하시겠습니까?\n\n\"{name}\"을(를) 최근 작업 목록에서 지웁니다. 논문 파일은 컴퓨터에 그대로 남습니다.",
@@ -445,6 +446,7 @@ const ko: Record<MessageKey, string> = {
   "pdf.loadError": "PDF를 불러오지 못했습니다: {error}",
 
   "project.openError": "프로젝트를 열 수 없습니다: {error}",
+  "project.goneRemoved": "\"{name}\" 폴더가 삭제되었거나 이동되어 최근 작업에서 지웠습니다.",
   "project.newError": "새 논문을 만들 수 없습니다: {error}",
   "project.truncated": "폴더가 커서 처음 5000개 파일만 표시합니다.",
   "project.noMain": "main.tex를 찾지 못했습니다. 파일 탭에서 main 파일을 지정하세요.",

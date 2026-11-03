@@ -2,7 +2,7 @@ import { Clock, FilePlus, FolderOpen, Pencil, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState, type ComponentType } from "react";
 import logo from "../assets/logo.png";
 import { t as translateNow, useT } from "../i18n";
-import { confirmDialog, isDemoMode } from "../lib/backend";
+import { confirmDialog, errorKind, isDemoMode } from "../lib/backend";
 import { timeAgo } from "../lib/time";
 import type { MathFieldProps } from "../home/background/MathField";
 import { PdfThumbnail } from "../pdf/PdfThumbnail";
@@ -24,8 +24,31 @@ function folderName(root: string): string {
   return root.split(/[\\/]/).filter(Boolean).pop() ?? root;
 }
 
-/** Whether the folder still exists, and the compiled PDF to preview (if any). */
-function useProjectFiles(root: string, memory: ProjectMemory) {
+const RECHECK_MS = 5000;
+
+/** Counter that ticks when the window regains focus and every few seconds while visible,
+ *  so the cards notice folders deleted or moved outside the app. */
+function useRecheckTick() {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const bump = () => {
+      if (document.visibilityState === "visible") setTick((n) => n + 1);
+    };
+    const timer = window.setInterval(bump, RECHECK_MS);
+    window.addEventListener("focus", bump);
+    document.addEventListener("visibilitychange", bump);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", bump);
+      document.removeEventListener("visibilitychange", bump);
+    };
+  }, []);
+  return tick;
+}
+
+/** Whether the main file still exists, and the compiled PDF to preview (if any).
+ *  A project whose folder is gone is dropped from the recent list. */
+function useProjectFiles(root: string, memory: ProjectMemory, tick: number) {
   const [state, setState] = useState<{ missing: boolean; pdfPath: string | null } | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -34,15 +57,19 @@ function useProjectFiles(root: string, memory: ProjectMemory) {
     (async () => {
       try {
         const [hasMain, hasPdf] = await Promise.all([pathExists(root, main), pathExists(root, pdf)]);
-        if (!cancelled) setState({ missing: !hasMain, pdfPath: hasPdf ? pdf : null });
-      } catch {
-        if (!cancelled) setState({ missing: true, pdfPath: null });
+        if (cancelled) return;
+        const pdfPath = hasPdf ? pdf : null;
+        setState((prev) => (prev && prev.missing === !hasMain && prev.pdfPath === pdfPath ? prev : { missing: !hasMain, pdfPath }));
+      } catch (err) {
+        if (cancelled) return;
+        if (errorKind(err) === "not_found") useWorkspace.getState().forgetProject(root);
+        else setState({ missing: true, pdfPath: null });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [root, memory.mainFile]);
+  }, [root, memory.mainFile, tick]);
   return state;
 }
 
@@ -89,9 +116,9 @@ function NameEditor({ root, memory, onDone }: { root: string; memory: ProjectMem
   );
 }
 
-function ProjectCard({ root, memory }: { root: string; memory: ProjectMemory }) {
+function ProjectCard({ root, memory, tick }: { root: string; memory: ProjectMemory; tick: number }) {
   const t = useT();
-  const files = useProjectFiles(root, memory);
+  const files = useProjectFiles(root, memory, tick);
   const missing = files?.missing ?? false;
   const [editing, setEditing] = useState(false);
   const name = displayName(root, memory);
@@ -163,6 +190,7 @@ export function Home() {
   const t = useT();
   const loading = useProject((s) => s.loading);
   const projects = useWorkspace((s) => s.projects);
+  const tick = useRecheckTick();
   const recent = Object.entries(projects).sort(([, a], [, b]) => (b.lastOpened ?? 0) - (a.lastOpened ?? 0));
   const scrollRef = useRef<HTMLDivElement>(null);
   const columnRef = useRef<HTMLDivElement>(null);
@@ -214,7 +242,7 @@ export function Home() {
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4" data-testid="recent-projects">
               {recent.map(([root, memory]) => (
-                <ProjectCard key={root} root={root} memory={memory} />
+                <ProjectCard key={root} root={root} memory={memory} tick={tick} />
               ))}
             </div>
           )}
