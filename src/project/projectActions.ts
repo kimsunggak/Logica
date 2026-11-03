@@ -57,7 +57,15 @@ export async function openProject(root: string): Promise<void> {
     listing = await listProjectFiles(root);
   } catch (err) {
     useProject.setState({ loading: false });
-    notify("error", t("project.openError", { error: errorMessage(err) }));
+    const workspace = useWorkspace.getState();
+    if (errorKind(err) === "not_found" && workspace.projects[root]) {
+      // Deleted or moved outside the app: drop it so the recent list matches the disk.
+      const memory = workspace.projects[root];
+      workspace.forgetProject(root);
+      notify("info", t("project.goneRemoved", { name: memory.name || memory.title || root }));
+    } else {
+      notify("error", t("project.openError", { error: errorMessage(err) }));
+    }
     return;
   }
 

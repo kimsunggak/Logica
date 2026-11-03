@@ -18,6 +18,8 @@ export interface ProjectMemory {
   collapsed: string[];
   /** Paper title from \\title{...}, shown on the home screen. */
   title?: string;
+  /** Name the user gave the project on the home screen; wins over the paper title. */
+  name?: string;
   /** When the project was last opened (ms since epoch). */
   lastOpened?: number;
 }

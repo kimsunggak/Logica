@@ -27,7 +27,7 @@ export function isDemoMode(): boolean {
 
 async function demoBackend(): Promise<DemoBackend> {
   if (!import.meta.env.DEV) {
-    throw { kind: "not_desktop", message: "LOGICA must run as a desktop app (npm run tauri dev)." };
+    throw { kind: "not_desktop", message: "LOGICA must run as a desktop app (npm run tauri:dev)." };
   }
   demo ??= import("../dev/demoBackend").then((m) => m.createDemoBackend());
   return demo;
