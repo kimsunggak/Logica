@@ -14,7 +14,7 @@
   <a href="LICENSE"><img alt="라이선스" src="https://img.shields.io/github/license/kimsunggak/Logica"></a>
 </p>
 
-![LOGICA 작업 화면: 왼쪽 목차, 가운데 LaTeX 편집기와 PDF 미리보기, 오른쪽 AI 채팅](docs/images/screenshot.png)
+![엉킨 실타래 같은 생각을 에이전트의 질문으로 한 줄씩 풀어 Problem, Hypothesis, Method, Evidence로 정리하고, 연구자가 직접 논문을 써 나가는 애니메이션](docs/images/story.gif)
 
 > **Researcher writes. AI edits on demand.**
 > AI는 요청한 순간에만 개입하고, 모든 AI 수정은 diff로 확인하고 승인해야 원고에 반영됩니다.
@@ -26,6 +26,8 @@
 - **AI 인라인 편집**: 문장을 선택하고 <kbd>Ctrl</kbd>+<kbd>K</kbd>, 결과를 diff로 확인한 뒤 적용
 - **AI 논문 에이전트**: 논문 전체를 읽고 질문에 답하거나 수정안을 제안, 필요하면 웹에서 근거를 찾아 첨부
 - **로컬 우선**: 원고, 대화 기록, 설정은 모두 내 컴퓨터에만 저장. 자체 서버 없음
+
+![LOGICA 작업 화면: 왼쪽 목차, 가운데 LaTeX 편집기와 PDF 미리보기, 오른쪽 AI 채팅](docs/images/screenshot.png)
 
 <details>
 <summary><b>기능 상세 보기</b></summary>
