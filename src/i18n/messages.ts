@@ -46,7 +46,7 @@ const en = {
   "home.removeConfirm": "Remove \"{name}\" from recent work?\n\nThe paper files stay on your computer.",
   "home.justNow": "just now",
   "top.home": "Home",
-  "welcome.demo": "Browser preview mode: files, compilation and AI responses are simulated. Run npm run tauri dev for the desktop app.",
+  "welcome.demo": "Browser preview mode: files, compilation and AI responses are simulated. Run npm run tauri:dev for the desktop app.",
 
   // sidebar, outline, files
   "sidebar.outline": "Outline",
@@ -433,7 +433,7 @@ const ko: Record<MessageKey, string> = {
   "home.removeConfirm": "정말 삭제하시겠습니까?\n\n\"{name}\"을(를) 최근 작업 목록에서 지웁니다. 논문 파일은 컴퓨터에 그대로 남습니다.",
   "home.justNow": "방금",
   "top.home": "홈",
-  "welcome.demo": "브라우저 미리보기 모드: 파일, 컴파일, AI 응답이 모두 시뮬레이션입니다. 데스크톱 앱은 npm run tauri dev로 실행하세요.",
+  "welcome.demo": "브라우저 미리보기 모드: 파일, 컴파일, AI 응답이 모두 시뮬레이션입니다. 데스크톱 앱은 npm run tauri:dev로 실행하세요.",
 
   "sidebar.outline": "목차",
   "sidebar.files": "파일",

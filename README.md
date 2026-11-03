@@ -36,7 +36,7 @@ LOGICA는 개인 연구용 로컬 LaTeX 논문 작성 도구입니다. 논문 �
 - Tauri 2 시스템 의존성: <https://v2.tauri.app/start/prerequisites/>
   - Linux(Ubuntu/Debian): `libwebkit2gtk-4.1-dev build-essential libssl-dev libayatana-appindicator3-dev librsvg2-dev`
 - TeX 배포판은 필요 없습니다. LOGICA에는 TeX 엔진 [Tectonic](https://tectonic-typesetting.github.io/)이 내장되어 있습니다. TeX Live, MacTeX, MiKTeX가 설치되어 있으면 그쪽을 먼저 씁니다(패키지 호환성이 가장 좋음).
-  - `npm run tauri dev` / `npm run tauri build`가 시작될 때 `scripts/fetch-tectonic.mjs`가 해당 플랫폼의 공식 Tectonic 릴리스를 내려받아 고정된 SHA-256과 대조한 뒤 `src-tauri/binaries/`에 둡니다. `cargo`를 직접 실행할 때는 먼저 `npm run tectonic`을 실행하세요.
+  - `npm run tauri:dev` / `npm run tauri build`가 시작될 때 `scripts/fetch-tectonic.mjs`가 해당 플랫폼의 공식 Tectonic 릴리스를 내려받아 고정된 SHA-256과 대조한 뒤 `src-tauri/binaries/`에 둡니다. `cargo`를 직접 실행할 때는 먼저 `npm run tectonic`을 실행하세요.
   - 내장 엔진은 처음 컴파일할 때 필요한 LaTeX 패키지를 인터넷에서 내려받고, 이후에는 캐시를 씁니다.
 - Linux에서 API key 저장: Secret Service 구현(GNOME Keyring 또는 KWallet)이 실행 중이어야 합니다.
 
@@ -44,15 +44,19 @@ LOGICA는 개인 연구용 로컬 LaTeX 논문 작성 도구입니다. 논문 �
 
 ```bash
 npm install
-npm run tauri dev        # 개발 모드 데스크톱 앱
+npm run tauri:dev        # 개발 모드 데스크톱 앱 (LOGICA Dev)
 npm run tauri build      # 배포용 빌드 (src-tauri/target/release/bundle)
 ```
 
 `examples/sample-paper/`에 바로 열어볼 수 있는 예제 논문이 있습니다.
 
+### 개발 앱과 배포 앱 구분
+
+`npm run tauri:dev`는 `src-tauri/tauri.dev.conf.json`을 덧씌워 **LOGICA Dev**로 실행합니다. 창 제목은 `LOGICA (Dev)`, 아이콘에는 주황색 DEV 표시(`src-tauri/icons-dev/`)가 붙고, 앱 ID가 `app.logica.desktop.dev`라서 채팅 기록·논문 요약·설정·최근 작업이 배포 앱(`app.logica.desktop`)과 따로 저장됩니다. API key와 ChatGPT 로그인은 두 앱이 함께 씁니다. 배포 빌드(`npm run tauri build`)에는 영향이 없습니다.
+
 ### 브라우저 미리보기 모드 (개발용)
 
-`npm run dev` 후 브라우저에서 `http://localhost:1420`을 열면 메모리 내 가짜 backend로 UI 전체 흐름을 확인할 수 있습니다. 파일, 컴파일, AI 응답이 모두 시뮬레이션되며(AI 응답도 실제 OpenAI/Claude streaming 형식으로 흉내 내므로 provider adapter 코드가 그대로 실행됩니다) 이 코드는 배포 빌드에 포함되지 않습니다. `npm run tauri dev` 중에는 같은 주소가 런타임 디버거로 넘어갑니다.
+`npm run dev` 후 브라우저에서 `http://localhost:1420`을 열면 메모리 내 가짜 backend로 UI 전체 흐름을 확인할 수 있습니다. 파일, 컴파일, AI 응답이 모두 시뮬레이션되며(AI 응답도 실제 OpenAI/Claude streaming 형식으로 흉내 내므로 provider adapter 코드가 그대로 실행됩니다) 이 코드는 배포 빌드에 포함되지 않습니다. `npm run tauri:dev` 중에는 같은 주소가 런타임 디버거로 넘어갑니다.
 
 ## 사용 방법
 
@@ -124,6 +128,8 @@ LOGICA는 특정 provider에 묶이지 않도록 공통 `AIProvider` 인터페�
 | 논문 요약 (섹션별 요약, YAML) | `%LOCALAPPDATA%\app.logica.desktop\papers\<프로젝트 ID>\paper-summary.yaml` (프로젝트 ID는 채팅 기록과 같음) |
 | 설정, 최근 작업, 창 배치 | `%APPDATA%\app.logica.desktop\state.json` |
 | API key, ChatGPT 로그인 토큰 | Windows 자격 증명 관리자 (macOS 키체인, Linux Secret Service) |
+
+`npm run tauri:dev`로 실행한 LOGICA Dev는 위 경로의 `app.logica.desktop` 대신 `app.logica.desktop.dev` 폴더를 씁니다.
 
 채팅 세션 파일 형식은 `{ version, createdAt, updatedAt, messages, summary }`이며, `summary`의 구조는 아래 [세션 요약 구조](#세션-요약-구조)에 있습니다. 채팅창의 기록 버튼에서 이전 대화를 불러오거나 삭제하고, 새 대화 버튼으로 새 세션을 시작합니다. 논문 요약(섹션별 요약)은 세션과 따로 프로젝트마다 하나이며, 형식은 아래 [논문 요약 문서](#논문-요약-문서)에 있습니다. 질문할 때 보내는 내용(원고 또는 섹션 요약, 질문)과 섹션 요약을 만들 때 보내는 섹션 원문은 OpenAI로 전송되고, OpenAI 호출이 실패하면 Anthropic API key가 연결된 경우 같은 내용이 Anthropic으로 전송됩니다.
 
@@ -307,7 +313,7 @@ cd src-tauri && cargo test -- --ignored   # 실제 Anthropic API에 잘못된 ke
 
 ### 런타임 디버거 (개발용)
 
-`npm run tauri dev`로 앱을 띄운 뒤 브라우저에서 `http://localhost:1420`을 열면 런타임 디버거(`http://127.0.0.1:1430`, 터미널에도 `LOGICA debug visualizer`로 출력)로 넘어갑니다. 앱은 Tauri 창에서 그대로 실행되고, 앱 빌드가 끝나기 전에 열면 디버거가 뜰 때까지 기다렸다가 넘어갑니다. 디버거에서는 User Input → Request Refinement → Paper Orchestra → Section Selection → Paper Chat/Edit 실행과 원문 적용 tool을 추적합니다. Architecture는 실제 호출과 건너뛴 모듈, Flow Chart는 UI 모드·섹션 해시·수정안 적용·세션 요약의 조건 분기를 표시합니다. 각 노드의 Inspector에서 함수 호출, 입력·출력, 모델 프롬프트, 수정 tool 인자와 실제 적용 결과를 볼 수 있습니다. Paper Summary Module과 Session Summary Module은 각자의 조건에 따라 별도로 표시되며, 상단 버튼으로 현재 프로젝트의 논문 요약 YAML과 세션 요약 JSON을 확인할 수 있습니다. LLM Gateway는 호출 모델, 오류와 fallback을 표시하고 동일 이벤트를 터미널에도 기록합니다.
+`npm run tauri:dev`로 앱을 띄운 뒤 브라우저에서 `http://localhost:1420`을 열면 런타임 디버거(`http://127.0.0.1:1430`, 터미널에도 `LOGICA debug visualizer`로 출력)로 넘어갑니다. 앱은 Tauri 창에서 그대로 실행되고, 앱 빌드가 끝나기 전에 열면 디버거가 뜰 때까지 기다렸다가 넘어갑니다. 디버거에서는 User Input → Request Refinement → Paper Orchestra → Section Selection → Paper Chat/Edit 실행과 원문 적용 tool을 추적합니다. Architecture는 실제 호출과 건너뛴 모듈, Flow Chart는 UI 모드·섹션 해시·수정안 적용·세션 요약의 조건 분기를 표시합니다. 각 노드의 Inspector에서 함수 호출, 입력·출력, 모델 프롬프트, 수정 tool 인자와 실제 적용 결과를 볼 수 있습니다. Paper Summary Module과 Session Summary Module은 각자의 조건에 따라 별도로 표시되며, 상단 버튼으로 현재 프로젝트의 논문 요약 YAML과 세션 요약 JSON을 확인할 수 있습니다. LLM Gateway는 호출 모델, 오류와 fallback을 표시하고 동일 이벤트를 터미널에도 기록합니다.
 
 - 이벤트는 웹뷰(`src/debug/trace.ts`)와 Rust(`src-tauri/src/ai.rs`)의 실제 실행에서 만들어지고, `src-tauri/src/debug_trace.rs`가 Server-Sent Events로 페이지에 보냅니다.
 - 중앙의 `Architecture`와 `Flow Chart` 버튼으로 모듈 구조·실행 상태와 조건별 처리 흐름을 전환합니다. Flow Chart는 최초 요약의 해시 일치 여부, 응답 경로, 답변 후 변경 섹션 재요약과 세션 요약 조건을 마름모와 Yes/No로 표시합니다. 모듈을 클릭하면 선택한 실행의 Inspector가 열리고, 저장 파일 노드를 클릭하면 해당 요약 파일 조회 창이 열립니다.
