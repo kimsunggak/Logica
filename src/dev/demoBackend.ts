@@ -484,7 +484,7 @@ export function createDemoBackend(): DemoBackend {
       if (!file || typeof file.content === "string") fail("not_found", `No such file: ${path}`);
       return file.content.slice().buffer;
     },
-    path_exists: ({ path }) => files.has(path),
+    path_exists: ({ path }) => path === "." || files.has(path),
     create_starter_project: ({ reuse }) => {
       if (reuse || !projects.has(STARTER_BASE)) return starter(STARTER_BASE);
       let n = 2;

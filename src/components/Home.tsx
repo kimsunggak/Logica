@@ -33,8 +33,9 @@ function useProjectFiles(root: string, memory: ProjectMemory) {
     const pdf = main.replace(/\.tex$/, ".pdf");
     (async () => {
       try {
-        const [hasMain, hasPdf] = await Promise.all([pathExists(root, main), pathExists(root, pdf)]);
-        if (!cancelled) setState({ missing: !hasMain, pdfPath: hasPdf ? pdf : null });
+        // Only a missing folder disables the card; a folder without a main file still opens.
+        const [hasFolder, hasPdf] = await Promise.all([pathExists(root, "."), pathExists(root, pdf)]);
+        if (!cancelled) setState({ missing: !hasFolder, pdfPath: hasPdf ? pdf : null });
       } catch {
         if (!cancelled) setState({ missing: true, pdfPath: null });
       }
