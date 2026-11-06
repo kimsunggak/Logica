@@ -47,7 +47,7 @@ function useRecheckTick() {
   return tick;
 }
 
-/** Whether the main file still exists, and the compiled PDF to preview (if any).
+/** Whether the project folder still exists, and the compiled PDF to preview (if any).
  *  A project whose folder is gone is dropped from the recent list. */
 function useProjectFiles(root: string, memory: ProjectMemory, tick: number) {
   const [state, setState] = useState<{ missing: boolean; pdfPath: string | null } | null>(null);
@@ -57,10 +57,11 @@ function useProjectFiles(root: string, memory: ProjectMemory, tick: number) {
     const pdf = main.replace(/\.tex$/, ".pdf");
     (async () => {
       try {
-        const [hasMain, hasPdf] = await Promise.all([pathExists(root, main), pathExists(root, pdf)]);
+        // Only a missing folder disables the card; a folder without a main file still opens.
+        const [hasFolder, hasPdf] = await Promise.all([pathExists(root, "."), pathExists(root, pdf)]);
         if (cancelled) return;
         const pdfPath = hasPdf ? pdf : null;
-        setState((prev) => (prev && prev.missing === !hasMain && prev.pdfPath === pdfPath ? prev : { missing: !hasMain, pdfPath }));
+        setState((prev) => (prev && prev.missing === !hasFolder && prev.pdfPath === pdfPath ? prev : { missing: !hasFolder, pdfPath }));
       } catch (err) {
         if (cancelled) return;
         if (errorKind(err) === "not_found") useWorkspace.getState().forgetProject(root);

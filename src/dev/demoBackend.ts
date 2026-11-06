@@ -628,7 +628,7 @@ export function createDemoBackend(): DemoBackend {
       if (!file || typeof file.content === "string") fail("not_found", `No such file: ${path}`);
       return file.content.slice().buffer;
     },
-    path_exists: ({ path }) => files.has(path),
+    path_exists: ({ path }) => path === "." || files.has(path),
     create_starter_project: ({ template, reuse }) => {
       if (!(template in STARTER_BASES)) fail("invalid_template", `unknown paper template: ${template}`);
       const base = STARTER_BASES[template as PaperTemplateId];
