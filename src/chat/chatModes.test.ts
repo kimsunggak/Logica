@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CHAT_MODELS } from "../ai/models/modelConfig";
+import { chatModels } from "../ai/gateway";
 import { useProject } from "../project/projectStore";
 import { loadSession, saveSession } from "./chatHistory";
 import { runChatTurn, type Turn, type TurnResult } from "./orchestrator";
@@ -12,7 +12,7 @@ vi.mock("./orchestrator", async (original) => ({ ...(await original<object>()), 
 vi.mock("./chatHistory", async (original) => ({
   ...(await original<object>()), saveSession: vi.fn(async () => {}), loadSession: vi.fn(),
 }));
-const choice = CHAT_MODELS.answer.primary;
+const choice = chatModels("answer").primary;
 const finished = (turn: Turn): TurnResult => ({
   route: turn.mode === "edit" ? "edit" : "chat", outcome: turn.mode === "edit" ? "edit" : "chat",
   content: "Done", choice, finishReason: "stop",

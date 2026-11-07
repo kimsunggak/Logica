@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AIError } from "./errors";
 import type { AIRequest, AIResponse, ProviderId, StreamHandlers } from "./types";
 import * as trace from "../debug/trace";
+import { DEFAULT_SETTINGS, useSettings } from "../settings/settingsStore";
 
 type Script = (request: AIRequest, handlers?: StreamHandlers) => Promise<AIResponse>;
 const calls: { provider: ProviderId; request: AIRequest }[] = [];
@@ -35,6 +36,7 @@ const request = { id: "t1-refine", instruction: "q", context: {} };
 
 beforeEach(() => {
   calls.length = 0;
+  useSettings.getState().updateAI({ defaultProvider: DEFAULT_SETTINGS.ai.defaultProvider, models: { ...DEFAULT_SETTINGS.ai.models } });
   scripts = {};
   connected = { openai: true, anthropic: true };
 });
@@ -57,6 +59,26 @@ describe("LLM Gateway", () => {
     } finally {
       start.mockRestore();
     }
+  });
+
+  it.each(["answer", "edit"] as const)("calls %s with the provider and model chosen in Settings", async (task) => {
+    useSettings.getState().updateAI({ defaultProvider: "anthropic", models: { openai: "gpt-6-luna", anthropic: "claude-opus-5-5" } });
+    scripts.anthropic = reply("anthropic", "ok");
+    const result = await callModel(task, request, { control: control() });
+    expect(result.choice).toEqual({ provider: "anthropic", model: "claude-opus-5-5", reasoningEffort: "medium" });
+    expect(calls.map((c) => [c.provider, c.request.model, c.request.reasoningEffort])).toEqual([["anthropic", "claude-opus-5-5", "medium"]]);
+  });
+
+  it.each(["answer", "edit"] as const)("falls back to the other provider's chosen model for %s", async (task) => {
+    useSettings.getState().updateAI({ defaultProvider: "openai", models: { openai: "gpt-6-luna", anthropic: "claude-opus-5-5" } });
+    scripts.openai = failing(new AIError("unavailable", "down", { provider: "openai" }));
+    scripts.anthropic = reply("anthropic", "recovered");
+    const result = await callModel(task, request, { control: control() });
+    expect(result.choice).toEqual({ provider: "anthropic", model: "claude-opus-5-5", reasoningEffort: "medium" });
+    expect(calls.map((c) => [c.provider, c.request.model])).toEqual([
+      ["openai", "gpt-6-luna"],
+      ["anthropic", "claude-opus-5-5"],
+    ]);
   });
 
   it("uses the primary model and reasoning effort for each task", async () => {
@@ -163,7 +185,7 @@ describe("LLM Gateway", () => {
   });
 
   it.each(["judge", "refine", "summary", "sections"] as const)("falls back after internal %s text fails without a display callback", async (task) => {
-    const { primary, fallback } = (await import("./models/modelConfig")).CHAT_MODELS[task];
+    const { primary, fallback } = (await import("./gateway")).chatModels(task);
     scripts[primary.provider] = async (_req, handlers) => {
       handlers?.onDelta?.("internal", "internal");
       throw new AIError("stream_interrupted", "cut off", { provider: primary.provider });

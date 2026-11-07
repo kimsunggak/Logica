@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AIError } from "../../ai/errors";
 import type { ChatRequest, GatewayResult } from "../../ai/gateway";
-import { CHAT_MODELS } from "../../ai/models/modelConfig";
+import { chatModels } from "../../ai/gateway";
 import { buildPrompt } from "../../ai/prompts";
 import type { ChatTask } from "../../ai/types";
 import { buildPaperDocument } from "../../latex/parser/documentModel";
@@ -24,7 +24,7 @@ function gateway(options: { skip?: string[]; fail?: (request: ChatRequest) => bo
     const summaries = (request.sectionsToSummarize ?? []).filter((s) => !options.skip?.includes(s.key)).map((s) => ({ key: s.key, summary: `About ${s.title}.` }));
     return {
       response: { id: "r", provider: "openai", model: "gpt-6.1-sol", text: "", finishReason: "stop", toolCalls: [{ id: "c1", name: "write_section_summaries", arguments: { summaries } }] },
-      choice: CHAT_MODELS[task].primary,
+      choice: chatModels(task).primary,
     };
   };
   return { call: call as never, log };
