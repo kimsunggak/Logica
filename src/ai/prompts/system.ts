@@ -13,9 +13,6 @@ export const LATEX_EDITING_RULES: readonly string[] = [
   "Keep existing % comments.",
 ];
 
-/** For an inline edit of a selection; chat has no selection. */
-export const SELECTION_RULE = "Only edit the selected text. Never return text from outside the selection.";
-
 export function systemPrompt(extraRules: readonly string[] = []): string {
   return [
     "You are LOGICA, an editing assistant inside a LaTeX writing tool for academic research papers.",

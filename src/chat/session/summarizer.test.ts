@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatRequest, GatewayResult } from "../../ai/gateway";
-import { CHAT_MODELS } from "../../ai/models/modelConfig";
+import { chatModels } from "../../ai/gateway";
 import { buildPrompt } from "../../ai/prompts";
 import type { AIResponse, ChatTask } from "../../ai/types";
 import { foldTurns, moduleChars, turnsToFold } from "./summarizer";
@@ -14,7 +14,7 @@ function gateway(response: Partial<AIResponse>) {
   const log: { task: ChatTask; request: ChatRequest }[] = [];
   const call = async (task: ChatTask, request: ChatRequest): Promise<GatewayResult> => {
     log.push({ task, request });
-    return { response: { id: "r", provider: "openai", model: "gpt-6.1-sol", text: "", finishReason: "stop", ...response }, choice: CHAT_MODELS[task].primary };
+    return { response: { id: "r", provider: "openai", model: "gpt-6.1-sol", text: "", finishReason: "stop", ...response }, choice: chatModels(task).primary };
   };
   return { call: call as never, log };
 }

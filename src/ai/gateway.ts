@@ -3,17 +3,18 @@
  *
  *   Refinement, Auto Router, Section Selection, Chat/Edit → callModel → aiService → Rust
  *
- * It picks the model for the call's task (`CHAT_MODELS`) and, when the primary
+ * It picks the model for the call's task (`chatModels`) and, when the primary
  * call fails before any text reached the screen, sends the same request to
  * the fallback provider. Each attempt is reported to the runtime debugger.
  */
 import { AIError, toAIError } from "./errors";
-import { CHAT_MODELS, MAX_OUTPUT_TOKENS, MAX_SEARCHES, type ModelChoice } from "./models/modelConfig";
+import { CHAT_MODELS, chosenModels, MAX_OUTPUT_TOKENS, MAX_SEARCHES, type ModelChoice } from "./models/modelConfig";
 import { buildPrompt } from "./prompts";
 import { aiService } from "./service";
 import type { AIRequest, AIResponse, ChatTask } from "./types";
 import { endSpan, failSpan, spanData, startSpan, step, type Span } from "../debug/trace";
 import { t } from "../i18n";
+import { useSettings } from "../settings/settingsStore";
 
 /** Lets the caller stop a running chat turn. */
 export interface RunControl {
@@ -127,12 +128,19 @@ async function attempt(
   }
 }
 
+/** The answer and the edit follow the provider and model chosen in Settings; the other tasks are fixed. */
+export function chatModels(task: ChatTask): { primary: ModelChoice; fallback: ModelChoice } {
+  if (task !== "answer" && task !== "edit") return CHAT_MODELS[task];
+  const { defaultProvider, models } = useSettings.getState().ai;
+  return chosenModels(defaultProvider, models);
+}
+
 /**
  * Call the model for `task`. The fallback takes over when the primary call fails,
  * unless the user stopped the turn or part of the answer is already shown.
  */
 export async function callModel(task: ChatTask, request: ChatRequest, options: GatewayOptions): Promise<GatewayResult> {
-  const { primary, fallback } = CHAT_MODELS[task];
+  const { primary, fallback } = chatModels(task);
   // Stopped between two calls of the turn: do not start the next one.
   if (options.control.stopped) throw cancelledError(primary);
   let shown = false;

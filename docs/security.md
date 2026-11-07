@@ -37,13 +37,13 @@ LOGICA는 자체 서버가 없고, AI 기능을 쓸 때만 아래 내용을 연�
 
 | 기능 | 보내는 내용 | 받는 곳 |
 | --- | --- | --- |
-| AI 인라인 편집 | 선택한 텍스트와 지시, 논문 제목·abstract·outline, 현재 섹션 경로, 앞뒤 문단 | 설정에서 고른 provider |
-| AI 채팅: 요청 정리, 섹션 선택, 답변, 수정안, 웹 리서치, 세션 요약 | 요청, 대화 기록(세션 요약과 최근 대화), 논문 요약, 고른 섹션의 원문 | OpenAI. 실패하면 Anthropic API key가 연결된 경우 Anthropic |
+| AI 채팅: 답변, 수정안 | 요청, 대화 기록(세션 요약과 최근 대화), 논문 요약, 고른 섹션의 원문 | 설정의 기본 provider. 실패하면 다른 provider가 연결된 경우 그 provider |
+| AI 채팅: 요청 정리, 섹션 선택, 웹 리서치, 세션 요약 | 요청, 대화 기록(세션 요약과 최근 대화), 논문 요약, 고른 섹션의 원문 | OpenAI. 실패하면 Anthropic API key가 연결된 경우 Anthropic |
 | AI 채팅: Auto 모드의 의도 판단 | 요청, 대화 기록, 논문 요약 | Anthropic. 실패하면 OpenAI가 연결된 경우 OpenAI |
 | 논문 요약 만들기 | 요약할 섹션의 원문 | OpenAI. 실패하면 Anthropic API key가 연결된 경우 Anthropic |
 
 - 웹 검색을 켜면 provider의 내장 웹 검색 도구를 씁니다. 검색어는 모델이 만들고 검색은 provider 쪽에서 실행되며, LOGICA가 다른 검색 서비스에 직접 요청하지는 않습니다.
-- 호출마다 쓰는 모델은 `src/ai/models/modelConfig.ts`의 `CHAT_MODELS`에서 정합니다. 자세한 내용은 [작동 구조의 모델과 fallback](architecture.md#모델과-fallback)에 있습니다.
+- Chat 답변과 Edit 수정안은 Settings에서 고른 모델을 쓰고, 나머지 호출의 모델은 `src/ai/models/modelConfig.ts`의 `CHAT_MODELS`에서 정합니다. 자세한 내용은 [작동 구조의 모델과 fallback](architecture.md#모델과-fallback)에 있습니다.
 
 ## 보안 설계
 

@@ -1,10 +1,10 @@
 import { Check, CheckCheck, FileText, Globe, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
-import { CHAT_MODELS } from "../ai/models/modelConfig";
+import { chosenModels } from "../ai/models/modelConfig";
 import type { ChatMode, WebEvidence } from "../ai/types";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
-import { DiffView } from "../editor/inlineEdit/DiffView";
+import { DiffView } from "./DiffView";
 import { validateRewrite } from "../latex/validation";
 import { confirmDialog, openExternal } from "../lib/backend";
 import { timeAgo } from "../lib/time";
@@ -431,7 +431,10 @@ export function ChatPanel() {
   const running = useChat((s) => s.runningId !== null);
   const mode = useChat((s) => s.mode);
   const webSearch = useChat((s) => s.webSearch);
-  const config = mode === "edit" ? CHAT_MODELS.edit : CHAT_MODELS.answer;
+  const defaultProvider = useSettings((s) => s.ai.defaultProvider);
+  const chosen = useSettings((s) => s.ai.models);
+  // Chat and Edit both answer with the model chosen in Settings.
+  const config = chosenModels(defaultProvider, chosen);
   const models = t("chat.modelLabel", { primary: config.primary.model, fallback: config.fallback.model });
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);

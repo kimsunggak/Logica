@@ -13,9 +13,6 @@ const LABELS: Record<ContextKey, string> = {
   abstract: "abstract",
   outline: "paper_outline",
   currentSection: "current_section",
-  previousParagraph: "previous_paragraph",
-  currentParagraph: "current_paragraph",
-  nextParagraph: "next_paragraph",
 };
 
 export function tag(name: string, content: string): string {

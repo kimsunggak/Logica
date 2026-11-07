@@ -9,7 +9,6 @@ import { CompileLog } from "../components/CompileLog";
 import { CollapseButton } from "../components/panes";
 import { StatusBar } from "../components/StatusBar";
 import { editorSession } from "./editorSession";
-import { InlineEditPanel } from "./inlineEdit/InlineEditPanel";
 
 function EditorTabs() {
   const t = useT();
@@ -118,7 +117,6 @@ function EncodingBanner() {
 export function EditorPane() {
   const t = useT();
   const hostRef = useRef<HTMLDivElement>(null);
-  const areaRef = useRef<HTMLDivElement>(null);
   const activePath = useProject((s) => s.activePath);
 
   useEffect(() => {
@@ -138,14 +136,13 @@ export function EditorPane() {
       <EditorTabs />
       <ExternalChangeBanner />
       <EncodingBanner />
-      <div ref={areaRef} className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1">
         <div ref={hostRef} className={`absolute inset-0 ${activePath ? "" : "invisible"}`} data-testid="editor-host" />
         {!activePath && (
           <div className="absolute inset-0 flex items-center justify-center text-[13px] text-slate-400">
             {t("editor.empty")}
           </div>
         )}
-        <InlineEditPanel container={areaRef} />
       </div>
       <CompileLog />
       <StatusBar />

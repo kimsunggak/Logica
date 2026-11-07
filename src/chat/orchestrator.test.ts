@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AIError } from "../ai/errors";
 import type { ChatRequest, GatewayOptions, GatewayResult } from "../ai/gateway";
-import { CHAT_MODELS } from "../ai/models/modelConfig";
+import { chatModels } from "../ai/gateway";
 import { EDIT_TOOLS } from "../ai/tools/chatTools";
 import type { AIResponse, ChatMode, ChatTask } from "../ai/types";
 import { startSpan } from "../debug/trace";
@@ -37,7 +37,7 @@ function run(mode: ChatMode, replies: Partial<Record<ChatTask, Reply>> = {}, inp
   const stages: Stage[] = [], text: string[] = [], refined: string[] = [];
   const call = async (task: ChatTask, request: ChatRequest, options: GatewayOptions): Promise<GatewayResult> => {
     log.push({ task, request, options });
-    const choice = CHAT_MODELS[task].primary;
+    const choice = chatModels(task).primary;
     options.onAttempt?.(choice, false);
     return { response: (replies[task] ?? defaults[task]!)(request, options), choice };
   };
@@ -246,7 +246,7 @@ describe("Web search", () => {
     const text: string[] = [];
     let count = 0;
     const call = async (task: ChatTask, request: ChatRequest, options: GatewayOptions): Promise<GatewayResult> => {
-      const choice = CHAT_MODELS[task].primary;
+      const choice = chatModels(task).primary;
       if (task === "refine") return { response: response(turn.instruction), choice };
       if (task === "select") return { response: tool("select_chat_sections", { reason: "Read the method", sections: ["3.2"] }), choice };
       count++;

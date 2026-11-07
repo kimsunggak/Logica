@@ -6,9 +6,8 @@ import { fromHttpError } from "../errors";
 
 const request: AIRequest = {
   id: "r",
-  task: "inline-edit",
+  task: "answer",
   instruction: "Make concise",
-  selectedText: "Some text.",
   context: { paperTitle: "T" },
   model: "model-x",
   maxOutputTokens: 1000,
@@ -47,7 +46,7 @@ describe("error mapping", () => {
 });
 
 describe("web search requests", () => {
-  const answer: AIRequest = { ...request, task: "answer", instruction: "Related work?", selectedText: undefined, reasoningEffort: "medium" };
+  const answer: AIRequest = { ...request, task: "answer", instruction: "Related work?", reasoningEffort: "medium" };
   const fn = { name: "pick", description: "Pick one.", parameters: { type: "object", properties: {}, additionalProperties: false } };
 
   it("OpenAI offers the built-in search without forcing a tool call", () => {

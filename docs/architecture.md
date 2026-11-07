@@ -4,7 +4,7 @@ LOGICA의 AI 에이전트가 요청을 처리하는 단계, 대화와 논문을 
 
 ## AI context 구성
 
-인라인 편집은 선택 텍스트만 보내지 않고, 같은 문서 모델(`PaperDocument`)에서 필요한 부분만 골라 공통 semantic context를 만듭니다. 채팅은 논문에 대한 첫 질문에서 먼저 논문을 섹션별로 요약해 두고, 질문에 필요한 섹션만 원문으로, 나머지 섹션은 그 요약으로 보냅니다.
+채팅은 논문에 대한 첫 질문에서 먼저 논문을 섹션별로 요약해 두고, 질문에 필요한 섹션만 원문으로, 나머지 섹션은 그 요약으로 보냅니다.
 
 채팅은 `UI Mode → Request Refinement → Routing → Section Selection → Execution` 순서로 처리합니다. 입력창 왼쪽의 **Chat**은 논문 질의응답, **Edit**은 원문 수정안 생성, **Auto**는 요청에 따른 Chat/Edit 자동 선택입니다. 전송한 모드는 해당 턴에 고정되며 대화 파일에 함께 저장됩니다.
 
@@ -34,7 +34,6 @@ flowchart TD
   T --> S[변경된 섹션의 논문 요약 갱신]
 ```
 
-- 인라인 편집은 논문 제목, abstract, outline, 현재 section 경로, 앞 문단, 선택 텍스트, 다음 문단을 사용합니다.
 - 채팅의 단계별 책임은 다음과 같습니다.
   1. **Request Refinement**: 모든 모드에서 세션 요약, 최근 대화, 사용자 입력으로 문맥과 지시 대상을 복원합니다. 출력은 정제된 요청 문자열 하나입니다. 의도 분류나 섹션 선택을 수행하지 않으며, 질문/명령, 부정, 조건, 요청 범위를 보존합니다.
   2. **Routing**: Chat/Edit은 코드가 경로를 고정합니다. Auto만 `route_chat`, `route_edit`, `clarify_request` 도구를 가진 모델을 호출합니다. 이 모델에는 원래 입력, 정제된 요청, 대화 정보와 논문 지도를 보내며 원문 선택은 맡기지 않습니다. 의도가 불명확하거나 tool 호출이 유효하지 않으면 확인 질문을 반환합니다.
@@ -43,7 +42,7 @@ flowchart TD
   5. **적용**: tool 인자는 먼저 diff로 표시합니다. 사용자가 개별 적용/모두 적용을 누르면 현재 프로젝트·세션과 저장된 제안을 확인하고, 현재 파일에서 원문이 정확하고 유일하게 일치하는지, 수정 구간이 겹치지 않는지 검증합니다. 모두 적용은 전체 검증 후 파일별 아래쪽 구간부터 교체합니다. 검증에 실패하면 아무것도 적용하지 않고, 단독으로도 적용할 수 없는 수정안만 실패로 표시하며 나머지는 다시 적용할 수 있게 남깁니다. 편집기 버퍼에 반영하므로 기존 저장·되돌리기 흐름을 따릅니다. 실제 적용 뒤 변경 섹션 해시를 다시 확인해 논문 요약을 갱신합니다.
 - 제목·저자는 `metadata` 항목으로 분리합니다. 코드가 `\title`·`\author` 선언에서 정보와 해시를 추출해 논문 지도와 YAML에 반영하며, 별도 LLM 요약을 하지 않습니다. 제목·저자 수정에는 이 항목의 선언 원문을 전달하고, `all` 선택에는 preamble을 포함한 전체 파일을 허용합니다.
 - 파일을 읽을 때 CRLF/CR 줄바꿈을 LF로 통일해, 열지 않은 파일의 수정안도 편집기에 연 뒤 정확 일치 검사를 통과하도록 합니다. 이전 세션의 저장된 수정안도 같은 형식으로 불러오며 일반 공백·문장·수치의 일치 검사는 유지합니다.
-- Chat/Edit의 기본 LLM 호출은 정제·선택·실행 3회이며 Auto는 의도 판단 1회가 추가됩니다. 최초 논문 요약, Chat의 추가 원문 요청, Edit의 웹 리서치, 백그라운드 요약과 provider fallback은 별도입니다. 정제·섹션 선택은 `gpt-6.1-sol` low, Chat/Edit은 같은 모델 medium, Auto Router는 `claude-sonnet-5-5` xhigh입니다. 모델과 대체 provider는 `src/ai/models/modelConfig.ts`의 `CHAT_MODELS`에서 관리합니다.
+- Chat/Edit의 기본 LLM 호출은 정제·선택·실행 3회이며 Auto는 의도 판단 1회가 추가됩니다. 최초 논문 요약, Chat의 추가 원문 요청, Edit의 웹 리서치, 백그라운드 요약과 provider fallback은 별도입니다. 정제·섹션 선택은 `gpt-6.1-sol` low, Chat/Edit은 Settings에서 고른 모델 medium, Auto Router는 `claude-sonnet-5-5` xhigh입니다. 모델과 대체 provider는 `src/ai/models/modelConfig.ts`에서 관리합니다.
 - 논문 요약은 첫 요청에서 준비하고, 그 이후에는 섹션 해시가 바뀌거나 요약이 누락된 부분만 갱신합니다. 원고 입력 한도는 150,000자입니다. 편집기의 열린 탭이나 커서 위치로 대상을 추측하지 않으므로 요청에 섹션이나 문장을 지정합니다.
 - 모든 단계는 세션 요약(L1)과 최근 대화 원문(L2)을 사용합니다. 최소 최근 4턴과 미요약 턴을 포함하며 메시지당 Auto Router는 최대 10,000자, 다른 모듈은 4,000자로 제한합니다. 긴 메시지는 앞 70%와 뒤 30%를 남깁니다. 현재 요청(L3)은 자르지 않습니다.
 - Session Summary Module은 미요약 대화가 10턴 이상이거나 모듈이 읽는 길이 기준 40,000자를 넘으면 최근 4턴을 남기고 한 번에 최대 6턴씩 접습니다. 중지·실패·길이 초과도 미완료 상태를 붙여 턴으로 남깁니다. 수정안은 원문·수정문과 적용/대기/거절 상태를 대화 기록에 포함해 다음 요청이 실제 적용 여부를 알 수 있게 합니다.
@@ -62,15 +61,16 @@ flowchart TD
 
 ## 모델과 fallback
 
-호출마다 쓰는 기본 모델과 대체 모델은 `src/ai/models/modelConfig.ts`의 `CHAT_MODELS`에서 관리합니다. LLM Gateway(`src/ai/gateway.ts`)는 기본 모델 호출이 실패하면, 아직 답변이 화면에 나오지 않았고 대체 provider가 연결되어 있을 때 대체 모델로 다시 호출합니다.
+Chat 답변과 Edit 수정안은 Settings의 기본 provider와 그 provider에 고른 모델로 호출하고, 실패하면 다른 provider에 고른 모델로 다시 호출합니다(`chosenModels`). 나머지 호출의 모델은 `src/ai/models/modelConfig.ts`의 `CHAT_MODELS`에 고정되어 있습니다. LLM Gateway(`src/ai/gateway.ts`)는 기본 모델 호출이 실패하면, 아직 답변이 화면에 나오지 않았고 대체 provider가 연결되어 있을 때 대체 모델로 다시 호출합니다.
 
 | 호출 | 기본 모델 | 대체 모델 |
 | --- | --- | --- |
 | 요청 정리, 섹션 선택, 세션 요약, 섹션 요약 | `gpt-6.1-sol` (low) | `claude-sonnet-5-5` |
-| 답변, 수정안, 웹 리서치 | `gpt-6.1-sol` (medium) | `claude-sonnet-5-5` |
+| 답변, 수정안 | Settings에서 고른 모델 (medium) | 다른 provider에 고른 모델 (medium) |
+| 웹 리서치 | `gpt-6.1-sol` (medium) | `claude-sonnet-5-5` |
 | Auto 의도 판단 | `claude-sonnet-5-5` (xhigh) | `gpt-6.1-sol` (low) |
 
-AI 인라인 편집은 설정에서 고른 provider와 모델을 씁니다. 모델 ID는 `src/ai/models/modelConfig.ts` 한 곳에만 기본값으로 둡니다. provider를 연결하면 Settings에서 **Refresh list**로 계정에서 실제로 쓸 수 있는 모델 목록을 provider API에서 가져오고, 목록에 없는 모델 ID도 직접 추가할 수 있습니다. 선택한 모델은 provider별로 저장됩니다.
+모델 ID는 `src/ai/models/modelConfig.ts` 한 곳에만 기본값으로 둡니다. provider를 연결하면 Settings에서 **Refresh list**로 계정에서 실제로 쓸 수 있는 모델 목록을 provider API에서 가져오고, 목록에 없는 모델 ID도 직접 추가할 수 있습니다. 선택한 모델은 provider별로 저장됩니다.
 
 ## 저장 파일
 
@@ -137,7 +137,7 @@ sections:
 
 ## 프롬프트와 결과 검사
 
-prompt는 provider와 무관하게 `src/ai/prompts/`에서 만들고(LaTeX 규칙: 명령어, citation key, `\label`, 수식, 기호, custom macro, `%` 주석 보존, 인라인 편집은 선택 영역 밖 반환 금지), 각 adapter는 이를 자기 메시지 형식으로만 바꿉니다.
+prompt는 provider와 무관하게 `src/ai/prompts/`에서 만들고(LaTeX 규칙: 명령어, citation key, `\label`, 수식, 기호, custom macro, `%` 주석 보존), 각 adapter는 이를 자기 메시지 형식으로만 바꿉니다.
 
 AI 결과는 적용 전에 `src/latex/validation.ts`로 검사합니다: 중괄호, `\begin`/`\end`, `$` 수식 구분자 균형, 사라지거나 바뀐 `\label`, bib에 없는 새 citation key는 오류로, 바뀐 수식, 삭제된 citation/ref/주석/명령어는 경고로 diff 아래에 표시합니다. 오류가 있으면 버튼이 **Accept anyway**로 바뀝니다.
 
@@ -145,7 +145,7 @@ AI 결과는 적용 전에 `src/latex/validation.ts`로 검사합니다: 중괄�
 
 ```
 src/
-├── editor/            CodeMirror 설정, 다중 파일 세션, 자동완성, AI 인라인 편집 UI(diff)
+├── editor/            CodeMirror 설정, 다중 파일 세션, 자동완성, 수정안 대상 하이라이트
 ├── outline/           논문 outline 패널
 ├── project/           프로젝트 열기/저장/컴파일/탐색 흐름, 파일 탐색기
 ├── latex/
@@ -156,11 +156,10 @@ src/
 ├── ai/
 │   ├── types/         AIProvider, AIRequest, AIResponse, ModelConfig
 │   ├── providers/     openai/, anthropic/ adapter와 registry
-│   ├── context/       context builder, 문단 탐지
-│   ├── prompts/       system, rewrite, presets, 채팅의 judge, refine, answer, summary, sectionSummary (paper.ts가 공통 앞부분)
+│   ├── prompts/       system, 채팅의 judge, refine, answer, summary, sectionSummary (paper.ts가 공통 앞부분)
 │   ├── streaming/     SSE parser, backend transport
 │   ├── credentials/   credential 상태 조회/저장/삭제
-│   ├── models/        모델 설정 (채팅 호출별 모델과 fallback: CHAT_MODELS)
+│   ├── models/        모델 설정 (고정 호출의 CHAT_MODELS, 설정 모델을 쓰는 chosenModels)
 │   ├── tools/         모델이 부르는 툴 정의 (판단의 세 갈래, update_summary, write_section_summaries)
 │   ├── gateway.ts     LLM Gateway: 채팅 호출의 모델 선택, Claude fallback, 호출 추적
 │   └── service.ts     UI가 쓰는 유일한 AI 진입점
@@ -186,13 +185,13 @@ src-tauri/src/
 Chat UI → Request Refinement → Paper Orchestra → Section Selection → Chat / Edit Module
                                                                ↓
                                           LLM Gateway (모델 선택, provider fallback)
-                                                            ↓
-Editor (인라인 편집) ───────────────────────────→ AI Service (src/ai/service.ts)
-   ↓
-AIProvider interface
-   ↓
-├── OpenAI adapter     ─┐
-└── Anthropic adapter  ─┴→ transport → Rust ai.rs (key 첨부) → provider API
+                                                               ↓
+                                          AI Service (src/ai/service.ts)
+                                                               ↓
+                                          AIProvider interface
+                                                               ↓
+                                          ├── OpenAI adapter     ─┐
+                                          └── Anthropic adapter  ─┴→ transport → Rust ai.rs (key 첨부) → provider API
 ```
 
 UI 컴포넌트는 vendor API를 직접 호출하지 않습니다.
