@@ -27,14 +27,6 @@ export interface SessionListener {
   onActivated(path: string): void;
 }
 
-export interface SelectionSnapshot {
-  path: string;
-  from: number;
-  to: number;
-  text: string;
-  docText: string;
-}
-
 const compartments = {
   theme: new Compartment(),
   font: new Compartment(),
@@ -264,19 +256,6 @@ class EditorSession {
       this.listener?.onDocChanged(path);
     }
     return true;
-  }
-
-  selection(): SelectionSnapshot | null {
-    if (!this.view || !this.activePath) return null;
-    const { state } = this.view;
-    const main = state.selection.main;
-    return {
-      path: this.activePath,
-      from: main.from,
-      to: main.to,
-      text: state.sliceDoc(main.from, main.to),
-      docText: state.doc.toString(),
-    };
   }
 
   /** Move the cursor to a 1-based line (and column) of the active file. */

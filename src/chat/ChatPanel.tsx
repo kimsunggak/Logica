@@ -4,7 +4,7 @@ import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agen
 import { chosenModels } from "../ai/models/modelConfig";
 import type { ChatMode, WebEvidence } from "../ai/types";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
-import { DiffView } from "../editor/inlineEdit/DiffView";
+import { DiffView } from "./DiffView";
 import { validateRewrite } from "../latex/validation";
 import { confirmDialog, openExternal } from "../lib/backend";
 import { timeAgo } from "../lib/time";

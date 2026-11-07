@@ -29,7 +29,6 @@ export const DEFAULT_MODEL_ID: Record<ProviderId, string> = {
 
 /** Output token budget per task (reasoning models spend part of it thinking first). */
 export const MAX_OUTPUT_TOKENS = {
-  "inline-edit": 8192,
   // One tool call with a one-sentence reason.
   judge: 4096,
   // A one or two sentence reply to small talk.

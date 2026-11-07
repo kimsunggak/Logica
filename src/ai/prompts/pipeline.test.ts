@@ -99,10 +99,6 @@ describe("separate prompt responsibilities", () => {
     expect(anthropic.tool_choice).toMatchObject({ type: "auto", disable_parallel_tool_use: true });
   });
 
-  it("keeps the inline selection rule specific to inline editing", () => {
-    expect(buildPrompt({ ...turn, task: "inline-edit" }).system).toContain("Only edit the selected text.");
-    expect(buildPrompt({ ...turn, task: "edit" }).system).not.toContain("Only edit the selected text.");
-  });
 });
 
 describe("web research for Edit", () => {

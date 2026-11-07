@@ -4,7 +4,7 @@ LOGICA의 AI 에이전트가 요청을 처리하는 단계, 대화와 논문을 
 
 ## AI context 구성
 
-인라인 편집은 선택 텍스트만 보내지 않고, 같은 문서 모델(`PaperDocument`)에서 필요한 부분만 골라 공통 semantic context를 만듭니다. 채팅은 논문에 대한 첫 질문에서 먼저 논문을 섹션별로 요약해 두고, 질문에 필요한 섹션만 원문으로, 나머지 섹션은 그 요약으로 보냅니다.
+채팅은 논문에 대한 첫 질문에서 먼저 논문을 섹션별로 요약해 두고, 질문에 필요한 섹션만 원문으로, 나머지 섹션은 그 요약으로 보냅니다.
 
 채팅은 `UI Mode → Request Refinement → Routing → Section Selection → Execution` 순서로 처리합니다. 입력창 왼쪽의 **Chat**은 논문 질의응답, **Edit**은 원문 수정안 생성, **Auto**는 요청에 따른 Chat/Edit 자동 선택입니다. 전송한 모드는 해당 턴에 고정되며 대화 파일에 함께 저장됩니다.
 
@@ -34,7 +34,6 @@ flowchart TD
   T --> S[변경된 섹션의 논문 요약 갱신]
 ```
 
-- 인라인 편집은 논문 제목, abstract, outline, 현재 section 경로, 앞 문단, 선택 텍스트, 다음 문단을 사용합니다.
 - 채팅의 단계별 책임은 다음과 같습니다.
   1. **Request Refinement**: 모든 모드에서 세션 요약, 최근 대화, 사용자 입력으로 문맥과 지시 대상을 복원합니다. 출력은 정제된 요청 문자열 하나입니다. 의도 분류나 섹션 선택을 수행하지 않으며, 질문/명령, 부정, 조건, 요청 범위를 보존합니다.
   2. **Routing**: Chat/Edit은 코드가 경로를 고정합니다. Auto만 `route_chat`, `route_edit`, `clarify_request` 도구를 가진 모델을 호출합니다. 이 모델에는 원래 입력, 정제된 요청, 대화 정보와 논문 지도를 보내며 원문 선택은 맡기지 않습니다. 의도가 불명확하거나 tool 호출이 유효하지 않으면 확인 질문을 반환합니다.
@@ -71,7 +70,7 @@ Chat 답변과 Edit 수정안은 Settings의 기본 provider와 그 provider에 
 | 웹 리서치 | `gpt-6.1-sol` (medium) | `claude-sonnet-5-5` |
 | Auto 의도 판단 | `claude-sonnet-5-5` (xhigh) | `gpt-6.1-sol` (low) |
 
-AI 인라인 편집은 설정에서 고른 provider와 모델을 씁니다. 모델 ID는 `src/ai/models/modelConfig.ts` 한 곳에만 기본값으로 둡니다. provider를 연결하면 Settings에서 **Refresh list**로 계정에서 실제로 쓸 수 있는 모델 목록을 provider API에서 가져오고, 목록에 없는 모델 ID도 직접 추가할 수 있습니다. 선택한 모델은 provider별로 저장됩니다.
+모델 ID는 `src/ai/models/modelConfig.ts` 한 곳에만 기본값으로 둡니다. provider를 연결하면 Settings에서 **Refresh list**로 계정에서 실제로 쓸 수 있는 모델 목록을 provider API에서 가져오고, 목록에 없는 모델 ID도 직접 추가할 수 있습니다. 선택한 모델은 provider별로 저장됩니다.
 
 ## 저장 파일
 
@@ -138,7 +137,7 @@ sections:
 
 ## 프롬프트와 결과 검사
 
-prompt는 provider와 무관하게 `src/ai/prompts/`에서 만들고(LaTeX 규칙: 명령어, citation key, `\label`, 수식, 기호, custom macro, `%` 주석 보존, 인라인 편집은 선택 영역 밖 반환 금지), 각 adapter는 이를 자기 메시지 형식으로만 바꿉니다.
+prompt는 provider와 무관하게 `src/ai/prompts/`에서 만들고(LaTeX 규칙: 명령어, citation key, `\label`, 수식, 기호, custom macro, `%` 주석 보존), 각 adapter는 이를 자기 메시지 형식으로만 바꿉니다.
 
 AI 결과는 적용 전에 `src/latex/validation.ts`로 검사합니다: 중괄호, `\begin`/`\end`, `$` 수식 구분자 균형, 사라지거나 바뀐 `\label`, bib에 없는 새 citation key는 오류로, 바뀐 수식, 삭제된 citation/ref/주석/명령어는 경고로 diff 아래에 표시합니다. 오류가 있으면 버튼이 **Accept anyway**로 바뀝니다.
 
@@ -146,7 +145,7 @@ AI 결과는 적용 전에 `src/latex/validation.ts`로 검사합니다: 중괄�
 
 ```
 src/
-├── editor/            CodeMirror 설정, 다중 파일 세션, 자동완성, AI 인라인 편집 UI(diff)
+├── editor/            CodeMirror 설정, 다중 파일 세션, 자동완성, 수정안 대상 하이라이트
 ├── outline/           논문 outline 패널
 ├── project/           프로젝트 열기/저장/컴파일/탐색 흐름, 파일 탐색기
 ├── latex/
@@ -157,8 +156,7 @@ src/
 ├── ai/
 │   ├── types/         AIProvider, AIRequest, AIResponse, ModelConfig
 │   ├── providers/     openai/, anthropic/ adapter와 registry
-│   ├── context/       context builder, 문단 탐지
-│   ├── prompts/       system, rewrite, presets, 채팅의 judge, refine, answer, summary, sectionSummary (paper.ts가 공통 앞부분)
+│   ├── prompts/       system, 채팅의 judge, refine, answer, summary, sectionSummary (paper.ts가 공통 앞부분)
 │   ├── streaming/     SSE parser, backend transport
 │   ├── credentials/   credential 상태 조회/저장/삭제
 │   ├── models/        모델 설정 (고정 호출의 CHAT_MODELS, 설정 모델을 쓰는 chosenModels)
@@ -187,13 +185,13 @@ src-tauri/src/
 Chat UI → Request Refinement → Paper Orchestra → Section Selection → Chat / Edit Module
                                                                ↓
                                           LLM Gateway (모델 선택, provider fallback)
-                                                            ↓
-Editor (인라인 편집) ───────────────────────────→ AI Service (src/ai/service.ts)
-   ↓
-AIProvider interface
-   ↓
-├── OpenAI adapter     ─┐
-└── Anthropic adapter  ─┴→ transport → Rust ai.rs (key 첨부) → provider API
+                                                               ↓
+                                          AI Service (src/ai/service.ts)
+                                                               ↓
+                                          AIProvider interface
+                                                               ↓
+                                          ├── OpenAI adapter     ─┐
+                                          └── Anthropic adapter  ─┴→ transport → Rust ai.rs (key 첨부) → provider API
 ```
 
 UI 컴포넌트는 vendor API를 직접 호출하지 않습니다.

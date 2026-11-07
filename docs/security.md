@@ -37,8 +37,8 @@ LOGICA는 자체 서버가 없고, AI 기능을 쓸 때만 아래 내용을 연�
 
 | 기능 | 보내는 내용 | 받는 곳 |
 | --- | --- | --- |
-| AI 인라인 편집 | 선택한 텍스트와 지시, 논문 제목·abstract·outline, 현재 섹션 경로, 앞뒤 문단 | 설정에서 고른 provider |
-| AI 채팅: 요청 정리, 섹션 선택, 답변, 수정안, 웹 리서치, 세션 요약 | 요청, 대화 기록(세션 요약과 최근 대화), 논문 요약, 고른 섹션의 원문 | OpenAI. 실패하면 Anthropic API key가 연결된 경우 Anthropic |
+| AI 채팅: 답변, 수정안 | 요청, 대화 기록(세션 요약과 최근 대화), 논문 요약, 고른 섹션의 원문 | 설정의 기본 provider. 실패하면 다른 provider가 연결된 경우 그 provider |
+| AI 채팅: 요청 정리, 섹션 선택, 웹 리서치, 세션 요약 | 요청, 대화 기록(세션 요약과 최근 대화), 논문 요약, 고른 섹션의 원문 | OpenAI. 실패하면 Anthropic API key가 연결된 경우 Anthropic |
 | AI 채팅: Auto 모드의 의도 판단 | 요청, 대화 기록, 논문 요약 | Anthropic. 실패하면 OpenAI가 연결된 경우 OpenAI |
 | 논문 요약 만들기 | 요약할 섹션의 원문 | OpenAI. 실패하면 Anthropic API key가 연결된 경우 Anthropic |
 

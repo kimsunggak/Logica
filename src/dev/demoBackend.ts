@@ -367,17 +367,7 @@ function simulateReply(body: Record<string, any>, messages: { content: string }[
   if (system.includes("Request Refinement Module")) return { text: simulateRefine(last) };
   if (system.includes("Web Research Module")) return { text: simulateResearch(last) };
   if (last.includes("You are the Paper Chat Module")) return { text: simulateAnswerModule(all, last) };
-  return { text: simulateAnswer(last) };
-}
-
-/** Inline edit: the rewritten selection, or a reviewable suggestion for the paragraph. */
-function simulateAnswer(userMessage: string): string {
-  const instruction = between(userMessage, "instruction") ?? "";
-  const selected = between(userMessage, "selected_text");
-  if (userMessage.includes("<instruction>") && selected !== undefined) return demoRewrite(selected, instruction);
-  const target = selected ?? between(userMessage, "current_paragraph");
-  if (!target) return "Place the cursor in a paragraph or select text, and I will suggest an edit for it.";
-  return `Here is a tighter version that keeps the citations and LaTeX commands unchanged:\n\n\`\`\`latex\n${demoRewrite(target, instruction)}\n\`\`\`\n\nReview it as a diff before applying.`;
+  return { text: "This is the LOGICA demo. Ask a question about the paper." };
 }
 
 const chunks = (text: string, size = 14) => Array.from({ length: Math.ceil(text.length / size) }, (_, i) => text.slice(i * size, (i + 1) * size));

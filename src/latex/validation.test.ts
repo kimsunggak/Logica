@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeRewrite, validateRewrite } from "./validation";
+import { validateRewrite } from "./validation";
 
 const errors = (o: string, r: string, bib?: string[]) =>
   validateRewrite(o, r, { bibKeys: bib ? new Set(bib) : undefined }).filter((i) => i.severity === "error");
@@ -33,12 +33,5 @@ describe("validateRewrite", () => {
   it("accepts an explicit deletion but still reports broken LaTeX structure", () => {
     expect(validateRewrite("Delete this sentence.", "", { allowEmpty: true })).toEqual([]);
     expect(validateRewrite("\\begin{itemize}", "", { allowEmpty: true }).some((i) => i.severity === "error")).toBe(true);
-  });
-});
-
-describe("normalizeRewrite", () => {
-  it("strips code fences and keeps surrounding whitespace", () => {
-    expect(normalizeRewrite("  old text\n", "```latex\nnew text\n```")).toBe("  new text\n");
-    expect(normalizeRewrite("old", "new")).toBe("new");
   });
 });

@@ -185,16 +185,3 @@ export function validateRewrite(
   }
   return issues;
 }
-
-/**
- * Clean a model response so it can replace the selection: remove a wrapping
- * code fence and restore the original's leading/trailing whitespace.
- */
-export function normalizeRewrite(original: string, response: string): string {
-  let text = response;
-  const fence = /^\s*```[a-zA-Z]*\s*\n([\s\S]*?)\n?```\s*$/.exec(text);
-  if (fence) text = fence[1];
-  const leading = /^\s*/.exec(original)?.[0] ?? "";
-  const trailing = /\s*$/.exec(original)?.[0] ?? "";
-  return leading + text.trim() + trailing;
-}

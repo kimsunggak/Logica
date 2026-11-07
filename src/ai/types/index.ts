@@ -18,10 +18,6 @@ export interface AIContext {
   outline?: string;
   /** e.g. "3 Method › 3.2 Uncertainty-guided Routing" */
   currentSection?: string;
-  previousParagraph?: string;
-  /** Paragraph around the cursor when nothing is selected. */
-  currentParagraph?: string;
-  nextParagraph?: string;
 }
 
 export interface AIMessage {
@@ -32,10 +28,10 @@ export interface AIMessage {
 /** UI purpose; common refinement precedes fixed routing or Auto classification. */
 export type ChatMode = "auto" | "chat" | "edit";
 export type ExecutionMode = Exclude<ChatMode, "auto">;
-export type AITask = "inline-edit" | "judge" | "reply" | "refine" | "select" | "research" | "answer" | "edit" | "summary" | "sections";
+export type AITask = "judge" | "reply" | "refine" | "select" | "research" | "answer" | "edit" | "summary" | "sections";
 
 /** The model calls of a chat turn. */
-export type ChatTask = Exclude<AITask, "inline-edit">;
+export type ChatTask = AITask;
 
 export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
@@ -141,7 +137,6 @@ export interface AIRequest {
   instruction: string;
   uiMode?: ChatMode;
   executionMode?: ExecutionMode;
-  selectedText?: string;
   context: AIContext;
   /** Earlier chat turns sent word for word (L2). */
   history?: AIMessage[];
