@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/kimsunggak/Logica/releases/latest"><img alt="최신 릴리스" src="https://img.shields.io/github/v/release/kimsunggak/Logica"></a>
-  <img alt="지원 OS" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey">
+  <img alt="지원 OS" src="https://img.shields.io/badge/platform-Windows-lightgrey">
   <a href="LICENSE"><img alt="라이선스" src="https://img.shields.io/github/license/kimsunggak/Logica"></a>
 </p>
 
@@ -48,19 +48,17 @@
 
 ### 1. 설치
 
-[Releases](https://github.com/kimsunggak/Logica/releases/latest)에서 OS에 맞는 설치 파일을 받아 실행합니다.
+[Releases](https://github.com/kimsunggak/Logica/releases/latest)에서 Windows 설치 파일을 받아 실행합니다.
 
 | OS | 받을 파일 |
 | --- | --- |
 | Windows | `LOGICA_<버전>_x64-setup.exe` |
-| macOS | `LOGICA_<버전>_aarch64.dmg` |
-| Linux | `LOGICA_<버전>_amd64.AppImage` 또는 `.deb` |
 
-릴리스에 내 OS용 파일이 없으면 [소스에서 빌드](docs/development.md)할 수 있습니다.
+현재는 Windows만 지원합니다. macOS와 Linux용 설치 파일은 아직 제공하지 않습니다.
 
 > [!WARNING]
 > 설치 파일에 코드 서명이 없어 처음 실행할 때 경고가 뜹니다.
-> Windows는 **추가 정보 → 실행**, macOS는 앱을 **우클릭 → 열기**를 누르면 됩니다.
+> **추가 정보 → 실행**을 누르면 됩니다.
 
 ### 2. AI 연결
 
@@ -74,8 +72,6 @@
 둘 다 연결하면 한쪽 호출이 실패할 때 다른 쪽으로 자동 전환됩니다.
 
 ## 사용법
-
-> macOS에서는 아래 단축키의 <kbd>Ctrl</kbd> 대신 <kbd>Cmd</kbd>를 누릅니다.
 
 ### 논문 쓰기
 
@@ -148,7 +144,7 @@ flowchart LR
 
 - 원고와 컴파일 결과는 논문 폴더에, 대화 기록·논문 요약·설정은 앱 데이터 폴더에 저장됩니다. LOGICA는 자체 서버가 없습니다.
 - AI 기능을 쓸 때만 요청과 필요한 원고 내용(고른 섹션의 원문 또는 요약)이 연결한 provider(OpenAI, Anthropic)로 전송됩니다. 웹 검색을 켜면 검색은 provider 쪽에서 실행됩니다.
-- API key와 ChatGPT 로그인 토큰은 OS 보안 저장소(Windows 자격 증명 관리자, macOS 키체인, Linux Secret Service)에만 저장되고, 파일로는 저장되지 않습니다.
+- API key와 ChatGPT 로그인 토큰은 Windows 자격 증명 관리자에만 저장되고, 파일로는 저장되지 않습니다.
 
 <details>
 <summary><b>저장 위치 보기</b></summary>
@@ -160,8 +156,6 @@ flowchart LR
 | 논문 요약 | `%LOCALAPPDATA%\app.logica.desktop\papers\` |
 | 설정, 최근 작업 | `%APPDATA%\app.logica.desktop\state.json` |
 
-- macOS는 모두 `~/Library/Application Support/app.logica.desktop/`에 있습니다.
-- Linux는 대화 기록과 논문 요약이 `~/.local/share/app.logica.desktop/`, 설정이 `~/.config/app.logica.desktop/`에 있습니다.
 - 앱을 삭제해도 이 폴더들은 남습니다. 완전히 지우려면 직접 삭제하세요.
 
 </details>
