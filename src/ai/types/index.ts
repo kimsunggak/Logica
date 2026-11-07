@@ -18,10 +18,6 @@ export interface AIContext {
   outline?: string;
   /** e.g. "3 Method › 3.2 Uncertainty-guided Routing" */
   currentSection?: string;
-  previousParagraph?: string;
-  /** Paragraph around the cursor when nothing is selected. */
-  currentParagraph?: string;
-  nextParagraph?: string;
 }
 
 export interface AIMessage {
@@ -36,10 +32,10 @@ export interface AIMessage {
  * answers from the paper. `summary` folds older turns into the session
  * summary, and `sections` summarizes the paper's sections for the paper map.
  */
-export type AITask = "inline-edit" | "judge" | "reply" | "refine" | "answer" | "summary" | "sections";
+export type AITask = "judge" | "reply" | "refine" | "answer" | "summary" | "sections";
 
 /** The model calls of a chat turn. */
-export type ChatTask = Exclude<AITask, "inline-edit">;
+export type ChatTask = AITask;
 
 export type ReasoningEffort = "low" | "medium" | "high";
 
@@ -119,7 +115,6 @@ export interface AIRequest {
   id: string;
   task: AITask;
   instruction: string;
-  selectedText?: string;
   context: AIContext;
   /** Earlier chat turns sent word for word (L2). */
   history?: AIMessage[];

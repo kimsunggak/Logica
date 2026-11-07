@@ -22,7 +22,6 @@ LOGICA는 개인 연구용 로컬 LaTeX 논문 작성 도구입니다. 논문 �
 | Outline | `\part` ~ `\subsubsection` 트리, 번호(부록은 A, B, ...), 접기/펼치기, 현재 커서 section 강조, 클릭 시 원본 위치로 이동, section별 단어 수, 현재 section의 파일:줄 표시 |
 | Editor | CodeMirror 6, LaTeX 문법 강조, 줄 번호, 괄호 매칭, undo/redo, 검색/바꾸기, 저장 상태 표시, `\section` `\cite` `\ref` `\eqref` `\label` 등 자동완성 |
 | 미리보기와 PDF | TeX 엔진 내장(설치된 TeX가 없으면 자동 사용), 입력을 멈추면 자동 저장 후 컴파일하는 실시간 미리보기(설정에서 끌 수 있음), 논문 페이지만 보이는 미리보기, **PDF 내보내기**로 원하는 위치에 저장, `latexmk` > `pdflatex` > `xelatex` 순 자동 선택(또는 직접 지정/사용자 명령), 타임아웃, 주요 오류만 추출(파일:줄 클릭 이동) |
-| AI 인라인 편집 | 텍스트 선택 후 `Cmd/Ctrl+K`, 기본 명령(Improve writing, Make concise, Make academic, Improve clarity, Fix grammar, Rewrite, 직접 입력), streaming 표시, Stop, diff 확인 후 Accept / Reject / Regenerate(다른 provider로 재생성 가능) |
 | AI 채팅 (에이전트) | Chat Orchestrator가 질문마다 처리 갈래를 고름: 잡담은 Reply Module이 답하고, 명확한 질문은 바로 답변하고, 모호한 질문은 논문 전체를 보고 명확한 질문으로 정제한 뒤 답변(정제해도 모호하면 되물음). 수정 요청에는 여러 곳, 여러 파일의 수정안을 제안하고 수정마다 diff와 LaTeX 검사 결과를 보여 주며 하나씩 또는 모두 적용/거절 |
 | Citation / Reference | `references.bib` 파싱, `\cite{` 입력 시 key/제목/저자/연도 자동완성, `\ref{` 라벨 자동완성, `\ref` `\eqref` `\cite` `\input` 위에서 `F12` 또는 `Cmd/Ctrl+클릭`으로 정의 위치 이동 |
 | 상태 복원 | 마지막 프로젝트, 열린 파일, 파일별 커서 위치, outline 접힘 상태, 패널 크기와 표시 여부, 테마, provider와 model 선택 |
@@ -60,8 +59,8 @@ npm run tauri build      # 배포용 빌드 (src-tauri/target/release/bundle)
 2. 왼쪽 Outline에서 section을 클릭하면 해당 파일과 줄로 이동합니다.
 3. 중앙 편집기에서 직접 수정하고 `Cmd/Ctrl+S`로 저장합니다.
 4. 입력을 멈추면 자동으로 저장하고 컴파일해 미리보기가 갱신됩니다. **Compile**(`Cmd/Ctrl+Enter`)로 직접 컴파일할 수도 있습니다. 오류는 편집기 아래에 파일:줄과 함께 표시되며 클릭하면 이동합니다. 완성본은 **PDF 내보내기**로 저장합니다.
-5. Settings(`Cmd/Ctrl+,`) > AI에서 OpenAI 또는 Claude API key를 연결하고 model을 고릅니다.
-6. 문장이나 문단을 선택하고 `Cmd/Ctrl+K`를 눌러 지시를 입력합니다. 결과가 streaming으로 표시된 뒤 diff가 나타나며, **Accept**를 눌러야만 원고가 바뀝니다.
+5. Settings(`Cmd/Ctrl+,`) > AI에서 OpenAI 또는 Claude API key를 연결하고 model을 고릅니다. 채팅 답변은 기본 provider와 여기서 고른 model로 호출됩니다.
+6. 채팅에 수정을 요청하면 수정안마다 diff가 나타나며, 적용을 눌러야만 원고가 바뀝니다.
 
 ### 단축키
 
@@ -70,9 +69,7 @@ npm run tauri build      # 배포용 빌드 (src-tauri/target/release/bundle)
 | `Cmd/Ctrl+O` | 프로젝트 열기 |
 | `Cmd/Ctrl+S` | 현재 파일 저장 |
 | `Cmd/Ctrl+Shift+S` | 모두 저장 |
-| `Cmd/Ctrl+Enter` | 컴파일 (AI diff 검토 중에는 Accept) |
-| `Cmd/Ctrl+K` | AI 인라인 편집 (선택이 없으면 커서가 있는 문단을 선택) |
-| `Esc` | AI 인라인 편집 닫기 / streaming 중이면 Stop |
+| `Cmd/Ctrl+Enter` | 컴파일 |
 | `Cmd/Ctrl+Shift+L` | AI 채팅 패널 열기/닫기 |
 | `F12`, `Cmd/Ctrl+클릭` | `\ref` `\eqref` `\cite` `\input` 대상으로 이동 |
 | `Cmd/Ctrl+F` | 검색 / 바꾸기 |
@@ -140,14 +137,13 @@ LOGICA는 특정 provider에 묶이지 않도록 공통 `AIProvider` 인터페�
 
 ## AI context 구성
 
-인라인 편집은 선택 텍스트만 보내지 않고, 같은 문서 모델(`PaperDocument`)에서 필요한 부분만 골라 공통 semantic context를 만듭니다. 채팅은 논문에 대한 첫 질문에서 먼저 논문을 섹션별로 요약해 두고, 질문에 필요한 섹션만 원문으로, 나머지 섹션은 그 요약으로 보냅니다.
+채팅은 논문에 대한 첫 질문에서 먼저 논문을 섹션별로 요약해 두고, 질문에 필요한 섹션만 원문으로, 나머지 섹션은 그 요약으로 보냅니다.
 
 ![AI 채팅 에이전트 구조: Chat Orchestrator가 판단 LLM으로 Reply, Answer, Refine 중 갈래를 고르고, 모든 LLM 호출은 LLM Gateway와 Rust를 거쳐 OpenAI나 Anthropic으로 갑니다](docs/images/chat-agent-architecture.png)
 
 AI 채팅 에이전트 구조 (원본: [`docs/images/chat-agent-architecture.svg`](docs/images/chat-agent-architecture.svg)). 사용자 질문은 Chat Orchestrator로 들어가고, 판단 LLM이 툴 하나로 갈래(A 잡담, B 바로 답변, C 정제 후 답변)와 원문으로 읽을 섹션을 고릅니다. 각 모듈의 결과는 오케스트레이터를 거쳐 화면에 표시되고, 답이 끝난 질문은 대화 메모리에 1턴으로 저장됩니다.
 
-- 인라인 편집: 논문 제목, abstract, outline, 현재 section 경로(예: `3 Method › 3.2 Uncertainty Estimation`), 앞 문단, 선택 텍스트, 다음 문단
-- 채팅: 한 질문에 모델을 최대 3번 부릅니다(답변이 섹션 원문을 더 요청하면 4번). 논문에 대한 첫 질문에서는 판단보다 먼저 논문 요약을 부르고(약 40,000자마다 1번), 그 뒤에는 고친 섹션이 있을 때만 턴이 끝난 뒤 백그라운드로 다시 부릅니다. 세션 요약은 백그라운드로 2턴마다 1번 부릅니다. 판단은 `claude-sonnet-5-5`(reasoning high, 실패하면 `gpt-6.1-sol`), 나머지는 `gpt-6.1-sol`(실패하면 `claude-sonnet-5-5`)입니다(`src/ai/models/modelConfig.ts`의 `CHAT_MODELS`).
+- 채팅: 한 질문에 모델을 최대 3번 부릅니다(답변이 섹션 원문을 더 요청하면 4번). 논문에 대한 첫 질문에서는 판단보다 먼저 논문 요약을 부르고(약 40,000자마다 1번), 그 뒤에는 고친 섹션이 있을 때만 턴이 끝난 뒤 백그라운드로 다시 부릅니다. 세션 요약은 백그라운드로 2턴마다 1번 부릅니다. 답변은 Settings의 기본 provider와 그 provider에 고른 model(reasoning medium)로 부르고, 실패하면 다른 provider에 고른 model로 부릅니다(`answerModels`). 판단은 `claude-sonnet-5-5`(reasoning high, 실패하면 `gpt-6.1-sol`), 나머지는 `gpt-6.1-sol`(실패하면 `claude-sonnet-5-5`)입니다(`src/ai/models/modelConfig.ts`의 `CHAT_MODELS`).
   1. 판단(Chat Orchestrator): 세션 요약, 최근 4턴 원문, 논문 지도(섹션별 키, 제목, 단어 수, label, 요약), 질문 순서로 보냅니다. 원고 본문은 보내지 않습니다. 모델은 `reply_directly`, `answer_question`, `refine_question` 중 하나를 반드시 부르고, 인자 `reason`에 그 갈래를 고른 근거(다른 두 갈래가 아닌 이유)를 적습니다. `answer_question`과 `refine_question`은 인자 `sections`에 원문으로 읽을 섹션 키를 함께 적습니다(요약으로 충분하면 빈 목록, 논문 전체가 필요하면 `["all"]`). 판단 모델은 사용자에게 보이는 글을 쓰지 않습니다. 툴 호출은 강제하되(OpenAI `required`, Claude `any`), Claude는 thinking을 켜면 강제 호출을 받지 않으므로 `auto`로 보내고 프롬프트로 요구합니다. 그래도 툴 없이 글만 오면 잡담으로 처리합니다.
      - 잡담(`reply_directly`)이면 Reply Module(reasoning low)이 세션 요약, 요약에 아직 안 들어간 턴, 질문만 보고 답합니다. 원고는 보내지 않으므로 잡담은 모델을 2번 부릅니다.
   2. 정제(Refine Module, reasoning medium, 판단이 `refine_question`일 때만): 논문(초록과 판단이 고른 섹션은 원문, 나머지는 섹션 요약. 요약을 만들지 못했으면 원고 전체, 최대 150,000자), 세션 요약, 요약에 아직 안 들어간 턴, 질문. 명확한 질문 하나로 다시 쓰거나 되물을 질문을 JSON으로 돌려줍니다. 섹션 단위로 받았을 때는 질문을 다듬은 뒤 원문으로 읽을 섹션을 `sections`로 다시 고르며, 이 선택이 판단의 선택을 대신합니다.
@@ -213,7 +209,7 @@ sections:
           This motivates handling occluded joints explicitly.
 ```
 
-prompt는 provider와 무관하게 `src/ai/prompts/`에서 만들고(LaTeX 규칙: 명령어, citation key, `\label`, 수식, 기호, custom macro, `%` 주석 보존, 인라인 편집은 선택 영역 밖 반환 금지), 각 adapter는 이를 자기 메시지 형식으로만 바꿉니다.
+prompt는 provider와 무관하게 `src/ai/prompts/`에서 만들고(LaTeX 규칙: 명령어, citation key, `\label`, 수식, 기호, custom macro, `%` 주석 보존), 각 adapter는 이를 자기 메시지 형식으로만 바꿉니다.
 
 AI 결과는 적용 전에 `src/latex/validation.ts`로 검사합니다: 중괄호, `\begin`/`\end`, `$` 수식 구분자 균형, 사라지거나 바뀐 `\label`, bib에 없는 새 citation key는 오류로, 바뀐 수식, 삭제된 citation/ref/주석/명령어는 경고로 diff 아래에 표시합니다. 오류가 있으면 버튼이 **Accept anyway**로 바뀝니다.
 
@@ -221,7 +217,7 @@ AI 결과는 적용 전에 `src/latex/validation.ts`로 검사합니다: 중괄�
 
 ```
 src/
-├── editor/            CodeMirror 설정, 다중 파일 세션, 자동완성, AI 인라인 편집 UI(diff)
+├── editor/            CodeMirror 설정, 다중 파일 세션, 자동완성
 ├── outline/           논문 outline 패널
 ├── project/           프로젝트 열기/저장/컴파일/탐색 흐름, 파일 탐색기
 ├── latex/
@@ -232,8 +228,7 @@ src/
 ├── ai/
 │   ├── types/         AIProvider, AIRequest, AIResponse, ModelConfig
 │   ├── providers/     openai/, anthropic/ adapter와 registry
-│   ├── context/       context builder, 문단 탐지
-│   ├── prompts/       system, rewrite, presets, 채팅의 judge, refine, answer, summary, sectionSummary (paper.ts가 공통 앞부분)
+│   ├── prompts/       system, 채팅의 judge, refine, answer, summary, sectionSummary (paper.ts가 공통 앞부분)
 │   ├── streaming/     SSE parser, backend transport
 │   ├── credentials/   credential 상태 조회/저장/삭제
 │   ├── models/        모델 설정 (채팅 호출별 모델과 fallback: CHAT_MODELS)
@@ -259,9 +254,9 @@ src-tauri/src/
 의존 방향:
 
 ```
-Chat UI → Chat Orchestrator → Refine / Answer Module → LLM Gateway (모델 선택, Claude fallback)
-                                                            ↓
-Editor (인라인 편집) ───────────────────────────→ AI Service (src/ai/service.ts)
+Chat UI → Chat Orchestrator → Refine / Answer Module → LLM Gateway (모델 선택, fallback)
+   ↓
+AI Service (src/ai/service.ts)
    ↓
 AIProvider interface
    ↓

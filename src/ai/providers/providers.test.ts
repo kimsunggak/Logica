@@ -6,9 +6,8 @@ import { fromHttpError } from "../errors";
 
 const request: AIRequest = {
   id: "r",
-  task: "inline-edit",
+  task: "answer",
   instruction: "Make concise",
-  selectedText: "Some text.",
   context: { paperTitle: "T" },
   model: "model-x",
   maxOutputTokens: 1000,

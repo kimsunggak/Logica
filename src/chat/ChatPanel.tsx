@@ -3,7 +3,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentTyp
 import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
 import { answerModels } from "../ai/models/modelConfig";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
-import { DiffView } from "../editor/inlineEdit/DiffView";
+import { DiffView } from "./DiffView";
 import { validateRewrite } from "../latex/validation";
 import { confirmDialog } from "../lib/backend";
 import { timeAgo } from "../lib/time";

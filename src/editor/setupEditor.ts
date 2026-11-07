@@ -21,10 +21,9 @@ import {
 import { keyAtOffset, REF_COMMANDS } from "../latex/parser/parseFile";
 import { compileProject, gotoDefinition, saveActive, saveAll } from "../project/projectActions";
 import { useProject } from "../project/projectStore";
-import { aiTargetField, flashLineField } from "./aiTarget";
+import { flashLineField } from "./aiTarget";
 import { latexCompletionSource } from "./completions";
 import { editorSession } from "./editorSession";
-import { acceptInlineEdit, openInlineEdit, rejectInlineEdit, useInlineEdit } from "./inlineEdit/inlineEditStore";
 import { latexLanguage } from "./latexLanguage";
 
 function isNavigable(command: string): boolean {
@@ -34,31 +33,12 @@ function isNavigable(command: string): boolean {
 const appKeymap = keymap.of([
   { key: "Mod-s", run: () => (void saveActive(), true), preventDefault: true },
   { key: "Mod-Shift-s", run: () => (void saveAll(), true), preventDefault: true },
-  {
-    // Accept a reviewed AI edit, otherwise compile.
-    key: "Mod-Enter",
-    run: () => {
-      const inline = useInlineEdit.getState();
-      if (inline.open && inline.phase === "review") acceptInlineEdit();
-      else void compileProject();
-      return true;
-    },
-    preventDefault: true,
-  },
-  { key: "Mod-k", run: () => openInlineEdit(), preventDefault: true },
+  { key: "Mod-Enter", run: () => (void compileProject(), true), preventDefault: true },
   {
     key: "F12",
     run: (view) => {
       const path = editorSession.activePath;
       if (path) void gotoDefinition(path, view.state.selection.main.head);
-      return true;
-    },
-  },
-  {
-    key: "Escape",
-    run: () => {
-      if (!useInlineEdit.getState().open) return false;
-      rejectInlineEdit();
       return true;
     },
   },
@@ -116,7 +96,6 @@ export function createBaseExtensions(): Extension[] {
       indentWithTab,
     ]),
     latexLanguage,
-    aiTargetField,
     flashLineField,
     clickNavigation,
     EditorView.contentAttributes.of({ spellcheck: "false", autocorrect: "off", autocapitalize: "off" }),

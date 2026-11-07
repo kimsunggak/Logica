@@ -25,14 +25,6 @@ export interface SessionListener {
   onActivated(path: string): void;
 }
 
-export interface SelectionSnapshot {
-  path: string;
-  from: number;
-  to: number;
-  text: string;
-  docText: string;
-}
-
 const compartments = {
   theme: new Compartment(),
   font: new Compartment(),
@@ -186,15 +178,6 @@ class EditorSession {
     this.markSaved(path);
   }
 
-  /** Dispatch state effects to any open file (active or in the background). */
-  dispatchEffects(path: string, effects: StateEffect<unknown>[]) {
-    if (path === this.activePath && this.view) this.view.dispatch({ effects });
-    else {
-      const state = this.states.get(path);
-      if (state) this.states.set(path, state.update({ effects }).state);
-    }
-  }
-
   /** Apply an edit to any open file. */
   applyEdit(path: string, from: number, to: number, insert: string, effects: StateEffect<unknown>[] = []) {
     const state = this.stateOf(path);
@@ -213,19 +196,6 @@ class EditorSession {
       this.listener?.onDocChanged(path);
     }
     return true;
-  }
-
-  selection(): SelectionSnapshot | null {
-    if (!this.view || !this.activePath) return null;
-    const { state } = this.view;
-    const main = state.selection.main;
-    return {
-      path: this.activePath,
-      from: main.from,
-      to: main.to,
-      text: state.sliceDoc(main.from, main.to),
-      docText: state.doc.toString(),
-    };
   }
 
   /** Move the cursor to a 1-based line (and column) of the active file. */

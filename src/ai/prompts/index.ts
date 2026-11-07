@@ -9,7 +9,6 @@ import { buildRefinePrompt } from "./refine";
 import { buildReplyPrompt } from "./reply";
 import { buildSectionSummaryPrompt } from "./sectionSummary";
 import { buildSummaryPrompt } from "./summary";
-import { buildInlineEditPrompt } from "./rewrite";
 
 export interface PromptPayload {
   system: string;
@@ -29,7 +28,6 @@ function normalizeMessages(messages: AIMessage[]): AIMessage[] {
 }
 
 const BUILDERS: Record<AITask, (request: AIRequest) => PromptPayload> = {
-  "inline-edit": buildInlineEditPrompt,
   judge: buildJudgePrompt,
   reply: buildReplyPrompt,
   refine: buildRefinePrompt,
@@ -42,5 +40,3 @@ export function buildPrompt(request: AIRequest): PromptPayload {
   const payload = BUILDERS[request.task](request);
   return { system: payload.system, messages: normalizeMessages(payload.messages) };
 }
-
-export { INLINE_COMMANDS, type InlineCommand } from "./presets";

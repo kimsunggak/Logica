@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeRewrite, validateRewrite } from "./validation";
+import { validateRewrite } from "./validation";
 
 const errors = (o: string, r: string, bib?: string[]) =>
   validateRewrite(o, r, { bibKeys: bib ? new Set(bib) : undefined }).filter((i) => i.severity === "error");
@@ -29,12 +29,5 @@ describe("validateRewrite", () => {
   });
   it("rejects empty output", () => {
     expect(errors("a", "  ")).toHaveLength(1);
-  });
-});
-
-describe("normalizeRewrite", () => {
-  it("strips code fences and keeps surrounding whitespace", () => {
-    expect(normalizeRewrite("  old text\n", "```latex\nnew text\n```")).toBe("  new text\n");
-    expect(normalizeRewrite("old", "new")).toBe("new");
   });
 });

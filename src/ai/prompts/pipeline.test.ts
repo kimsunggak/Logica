@@ -14,7 +14,7 @@ const history = [
 const turn: Omit<AIRequest, "task"> = {
   id: "1",
   instruction: "실험은 어떤 데이터로 했어?",
-  context: { currentFile: "sections/exp.tex", currentSection: "4 Experiments", currentParagraph: "We test on three datasets." },
+  context: { currentFile: "sections/exp.tex", currentSection: "4 Experiments" },
   projectFiles: files,
   omittedFiles: ["appendix.tex"],
   history,
@@ -88,15 +88,6 @@ describe("reply prompt", () => {
   it("reads the session summary before the conversation", () => {
     const user = buildPrompt({ ...turn, task: "reply", sessionSummary: "P1: 답은 짧게" }).messages[0].content;
     expect(user.indexOf("<session_summary>")).toBeLessThan(user.indexOf("<recent_conversation>"));
-  });
-});
-
-describe("system prompt", () => {
-  it("keeps the selection rule for inline edits only", () => {
-    const rule = "Only edit the selected text.";
-    expect(buildPrompt({ ...turn, task: "inline-edit", selectedText: "x" }).system).toContain(rule);
-    expect(buildPrompt({ ...turn, task: "answer" }).system).not.toContain(rule);
-    expect(buildPrompt({ ...turn, task: "refine" }).system).not.toContain(rule);
   });
 });
 

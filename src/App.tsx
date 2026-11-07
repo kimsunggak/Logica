@@ -6,7 +6,6 @@ import { openSettings } from "./components/uiStore";
 import { Home } from "./components/Home";
 import { Workspace } from "./components/Workspace";
 import { editorSession } from "./editor/editorSession";
-import { rejectInlineEdit, useInlineEdit } from "./editor/inlineEdit/inlineEditStore";
 import { installEditorExtensions } from "./editor/setupEditor";
 import { confirmDialog, isDesktop } from "./lib/backend";
 import {
@@ -78,7 +77,6 @@ export default function App() {
 
   // Each project has its own saved conversations.
   useEffect(() => {
-    if (useInlineEdit.getState().open) rejectInlineEdit();
     void openChatsFor(root);
   }, [root]);
 
