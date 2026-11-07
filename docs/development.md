@@ -4,14 +4,14 @@
 
 ## 준비물
 
+현재는 Windows만 지원합니다. macOS와 Linux 빌드는 아직 구현하거나 검증하지 않았습니다.
+
 - Node.js 20 이상
 - Rust stable (1.80 이상)
-- Tauri 2 시스템 의존성: <https://v2.tauri.app/start/prerequisites/>
-  - Linux(Ubuntu/Debian): `libwebkit2gtk-4.1-dev build-essential libssl-dev libayatana-appindicator3-dev librsvg2-dev`
-- TeX 배포판은 필요 없습니다. LOGICA에는 TeX 엔진 [Tectonic](https://tectonic-typesetting.github.io/)이 내장되어 있습니다. TeX Live, MacTeX, MiKTeX가 설치되어 있으면 그쪽을 먼저 씁니다(패키지 호환성이 가장 좋음).
+- Tauri 2 시스템 의존성(Windows): <https://v2.tauri.app/start/prerequisites/>
+- TeX 배포판은 필요 없습니다. LOGICA에는 TeX 엔진 [Tectonic](https://tectonic-typesetting.github.io/)이 내장되어 있습니다. TeX Live나 MiKTeX가 설치되어 있으면 그쪽을 먼저 씁니다(패키지 호환성이 가장 좋음).
   - `npm run tauri:dev` / `npm run tauri build`가 시작될 때 `scripts/fetch-tectonic.mjs`가 해당 플랫폼의 공식 Tectonic 릴리스를 내려받아 고정된 SHA-256과 대조한 뒤 `src-tauri/binaries/`에 둡니다. `cargo`를 직접 실행할 때는 먼저 `npm run tectonic`을 실행하세요.
   - 내장 엔진은 처음 컴파일할 때 필요한 LaTeX 패키지를 인터넷에서 내려받고, 이후에는 캐시를 씁니다.
-- Linux에서 API key 저장: Secret Service 구현(GNOME Keyring 또는 KWallet)이 실행 중이어야 합니다.
 
 ## 실행
 
@@ -59,12 +59,10 @@ Sign in with ChatGPT 전체 흐름(PKCE, callback, token 교환, refresh 회전)
 
 ## 배포 빌드
 
-`npm run tauri build`는 빌드한 OS용 설치 파일만 `src-tauri/target/release/bundle/` 아래에 만듭니다. 릴리스에는 사용자가 바로 설치하는 파일을 올립니다.
+`npm run tauri build`는 Windows 설치 파일을 `src-tauri/target/release/bundle/` 아래에 만듭니다. 릴리스에는 사용자가 바로 설치하는 파일을 올립니다.
 
 | OS | 폴더 | 릴리스에 올릴 파일 |
 | --- | --- | --- |
 | Windows | `nsis/`, `msi/` | `*_x64-setup.exe` (`.msi`는 선택) |
-| macOS | `dmg/` | `*.dmg` (`macos/`의 `.app`은 dmg 안에 들어 있음) |
-| Linux | `appimage/`, `deb/`, `rpm/` | `*.AppImage`, `*.deb` (`.rpm`은 선택) |
 
 `target/release/`의 실행 파일만 따로 올리면 내장 TeX 엔진과 라이선스 파일이 빠져 제대로 동작하지 않습니다. 설치 파일에는 코드 서명이 없습니다.

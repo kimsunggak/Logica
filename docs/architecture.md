@@ -81,7 +81,7 @@ AI 인라인 편집은 설정에서 고른 provider와 모델을 씁니다. 모�
 | 논문 요약 (섹션별 요약, YAML) | `%LOCALAPPDATA%\app.logica.desktop\papers\<프로젝트 ID>\paper-summary.yaml` (프로젝트 ID는 채팅 기록과 같음) |
 | 설정, 최근 작업, 창 배치 | `%APPDATA%\app.logica.desktop\state.json` |
 
-macOS는 대화 기록, 논문 요약, 설정이 모두 `~/Library/Application Support/app.logica.desktop/` 아래에 있고, Linux는 대화 기록과 논문 요약이 `~/.local/share/app.logica.desktop/`, 설정이 `~/.config/app.logica.desktop/`에 있습니다. API key와 ChatGPT 로그인 토큰은 파일이 아니라 OS credential store에 있습니다.
+API key와 ChatGPT 로그인 토큰은 파일이 아니라 Windows 자격 증명 관리자에 있습니다.
 
 채팅 세션 파일 형식은 `{ version, createdAt, updatedAt, messages, summary }`이며, `summary`의 구조는 아래 [세션 요약 구조](#세션-요약-구조)에 있습니다. 채팅창의 기록 버튼에서 이전 대화를 불러오거나 삭제하고, 새 대화 버튼으로 새 세션을 시작합니다. 논문 요약(섹션별 요약)은 세션과 따로 프로젝트마다 하나이며, 형식은 아래 [논문 요약 문서](#논문-요약-문서)에 있습니다. AI 호출 때 외부로 보내는 내용은 [인증과 보안](security.md#외부로-전송되는-데이터)에 있습니다.
 
