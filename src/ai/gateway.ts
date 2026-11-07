@@ -3,17 +3,18 @@
  *
  *   Chat Orchestrator, Refine Module, Answer Module → callModel → aiService → Rust
  *
- * It picks the model for the call's task (`CHAT_MODELS`) and, when the primary
+ * It picks the model for the call's task (`chatModels`) and, when the primary
  * call fails before any text reached the screen, sends the same request to
  * the fallback provider. Each attempt is reported to the runtime debugger.
  */
 import { AIError, toAIError } from "./errors";
-import { CHAT_MODELS, MAX_OUTPUT_TOKENS, type ModelChoice } from "./models/modelConfig";
+import { answerModels, CHAT_MODELS, MAX_OUTPUT_TOKENS, type ModelChoice } from "./models/modelConfig";
 import { buildPrompt } from "./prompts";
 import { aiService } from "./service";
 import type { AIRequest, AIResponse, ChatTask } from "./types";
 import { endSpan, failSpan, spanData, startSpan, step, type Span } from "../debug/trace";
 import { t } from "../i18n";
+import { useSettings } from "../settings/settingsStore";
 
 /** Lets the caller stop a running chat turn. */
 export interface RunControl {
@@ -47,6 +48,13 @@ export type ChatRequest = Omit<AIRequest, "task" | "model" | "reasoningEffort" |
 export function promptText(request: AIRequest): string {
   const payload = buildPrompt(request);
   return [`[system]\n${payload.system}`, ...payload.messages.map((m) => `[${m.role}]\n${m.content}`)].join("\n\n");
+}
+
+/** The answer follows the provider and model chosen in Settings; the other tasks are fixed. */
+export function chatModels(task: ChatTask): { primary: ModelChoice; fallback: ModelChoice } {
+  if (task !== "answer") return CHAT_MODELS[task];
+  const { defaultProvider, models } = useSettings.getState().ai;
+  return answerModels(defaultProvider, models);
 }
 
 async function canUse(choice: ModelChoice): Promise<boolean> {
@@ -125,7 +133,7 @@ async function attempt(
  * unless the user stopped the turn or part of the answer is already shown.
  */
 export async function callModel(task: ChatTask, request: ChatRequest, options: GatewayOptions): Promise<GatewayResult> {
-  const { primary, fallback } = CHAT_MODELS[task];
+  const { primary, fallback } = chatModels(task);
   // Stopped between two calls of the turn: do not start the next one.
   if (options.control.stopped) throw cancelledError(primary);
   let shown = false;

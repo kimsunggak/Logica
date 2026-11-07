@@ -53,22 +53,37 @@ export interface ModelChoice {
 const CLAUDE_FALLBACK: ModelChoice = { provider: "anthropic", model: "claude-sonnet-5-5" };
 
 /**
- * Primary and fallback models for each chat call. The LLM Gateway retries
- * with the fallback provider when the primary call fails.
+ * Primary and fallback models for the internal chat calls. The LLM Gateway
+ * retries with the fallback provider when the primary call fails. The answer
+ * follows Settings instead (`answerModels`).
  */
-export const CHAT_MODELS: Record<ChatTask, { primary: ModelChoice; fallback: ModelChoice }> = {
+export const CHAT_MODELS: Record<Exclude<ChatTask, "answer">, { primary: ModelChoice; fallback: ModelChoice }> = {
   judge: {
     primary: { provider: "anthropic", model: "claude-sonnet-5-5", reasoningEffort: "high" },
     fallback: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" },
   },
   reply: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
   refine: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
-  answer: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "medium" }, fallback: CLAUDE_FALLBACK },
   // Runs in the background every two turns.
   summary: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
   // Runs in the background after a turn that read the paper, for sections without a summary.
   sections: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
 };
+
+/** Reasoning effort of the chat answer, for the model chosen in Settings and its fallback. */
+const ANSWER_EFFORT: ReasoningEffort = "medium";
+
+/**
+ * Models of the chat answer: the default provider with the model chosen for it
+ * in Settings, falling back to the other provider's chosen model.
+ */
+export function answerModels(defaultProvider: ProviderId, models: Record<ProviderId, string>): { primary: ModelChoice; fallback: ModelChoice } {
+  const other: ProviderId = defaultProvider === "openai" ? "anthropic" : "openai";
+  return {
+    primary: { provider: defaultProvider, model: models[defaultProvider], reasoningEffort: ANSWER_EFFORT },
+    fallback: { provider: other, model: models[other], reasoningEffort: ANSWER_EFFORT },
+  };
+}
 
 /**
  * OpenAI's models endpoint also lists embedding, audio, image and moderation

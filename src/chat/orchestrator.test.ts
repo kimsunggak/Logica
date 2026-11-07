@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AIError } from "../ai/errors";
 import type { ChatRequest, GatewayOptions, GatewayResult } from "../ai/gateway";
-import { CHAT_MODELS } from "../ai/models/modelConfig";
+import { chatModels } from "../ai/gateway";
 import type { AIResponse, ChatTask, ToolCall } from "../ai/types";
 import { buildPrompt } from "../ai/prompts";
 import { startSpan } from "../debug/trace";
@@ -29,7 +29,7 @@ function gateway(replies: Partial<Record<ChatTask, Reply>>) {
   const log: { task: ChatTask; request: ChatRequest; options: GatewayOptions }[] = [];
   const call = async (task: ChatTask, request: ChatRequest, options: GatewayOptions): Promise<GatewayResult> => {
     log.push({ task, request, options });
-    const choice = CHAT_MODELS[task].primary;
+    const choice = chatModels(task).primary;
     options.onAttempt?.(choice, false);
     const out = replies[task];
     if (!out) throw new Error(`unexpected ${task} call`);
@@ -153,7 +153,7 @@ describe("Chat Orchestrator", () => {
       outcome: "reply",
       reason: "a thank-you, not a question about the paper",
       content: "천만에요!",
-      choice: CHAT_MODELS.reply.primary,
+      choice: chatModels("reply").primary,
     });
     expect(r.log.map((c) => c.task)).toEqual(["judge", "reply"]);
     const reply = r.log[1].request;
@@ -244,7 +244,7 @@ describe("Chat Orchestrator", () => {
   });
 
   it("reports the model that wrote the answer, and the fallback", async () => {
-    const claude = CHAT_MODELS.answer.fallback;
+    const claude = chatModels("answer").fallback;
     const r = runChatTurn(turn, {
       root: startSpan("t3", null, "pipeline", "test"),
       control: { stopped: false, activeRequest: null },
@@ -252,10 +252,10 @@ describe("Chat Orchestrator", () => {
       hooks: {},
       call: (async (task: ChatTask) =>
         task === "judge"
-          ? { response: response("", tool("answer_question")), choice: CHAT_MODELS.judge.primary }
-          : { response: response("from Claude"), choice: claude, fallbackFrom: { choice: CHAT_MODELS.answer.primary, error: new AIError("unavailable", "down") } }) as never,
+          ? { response: response("", tool("answer_question")), choice: chatModels("judge").primary }
+          : { response: response("from Claude"), choice: claude, fallbackFrom: { choice: chatModels("answer").primary, error: new AIError("unavailable", "down") } }) as never,
     });
-    expect(await r).toMatchObject({ content: "from Claude", choice: claude, fallbackFrom: CHAT_MODELS.answer.primary });
+    expect(await r).toMatchObject({ content: "from Claude", choice: claude, fallbackFrom: chatModels("answer").primary });
   });
 });
 

@@ -1,7 +1,7 @@
 import { Check, CheckCheck, FileText, History, MessageSquarePlus, Send, Square, Trash2, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { lineOf, locateEdit, parseEditBody, type ProposedEdit } from "../ai/agent/edits";
-import { CHAT_MODELS } from "../ai/models/modelConfig";
+import { answerModels } from "../ai/models/modelConfig";
 import { PROVIDER_LABELS } from "../ai/providers/registry";
 import { DiffView } from "../editor/inlineEdit/DiffView";
 import { validateRewrite } from "../latex/validation";
@@ -301,7 +301,10 @@ export function ChatPanel() {
   const t = useT();
   const messages = useChat((s) => s.messages);
   const running = useChat((s) => s.runningId !== null);
-  const models = t("chat.modelLabel", { primary: CHAT_MODELS.answer.primary.model, fallback: CHAT_MODELS.answer.fallback.model });
+  const defaultProvider = useSettings((s) => s.ai.defaultProvider);
+  const chosenModels = useSettings((s) => s.ai.models);
+  const answer = answerModels(defaultProvider, chosenModels);
+  const models = t("chat.modelLabel", { primary: answer.primary.model, fallback: answer.fallback.model });
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const chatFontSize = useSettings((s) => s.editor.chatFontSize);

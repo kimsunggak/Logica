@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AIError } from "./errors";
 import type { AIRequest, AIResponse, ProviderId, StreamHandlers } from "./types";
 import * as trace from "../debug/trace";
+import { DEFAULT_SETTINGS, useSettings } from "../settings/settingsStore";
 
 type Script = (request: AIRequest, handlers?: StreamHandlers) => Promise<AIResponse>;
 const calls: { provider: ProviderId; request: AIRequest }[] = [];
@@ -37,6 +38,7 @@ beforeEach(() => {
   calls.length = 0;
   scripts = {};
   connected = { openai: true, anthropic: true };
+  useSettings.getState().updateAI({ defaultProvider: DEFAULT_SETTINGS.ai.defaultProvider, models: { ...DEFAULT_SETTINGS.ai.models } });
 });
 
 describe("LLM Gateway", () => {
@@ -57,6 +59,26 @@ describe("LLM Gateway", () => {
     } finally {
       start.mockRestore();
     }
+  });
+
+  it("answers with the provider and model chosen in Settings", async () => {
+    useSettings.getState().updateAI({ defaultProvider: "anthropic", models: { openai: "gpt-6-luna", anthropic: "claude-opus-5-5" } });
+    scripts.anthropic = reply("anthropic", "ok");
+    const result = await callModel("answer", request, { control: control() });
+    expect(result.choice).toEqual({ provider: "anthropic", model: "claude-opus-5-5", reasoningEffort: "medium" });
+    expect(calls.map((c) => [c.provider, c.request.model, c.request.reasoningEffort])).toEqual([["anthropic", "claude-opus-5-5", "medium"]]);
+  });
+
+  it("falls back to the other provider's chosen model for the answer", async () => {
+    useSettings.getState().updateAI({ defaultProvider: "openai", models: { openai: "gpt-6-luna", anthropic: "claude-opus-5-5" } });
+    scripts.openai = failing(new AIError("unavailable", "down", { provider: "openai" }));
+    scripts.anthropic = reply("anthropic", "recovered");
+    const result = await callModel("answer", request, { control: control() });
+    expect(result.choice).toEqual({ provider: "anthropic", model: "claude-opus-5-5", reasoningEffort: "medium" });
+    expect(calls.map((c) => [c.provider, c.request.model])).toEqual([
+      ["openai", "gpt-6-luna"],
+      ["anthropic", "claude-opus-5-5"],
+    ]);
   });
 
   it("uses the primary model and reasoning effort for each task", async () => {

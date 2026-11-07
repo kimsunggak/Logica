@@ -12,7 +12,7 @@
  */
 import { create } from "zustand";
 import { AIError } from "../ai/errors";
-import type { RunControl } from "../ai/gateway";
+import { chatModels, type RunControl } from "../ai/gateway";
 import { CHAT_MODELS } from "../ai/models/modelConfig";
 import { aiService, newRequestId } from "../ai/service";
 import { lineOf, locateEdit, type ProposedEdit } from "../ai/agent/edits";
@@ -187,7 +187,7 @@ export async function sendChatMessage(text: string): Promise<void> {
   useChat.setState((s) => ({ messages: [...s.messages, userMessage, assistantMessage], runningId: requestId }));
 
   // One trace per question; its id is the answer's message id.
-  const root = startSpan(requestId, null, "pipeline", "sendChatMessage", () => ({ question: instruction, models: CHAT_MODELS }));
+  const root = startSpan(requestId, null, "pipeline", "sendChatMessage", () => ({ question: instruction, models: { ...CHAT_MODELS, answer: chatModels("answer") } }));
   step(requestId, root, "user", "receiveUserInput", instruction, () => ({
     question: instruction,
     session_turns: turn.turns.length,
