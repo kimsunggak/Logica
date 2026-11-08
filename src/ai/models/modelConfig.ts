@@ -70,7 +70,7 @@ export type ChosenModelTask = "answer" | "edit";
 /**
  * Primary and fallback models for the internal chat calls. The LLM Gateway
  * retries with the fallback provider when the primary call fails. The answer
- * and the edit follow Settings instead (`chosenModels`).
+ * and the edit follow the model and reasoning effort chosen in Settings (`chosenModels`).
  */
 export const CHAT_MODELS: Record<Exclude<ChatTask, ChosenModelTask>, { primary: ModelChoice; fallback: ModelChoice }> = {
   judge: {
@@ -88,18 +88,23 @@ export const CHAT_MODELS: Record<Exclude<ChatTask, ChosenModelTask>, { primary: 
   sections: { primary: { provider: "openai", model: "gpt-6.1-sol", reasoningEffort: "low" }, fallback: CLAUDE_FALLBACK },
 };
 
-/** Reasoning effort of the answer and the edit, for the chosen model and its fallback. */
-const CHOSEN_EFFORT: ReasoningEffort = "medium";
+/** Reasoning effort chosen for each provider until the user picks another. */
+export const DEFAULT_REASONING: Record<ProviderId, ReasoningEffort> = { openai: "medium", anthropic: "medium" };
 
 /**
- * Models of the answer and the edit: the default provider with the model
- * chosen for it in Settings, falling back to the other provider's chosen model.
+ * Models of the answer and the edit: the default provider with the model and
+ * reasoning effort chosen for it in Settings, falling back to the other
+ * provider's chosen model and effort.
  */
-export function chosenModels(defaultProvider: ProviderId, models: Record<ProviderId, string>): { primary: ModelChoice; fallback: ModelChoice } {
+export function chosenModels(
+  defaultProvider: ProviderId,
+  models: Record<ProviderId, string>,
+  reasoning: Record<ProviderId, ReasoningEffort> = DEFAULT_REASONING,
+): { primary: ModelChoice; fallback: ModelChoice } {
   const other: ProviderId = defaultProvider === "openai" ? "anthropic" : "openai";
   return {
-    primary: { provider: defaultProvider, model: models[defaultProvider], reasoningEffort: CHOSEN_EFFORT },
-    fallback: { provider: other, model: models[other], reasoningEffort: CHOSEN_EFFORT },
+    primary: { provider: defaultProvider, model: models[defaultProvider], reasoningEffort: reasoning[defaultProvider] },
+    fallback: { provider: other, model: models[other], reasoningEffort: reasoning[other] },
   };
 }
 

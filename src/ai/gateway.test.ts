@@ -36,7 +36,7 @@ const request = { id: "t1-refine", instruction: "q", context: {} };
 
 beforeEach(() => {
   calls.length = 0;
-  useSettings.getState().updateAI({ defaultProvider: DEFAULT_SETTINGS.ai.defaultProvider, models: { ...DEFAULT_SETTINGS.ai.models } });
+  useSettings.getState().updateAI({ defaultProvider: DEFAULT_SETTINGS.ai.defaultProvider, models: { ...DEFAULT_SETTINGS.ai.models }, reasoning: { ...DEFAULT_SETTINGS.ai.reasoning } });
   scripts = {};
   connected = { openai: true, anthropic: true };
 });
@@ -67,6 +67,28 @@ describe("LLM Gateway", () => {
     const result = await callModel(task, request, { control: control() });
     expect(result.choice).toEqual({ provider: "anthropic", model: "claude-opus-5-5", reasoningEffort: "medium" });
     expect(calls.map((c) => [c.provider, c.request.model, c.request.reasoningEffort])).toEqual([["anthropic", "claude-opus-5-5", "medium"]]);
+  });
+
+  it.each(["answer", "edit"] as const)("sends the reasoning effort chosen in Settings for %s, per provider", async (task) => {
+    useSettings.getState().updateAI({
+      defaultProvider: "openai",
+      models: { openai: "gpt-6-luna", anthropic: "claude-opus-5-5" },
+      reasoning: { openai: "xhigh", anthropic: "low" },
+    });
+    scripts.openai = failing(new AIError("unavailable", "down", { provider: "openai" }));
+    scripts.anthropic = reply("anthropic", "recovered");
+    await callModel(task, request, { control: control() });
+    expect(calls.map((c) => [c.provider, c.request.reasoningEffort])).toEqual([
+      ["openai", "xhigh"],
+      ["anthropic", "low"],
+    ]);
+  });
+
+  it("keeps the fixed effort of the other tasks whatever Settings say", async () => {
+    useSettings.getState().updateAI({ reasoning: { openai: "max", anthropic: "max" } });
+    scripts.openai = reply("openai", "ok");
+    await callModel("refine", request, { control: control() });
+    expect(calls[0].request.reasoningEffort).toBe("low");
   });
 
   it.each(["answer", "edit"] as const)("falls back to the other provider's chosen model for %s", async (task) => {

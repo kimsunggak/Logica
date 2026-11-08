@@ -33,7 +33,14 @@ export type AITask = "judge" | "reply" | "refine" | "select" | "research" | "ans
 /** The model calls of a chat turn. */
 export type ChatTask = AITask;
 
-export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
+/**
+ * Reasoning effort, mapped to OpenAI `reasoning.effort` and to Anthropic
+ * `output_config.effort` with adaptive thinking. Both APIs share these levels.
+ */
+export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
+/** The levels offered in Settings, lowest first. */
+export const REASONING_EFFORTS: readonly ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];
 
 /** A function the model may call; `parameters` is a JSON Schema object. */
 export interface ToolDefinition {

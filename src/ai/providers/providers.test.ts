@@ -45,6 +45,27 @@ describe("error mapping", () => {
   });
 });
 
+describe("reasoning effort", () => {
+  it("OpenAI sends it as reasoning.effort", () => {
+    for (const effort of ["low", "medium", "high", "xhigh", "max"] as const) {
+      expect(new OpenAIProvider(() => "api_key").buildBody({ ...request, reasoningEffort: effort })).toMatchObject({ reasoning: { effort } });
+    }
+    expect(new OpenAIProvider(() => "api_key").buildBody(request)).not.toHaveProperty("reasoning");
+  });
+
+  it("Claude sends it as output_config.effort with adaptive thinking", () => {
+    for (const effort of ["low", "medium", "high", "xhigh", "max"] as const) {
+      expect(new AnthropicProvider().buildBody({ ...request, reasoningEffort: effort })).toMatchObject({
+        thinking: { type: "adaptive" },
+        output_config: { effort },
+      });
+    }
+    const none = new AnthropicProvider().buildBody(request);
+    expect(none).not.toHaveProperty("thinking");
+    expect(none).not.toHaveProperty("output_config");
+  });
+});
+
 describe("web search requests", () => {
   const answer: AIRequest = { ...request, task: "answer", instruction: "Related work?", reasoningEffort: "medium" };
   const fn = { name: "pick", description: "Pick one.", parameters: { type: "object", properties: {}, additionalProperties: false } };

@@ -128,11 +128,11 @@ async function attempt(
   }
 }
 
-/** The answer and the edit follow the provider and model chosen in Settings; the other tasks are fixed. */
+/** The answer and the edit follow the provider, model and reasoning effort chosen in Settings; the other tasks are fixed. */
 export function chatModels(task: ChatTask): { primary: ModelChoice; fallback: ModelChoice } {
   if (task !== "answer" && task !== "edit") return CHAT_MODELS[task];
-  const { defaultProvider, models } = useSettings.getState().ai;
-  return chosenModels(defaultProvider, models);
+  const { defaultProvider, models, reasoning } = useSettings.getState().ai;
+  return chosenModels(defaultProvider, models, reasoning);
 }
 
 /**

@@ -69,7 +69,7 @@
 | OpenAI | **ChatGPT로 로그인**(ChatGPT 요금제 사용) 또는 OpenAI API key |
 | Claude | Anthropic API key |
 
-둘 다 연결하면 한쪽 호출이 실패할 때 다른 쪽으로 자동 전환됩니다.
+provider마다 모델과 추론 강도(`low`, `medium`, `high`, `xhigh`, `max`, 기본 `medium`)를 고를 수 있고, Chat 답변과 Edit 수정안은 **기본 provider**에 고른 모델과 추론 강도로 호출됩니다. 둘 다 연결하면 한쪽 호출이 실패할 때 다른 쪽으로 자동 전환됩니다.
 
 ## 사용법
 

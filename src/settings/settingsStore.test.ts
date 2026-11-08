@@ -20,4 +20,10 @@ describe("mergeSettings", () => {
     expect(mergeSettings({ editor: { chatFontSize: 99 } }).editor.chatFontSize).toBe(14);
     expect(mergeSettings({ editor: { chatFontSize: "big" } }).editor.chatFontSize).toBe(14);
   });
+
+  it("defaults reasoning to medium and keeps only known levels", () => {
+    expect(mergeSettings({ ai: { models: { openai: "gpt-6-luna" } } }).ai.reasoning).toEqual({ openai: "medium", anthropic: "medium" });
+    expect(mergeSettings({ ai: { reasoning: { openai: "xhigh", anthropic: "max" } } }).ai.reasoning).toEqual({ openai: "xhigh", anthropic: "max" });
+    expect(mergeSettings({ ai: { reasoning: { openai: "turbo", anthropic: "adaptive" } } }).ai.reasoning).toEqual({ openai: "medium", anthropic: "medium" });
+  });
 });
