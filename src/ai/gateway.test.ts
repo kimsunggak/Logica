@@ -54,8 +54,8 @@ describe("LLM Gateway", () => {
       });
       const inputs = start.mock.calls.filter(([, , , fn]) => fn === "aiService.generate").map(([, , , , input]) => typeof input === "function" ? input() : input);
       expect(inputs).toHaveLength(2);
-      expect(inputs[0]).toMatchObject({ task: "judge", fallback: false, turn_numbers: [6, 7, 8, 9] });
-      expect(inputs[1]).toMatchObject({ task: "judge", fallback: true, turn_numbers: [6, 7, 8, 9] });
+      expect(inputs[0]).toMatchObject({ task: "judge", fallback: false, turn_numbers: [6, 7, 8, 9], reasoning_effort: "xhigh", max_output_tokens: 128_000 });
+      expect(inputs[1]).toMatchObject({ task: "judge", fallback: true, turn_numbers: [6, 7, 8, 9], reasoning_effort: "low", max_output_tokens: 32_000 });
     } finally {
       start.mockRestore();
     }
@@ -67,6 +67,41 @@ describe("LLM Gateway", () => {
     const result = await callModel(task, request, { control: control() });
     expect(result.choice).toEqual({ provider: "anthropic", model: "claude-opus-5-5", reasoningEffort: "medium" });
     expect(calls.map((c) => [c.provider, c.request.model, c.request.reasoningEffort])).toEqual([["anthropic", "claude-opus-5-5", "medium"]]);
+  });
+
+  it.each([
+    ["answer", "high", 64_000],
+    ["edit", "high", 64_000],
+    ["edit", "medium", 64_000],
+    ["answer", "xhigh", 128_000],
+    ["edit", "xhigh", 128_000],
+    ["edit", "max", 128_000],
+  ] as const)("limits %s output at %s effort to %i tokens", async (task, effort, limit) => {
+    useSettings.getState().updateAI({ defaultProvider: "anthropic", models: { openai: "gpt-6-luna", anthropic: "claude-fable-5-1" }, reasoning: { openai: "medium", anthropic: effort } });
+    scripts.anthropic = reply("anthropic", "ok");
+    await callModel(task, request, { control: control() });
+    expect(calls.map((c) => [c.request.reasoningEffort, c.request.maxOutputTokens])).toEqual([[effort, limit]]);
+  });
+
+  it("limits each fallback by its own effort", async () => {
+    // Settings: Claude at xhigh, OpenAI at medium. The judge thinks at xhigh with a low-effort fallback.
+    useSettings.getState().updateAI({ defaultProvider: "anthropic", models: { openai: "gpt-6-luna", anthropic: "claude-opus-5-5" }, reasoning: { openai: "medium", anthropic: "xhigh" } });
+    scripts.anthropic = failing(new AIError("unavailable", "down", { provider: "anthropic" }));
+    scripts.openai = reply("openai", "ok");
+    await callModel("edit", request, { control: control() });
+    await callModel("judge", request, { control: control() });
+    expect(calls.map((c) => [c.request.task, c.provider, c.request.reasoningEffort, c.request.maxOutputTokens])).toEqual([
+      ["edit", "anthropic", "xhigh", 128_000],
+      ["edit", "openai", "medium", 64_000],
+      ["judge", "anthropic", "xhigh", 128_000],
+      ["judge", "openai", "low", 32_000],
+    ]);
+  });
+
+  it.each(["refine", "select", "research", "summary", "sections"] as const)("gives %s a 16,000 token budget", async (task) => {
+    scripts.openai = reply("openai", "ok");
+    await callModel(task, request, { control: control() });
+    expect(calls[0].request.maxOutputTokens).toBe(16_000);
   });
 
   it.each(["answer", "edit"] as const)("sends the reasoning effort chosen in Settings for %s, per provider", async (task) => {

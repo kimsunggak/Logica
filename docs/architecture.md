@@ -70,6 +70,14 @@ Chat 답변과 Edit 수정안은 Settings의 기본 provider와 그 provider에 
 | 웹 리서치 | `gpt-6.1-sol` (medium) | `claude-sonnet-5-5` |
 | Auto 의도 판단 | `claude-sonnet-5-5` (xhigh) | `gpt-6.1-sol` (low) |
 
+호출마다 출력 토큰 한도(`max_tokens`, OpenAI는 API key일 때 `max_output_tokens`)를 보냅니다. thinking도 이 한도에 포함되므로 생각할 여유를 두고 정했습니다. 추론 강도가 `xhigh`나 `max`인 호출은 작업과 관계없이 현재 Claude 모델과 `gpt-6.1-sol`의 최대 출력인 128,000을 씁니다(`maxOutputTokens`). 한도에 걸려 잘린 Edit 수정안은 적용할 수 없어 오류로 끝납니다.
+
+| 작업 | 출력 한도 (`xhigh` 미만) |
+| --- | --- |
+| 답변, 수정안 | 64,000 |
+| Auto 의도 판단 | 32,000 |
+| 요청 정리, 섹션 선택, 웹 리서치, 세션 요약, 섹션 요약 | 16,000 |
+
 모델 ID는 `src/ai/models/modelConfig.ts` 한 곳에만 기본값으로 둡니다. provider를 연결하면 Settings에서 **Refresh list**로 계정에서 실제로 쓸 수 있는 모델 목록을 provider API에서 가져오고, 목록에 없는 모델 ID도 직접 추가할 수 있습니다. 선택한 모델은 provider별로 저장됩니다.
 
 ## 저장 파일
