@@ -8,7 +8,7 @@
  * the fallback provider. Each attempt is reported to the runtime debugger.
  */
 import { AIError, toAIError } from "./errors";
-import { CHAT_MODELS, chosenModels, MAX_OUTPUT_TOKENS, MAX_SEARCHES, type ModelChoice } from "./models/modelConfig";
+import { CHAT_MODELS, chosenModels, MAX_SEARCHES, maxOutputTokens, type ModelChoice } from "./models/modelConfig";
 import { buildPrompt } from "./prompts";
 import { aiService } from "./service";
 import type { AIRequest, AIResponse, ChatTask } from "./types";
@@ -88,6 +88,7 @@ async function attempt(
           provider: choice.provider,
           model: choice.model,
           reasoning_effort: choice.reasoningEffort ?? null,
+          max_output_tokens: request.maxOutputTokens ?? null,
           fallback,
           request_id: request.id,
           tools: request.tools?.map((tool) => tool.name) ?? [],
@@ -159,7 +160,7 @@ export async function callModel(task: ChatTask, request: ChatRequest, options: G
     task,
     model: choice.model,
     reasoningEffort: choice.reasoningEffort,
-    maxOutputTokens: MAX_OUTPUT_TOKENS[task],
+    maxOutputTokens: maxOutputTokens(task, choice.reasoningEffort),
     ...(MAX_SEARCHES[task] ? { maxSearches: MAX_SEARCHES[task] } : {}),
   });
   const report = (fn: string, input: unknown, output: unknown) => {

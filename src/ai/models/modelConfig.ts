@@ -27,25 +27,38 @@ export const DEFAULT_MODEL_ID: Record<ProviderId, string> = {
   anthropic: DEFAULT_MODELS.anthropic[0].id,
 };
 
-/** Output token budget per task (reasoning models spend part of it thinking first). */
+/**
+ * Output token budget per task. Thinking counts toward it (for Claude it is
+ * the hard limit on thinking plus the reply), so each budget leaves room to
+ * think before answering. Every model in the default lists allows at least 64K.
+ */
 export const MAX_OUTPUT_TOKENS = {
-  // One tool call with a one-sentence reason.
-  judge: 4096,
+  // One tool call with a one-sentence reason, after thinking at xhigh.
+  judge: 32_000,
   // A one or two sentence reply to small talk.
-  reply: 4096,
+  reply: 16_000,
   // One self-contained request as plain text.
-  refine: 8192,
-  select: 4096,
+  refine: 16_000,
+  select: 16_000,
   // Findings for an edit, one line each, with their sources.
-  research: 8192,
+  research: 16_000,
   // Paper Chat answers; editing has its own task and tool call.
-  answer: 16384,
-  edit: 24576,
+  answer: 64_000,
+  // Every change of a request in one tool call, up to a whole draft.
+  edit: 64_000,
   // One tool call with the changes to the session summary.
-  summary: 4096,
+  summary: 16_000,
   // One tool call with a few sentences per section of a batch.
-  sections: 8192,
+  sections: 16_000,
 } as const;
+
+/** Output limit at xhigh and max effort: the maximum output of current Claude models and gpt-6.1-sol. */
+export const HIGH_EFFORT_OUTPUT_TOKENS = 128_000;
+
+/** Output limit of one call: 128K when the model thinks at xhigh or max, otherwise the task's budget. */
+export function maxOutputTokens(task: ChatTask, effort?: ReasoningEffort): number {
+  return effort === "xhigh" || effort === "max" ? HIGH_EFFORT_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS[task];
+}
 
 /**
  * Most web searches one call may run, for the tasks that cap them. One
