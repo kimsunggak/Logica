@@ -3,8 +3,8 @@
  * this store must never hold credentials.
  */
 import { create } from "zustand";
-import { DEFAULT_MODEL_ID } from "../ai/models/modelConfig";
-import type { AuthMethodKind, ModelConfig, ProviderId } from "../ai/types";
+import { DEFAULT_MODEL_ID, DEFAULT_REASONING } from "../ai/models/modelConfig";
+import { REASONING_EFFORTS, type AuthMethodKind, type ModelConfig, type ProviderId, type ReasoningEffort } from "../ai/types";
 import { detectLanguage, type Language } from "../i18n/detect";
 
 export type ThemeSetting = "system" | "light" | "dark";
@@ -16,6 +16,8 @@ export interface AISettings {
   openaiAuth: AuthMethodKind;
   /** Selected model per provider. */
   models: Record<ProviderId, string>;
+  /** Reasoning effort per provider, sent with the Chat answer and the Edit call. */
+  reasoning: Record<ProviderId, ReasoningEffort>;
   /** Model ids added by hand. */
   customModels: Record<ProviderId, string[]>;
   /** Last model list fetched from each provider's API. */
@@ -60,6 +62,7 @@ export const DEFAULT_SETTINGS: Settings = {
     defaultProvider: "openai",
     openaiAuth: "chatgpt",
     models: { ...DEFAULT_MODEL_ID },
+    reasoning: { ...DEFAULT_REASONING },
     customModels: { openai: [], anthropic: [] },
     fetchedModels: { openai: [], anthropic: [] },
   },
@@ -125,6 +128,10 @@ export function mergeSettings(saved: unknown): Settings {
       ...DEFAULT_SETTINGS.ai,
       ...ai,
       models: { ...DEFAULT_SETTINGS.ai.models, ...(ai.models ?? {}) },
+      reasoning: {
+        openai: validEffort(ai.reasoning?.openai, DEFAULT_SETTINGS.ai.reasoning.openai),
+        anthropic: validEffort(ai.reasoning?.anthropic, DEFAULT_SETTINGS.ai.reasoning.anthropic),
+      },
       customModels: { ...DEFAULT_SETTINGS.ai.customModels, ...(ai.customModels ?? {}) },
       fetchedModels: { ...DEFAULT_SETTINGS.ai.fetchedModels, ...(ai.fetchedModels ?? {}) },
       defaultProvider: ai.defaultProvider === "anthropic" ? "anthropic" : "openai",
@@ -133,6 +140,10 @@ export function mergeSettings(saved: unknown): Settings {
     editor: withChatFontSize({ ...DEFAULT_SETTINGS.editor, ...(s.editor ?? {}) }),
     latex: pickKnown(DEFAULT_SETTINGS.latex, s.latex),
   };
+}
+
+function validEffort(value: unknown, fallback: ReasoningEffort): ReasoningEffort {
+  return REASONING_EFFORTS.includes(value as ReasoningEffort) ? (value as ReasoningEffort) : fallback;
 }
 
 function withChatFontSize(editor: EditorSettings): EditorSettings {

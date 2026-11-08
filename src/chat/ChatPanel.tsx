@@ -433,8 +433,9 @@ export function ChatPanel() {
   const webSearch = useChat((s) => s.webSearch);
   const defaultProvider = useSettings((s) => s.ai.defaultProvider);
   const chosen = useSettings((s) => s.ai.models);
+  const reasoning = useSettings((s) => s.ai.reasoning);
   // Chat and Edit both answer with the model chosen in Settings.
-  const config = chosenModels(defaultProvider, chosen);
+  const config = chosenModels(defaultProvider, chosen, reasoning);
   const models = t("chat.modelLabel", { primary: config.primary.model, fallback: config.fallback.model });
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);

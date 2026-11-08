@@ -12,7 +12,7 @@ import { mergeModels } from "../ai/models/modelConfig";
 import { CHATGPT_USAGE_URL } from "../ai/providers/openai/openaiProvider";
 import { PROVIDERS } from "../ai/providers/registry";
 import { aiService } from "../ai/service";
-import { PROVIDER_IDS, type AuthMethodKind, type ProviderId } from "../ai/types";
+import { PROVIDER_IDS, REASONING_EFFORTS, type AuthMethodKind, type ProviderId, type ReasoningEffort } from "../ai/types";
 import { ProviderSelect } from "../components/ProviderSelect";
 import { closeSettings, useUI, type SettingsTab } from "../components/uiStore";
 import { detectCompilers, type DetectedTool } from "../latex/compiler/compileApi";
@@ -233,6 +233,7 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
   const t = useT();
   const connection = useConnections((s) => s[provider]);
   const selectedModel = useSettings((s) => s.ai.models[provider]);
+  const effort = useSettings((s) => s.ai.reasoning[provider]);
   const fetched = useSettings((s) => s.ai.fetchedModels[provider]);
   const custom = useSettings((s) => s.ai.customModels[provider]);
   const openaiAuth = useSettings((s) => s.ai.openaiAuth);
@@ -316,6 +317,23 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
               <option key={m.id} value={m.id}>
                 {m.displayName}
                 {m.displayName !== m.id ? ` (${m.id})` : ""}
+              </option>
+            ))}
+          </select>
+          <select
+            className="select w-auto"
+            value={effort}
+            title={t("settings.reasoningTitle")}
+            aria-label={t("settings.reasoning")}
+            onChange={(e) => {
+              const ai = useSettings.getState().ai;
+              useSettings.getState().updateAI({ reasoning: { ...ai.reasoning, [provider]: e.target.value as ReasoningEffort } });
+            }}
+            data-testid={`reasoning-${provider}`}
+          >
+            {REASONING_EFFORTS.map((level) => (
+              <option key={level} value={level}>
+                {t("settings.reasoning")}: {level}
               </option>
             ))}
           </select>

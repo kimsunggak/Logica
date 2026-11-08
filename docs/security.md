@@ -43,7 +43,7 @@ LOGICA는 자체 서버가 없고, AI 기능을 쓸 때만 아래 내용을 연�
 | 논문 요약 만들기 | 요약할 섹션의 원문 | OpenAI. 실패하면 Anthropic API key가 연결된 경우 Anthropic |
 
 - 웹 검색을 켜면 provider의 내장 웹 검색 도구를 씁니다. 검색어는 모델이 만들고 검색은 provider 쪽에서 실행되며, LOGICA가 다른 검색 서비스에 직접 요청하지는 않습니다.
-- Chat 답변과 Edit 수정안은 Settings에서 고른 모델을 쓰고, 나머지 호출의 모델은 `src/ai/models/modelConfig.ts`의 `CHAT_MODELS`에서 정합니다. 자세한 내용은 [작동 구조의 모델과 fallback](architecture.md#모델과-fallback)에 있습니다.
+- Chat 답변과 Edit 수정안은 Settings에서 고른 모델과 추론 강도를 쓰고, 나머지 호출의 모델은 `src/ai/models/modelConfig.ts`의 `CHAT_MODELS`에서 정합니다. 자세한 내용은 [작동 구조의 모델과 fallback](architecture.md#모델과-fallback)에 있습니다.
 
 ## 보안 설계
 
