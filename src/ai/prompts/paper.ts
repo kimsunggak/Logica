@@ -14,7 +14,7 @@ import { systemPrompt } from "./system";
 const FILES_RULES = "<paper> holds the full source of the paper the user is writing, file by file; <omitted_files> lists files left out to fit the size limit.";
 
 const SECTIONS_RULES = [
-  '<paper> holds the paper the user is writing, section by section in reading order, each with its key. A section with content="full" is given word for word, in <source> blocks with the file and lines the text comes from. A section with content="summary" is only a summary of it, not its text. A section with content="omitted" was left out to fit the size limit. <macros> holds the macro definitions of the preamble.',
+  '<paper> holds the paper the user is writing, section by section in reading order, each with its key. A section with content="full" is given word for word, in <source> blocks with the file and lines the text comes from. A section with content="summary" is only a summary of it, not its text. A section with content="omitted" was left out to fit the size limit. <preamble> holds the document class, package and macro definition lines of the preamble; the class and its options set the page layout, such as two columns.',
   "Quote, and propose edits to, only text you have word for word.",
 ].join("\n");
 
@@ -32,7 +32,7 @@ function formatFiles(request: AIRequest): string {
 
 function formatSections(view: PaperView): string {
   const blocks: string[] = [];
-  if (view.macros) blocks.push(tag("macros", view.macros));
+  if (view.preamble) blocks.push(tag("preamble", view.preamble));
   for (const s of view.sections) {
     const head = `<section key="${attr(s.key)}" title="${attr(s.title)}" content="${s.content}">`;
     if (s.content === "full") {

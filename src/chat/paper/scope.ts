@@ -25,7 +25,8 @@ export interface Paper {
   /** The paper as section units, and the summaries the report has for them, by key. */
   units?: SectionUnit[];
   summaries?: Map<string, string>;
-  macros?: string;
+  /** The preamble's class, package and macro lines. */
+  preamble?: string;
   /** The `.tex` sources the units were cut from, as read for this turn. */
   texts?: ReadonlyMap<string, string>;
 }
@@ -125,7 +126,7 @@ export function paperRequest(paper: Paper, scope: Scope): { projectFiles: Projec
     const summary = u.summary ?? paper.summaries?.get(u.key);
     return summary ? { ...base, content: "summary", summary } : { ...base, content: "omitted" };
   });
-  return { paperView: { sections, ...(paper.macros ? { macros: paper.macros } : {}) } };
+  return { paperView: { sections, ...(paper.preamble ? { preamble: paper.preamble } : {}) } };
 }
 
 /** What the debugger shows of a scope. */

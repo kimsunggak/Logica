@@ -103,8 +103,8 @@ export type ViewSection = { key: string; title: string; depth: number } & (
 /** The paper section by section, once the report has summaries of it. */
 export interface PaperView {
   sections: ViewSection[];
-  /** Macro definitions of the preamble. */
-  macros?: string;
+  /** The preamble's document class, packages and macro definitions. */
+  preamble?: string;
 }
 
 /** A section handed to the Paper Summary Module. */

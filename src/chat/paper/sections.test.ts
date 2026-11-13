@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildPaperDocument } from "../../latex/parser/documentModel";
 import { samplePaper, sampleSources } from "../../test/samplePaper";
-import { FRONT, macrosOf, paperUnits, textHash, unitText } from "./sections";
+import { FRONT, paperUnits, preambleOf, textHash, unitText } from "./sections";
 
 const { mainTex, methodTex } = sampleSources;
 
@@ -10,7 +10,7 @@ function unitsOf(files: Map<string, string>) {
 }
 
 describe("paperUnits", () => {
-  const { units, macros } = unitsOf(samplePaper());
+  const { units, preamble } = unitsOf(samplePaper());
   const unit = (key: string) => units.find((u) => u.key === key)!;
 
   it("splits the sample paper into the abstract, sections and subsections, in reading order", () => {
@@ -39,11 +39,20 @@ describe("paperUnits", () => {
     expect(unit(FRONT).bodyWords).toBe(unit(FRONT).words);
   });
 
-  it("starts the front matter after \\begin{document} and keeps only the preamble's macros", () => {
+  it("starts the front matter after \\begin{document} and keeps the preamble's class, packages and macros apart", () => {
     const front = unitText(unit(FRONT));
     expect(front).toContain("\\begin{abstract}");
     expect(front).not.toContain("\\usepackage");
-    expect(macros).toBe("\\newcommand{\\method}{\\textsc{STRoute}}\n\\newcommand{\\R}{\\mathbb{R}}");
+    expect(preamble).toBe([
+      "\\documentclass[11pt]{article}",
+      "\\usepackage[margin=1in]{geometry}",
+      "\\usepackage{amsmath,amssymb}",
+      "\\usepackage{booktabs}",
+      "\\usepackage{natbib}",
+      "\\usepackage{hyperref}",
+      "\\newcommand{\\method}{\\textsc{STRoute}}",
+      "\\newcommand{\\R}{\\mathbb{R}}",
+    ].join("\n"));
     // The last section ends before \end{document}.
     expect(unitText(unit("5"))).toContain("\\bibliography{references}");
     expect(unitText(unit("5"))).not.toContain("\\end{document}");
@@ -77,10 +86,15 @@ describe("paperUnits", () => {
   });
 });
 
-describe("macrosOf", () => {
+describe("preambleOf", () => {
   it("keeps definitions with the lines they continue on, without comments", () => {
-    const preamble = "\\usepackage{x}\n\\newcommand{\\ours}{%\n  Ours}\n\\def\\eps{\\varepsilon} % small\n\\DeclareMathOperator*{\\argmax}{arg\\,max}";
-    expect(macrosOf(preamble)).toBe("\\newcommand{\\ours}{\n  Ours}\n\\def\\eps{\\varepsilon}\n\\DeclareMathOperator*{\\argmax}{arg\\,max}");
+    const preamble = "\\usepackage{x}\n\\newcommand{\\ours}{%\n  Ours}\n\\title{Not a definition}\n\\def\\eps{\\varepsilon} % small\n\\DeclareMathOperator*{\\argmax}{arg\\,max}";
+    expect(preambleOf(preamble)).toBe("\\usepackage{x}\n\\newcommand{\\ours}{\n  Ours}\n\\def\\eps{\\varepsilon}\n\\DeclareMathOperator*{\\argmax}{arg\\,max}");
+  });
+
+  it("keeps the class options that set a two-column layout, also across lines", () => {
+    const preamble = "\\documentclass[10pt,twocolumn,\n  letterpaper]{article}\n% \\usepackage{cvpr}\n\\usepackage[review]{cvpr}\n\\input{preamble}";
+    expect(preambleOf(preamble)).toBe("\\documentclass[10pt,twocolumn,\n  letterpaper]{article}\n\\usepackage[review]{cvpr}");
   });
 });
 

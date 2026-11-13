@@ -123,3 +123,25 @@ describe("overfull lines", () => {
     expect(warnings.map((w) => /(\d+)pt/.exec(w.message)?.[1])).toEqual(["58", "24", "13", "30"]);
   });
 });
+
+describe("overfull lines after an error", () => {
+  it("does not let a quoted source line change which file is open", () => {
+    const log = [
+      "(./main.tex",
+      "(./sections/method.tex",
+      "./sections/method.tex:5: Undefined control sequence.",
+      "<argument> \\foo (unclosed",
+      "                 ",
+      "l.5 \\caption{\\foo (unclosed}",
+      "                            ",
+      ")",
+      "Overfull \\hbox (20.0pt too wide) in paragraph at lines 9--10",
+      "[]",
+      "",
+      ")",
+    ].join("\n");
+    const parsed = parseLatexLog(log, "main.tex");
+    expect(parsed.errors[0]).toMatchObject({ file: "sections/method.tex", line: 5 });
+    expect(parsed.warnings[0]).toMatchObject({ file: "main.tex", line: 9 });
+  });
+});

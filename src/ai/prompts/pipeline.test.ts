@@ -81,6 +81,16 @@ describe("separate prompt responsibilities", () => {
     expect(EDIT_TOOLS[0].name).toBe("apply_paper_edits");
   });
 
+  it("Edit reads the class and packages of the preamble with the sections, to size tables for the layout", () => {
+    const paperView = {
+      preamble: "\\documentclass[10pt,twocolumn,letterpaper]{article}\n\\usepackage[review]{cvpr}",
+      sections: [{ key: "4", title: "Experiments", depth: 0, content: "full" as const, sources: [{ path: "sec/4_experiments.tex", fromLine: 1, toLine: 1, text: "\\section{Experiments}" }] }],
+    };
+    const prompt = buildPrompt({ ...turn, projectFiles: undefined, paperView, task: "edit", editSections: ["4"] });
+    expect(prompt.messages[0].content).toContain("<preamble>\n\\documentclass[10pt,twocolumn,letterpaper]{article}\n\\usepackage[review]{cvpr}\n</preamble>");
+    expect(prompt.system).toContain("page layout the preamble sets");
+  });
+
   it("retains session summary before recent history and the task after the source", () => {
     const prompt = buildPrompt({ ...turn, task: "edit", editSections: ["3"] });
     const first = prompt.messages[0].content;

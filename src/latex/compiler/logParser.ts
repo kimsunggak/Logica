@@ -132,8 +132,11 @@ export function parseLatexLog(log: string, mainFile = "main.tex"): ParsedLog {
     list.push(item);
   };
 
-  /** Read TeX's `l.<n> <context>` lines following an error. */
-  const readContext = (start: number): { line?: number; context?: string } => {
+  /**
+   * Read TeX's `l.<n> <context>` lines following an error. `end` is the last
+   * line of TeX's quote of the source, which starts right after the error.
+   */
+  const readContext = (start: number): { line?: number; context?: string; end?: number } => {
     for (let j = start; j < Math.min(lines.length, start + 12); j++) {
       const m = /^l\.(\d+)\s?(.*)$/.exec(lines[j]);
       if (m) {
@@ -142,7 +145,7 @@ export function parseLatexLog(log: string, mainFile = "main.tex"): ParsedLog {
           .filter(Boolean)
           .join(" ");
         const clipped = context.length > MAX_CONTEXT ? `${context.slice(0, MAX_CONTEXT)}…` : context;
-        return { line: Number(m[1]), context: clipped || undefined };
+        return { line: Number(m[1]), context: clipped || undefined, end: j + 1 };
       }
     }
     return {};
@@ -152,6 +155,8 @@ export function parseLatexLog(log: string, mainFile = "main.tex"): ParsedLog {
   const files: (string | null)[] = [];
   // TeX prints the contents of an overfull or underfull line after the warning, up to a blank line.
   let inBoxDump = false;
+  // After an error TeX quotes the source (`<argument> ...`, `l.42 ...`), parentheses and all.
+  let quoteEnd = -1;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -159,8 +164,7 @@ export function parseLatexLog(log: string, mainFile = "main.tex"): ParsedLog {
       if (line.trim() === "") inBoxDump = false;
       continue;
     }
-    // Source excerpts after an error quote the paper's text, parentheses and all.
-    if (!/^l\.\d+/.test(line) && !/^l\.\d+/.test(lines[i - 1] ?? "")) trackFiles(line, files);
+    if (i > quoteEnd) trackFiles(line, files);
 
     const overfull = /^Overfull \\hbox \((\d+(?:\.\d+)?)pt too wide\) (?:in paragraph at lines (\d+)--\d+|in alignment at lines (\d+)--\d+|detected at line (\d+))/.exec(line);
     if (/^(?:Over|Under)full \\hbox/.test(line)) inBoxDump = true;
@@ -183,7 +187,8 @@ export function parseLatexLog(log: string, mainFile = "main.tex"): ParsedLog {
     const fle = fileLineError.exec(line);
     if (fle) {
       const message = fle[3].replace(/^LaTeX Error:\s*/, "").trim();
-      const { context } = readContext(i + 1);
+      const { context, end } = readContext(i + 1);
+      quoteEnd = end ?? i;
       const { hint, pkg } = hintFor(message);
       if (pkg) missingPackages.add(pkg);
       push(errors, {
@@ -199,7 +204,8 @@ export function parseLatexLog(log: string, mainFile = "main.tex"): ParsedLog {
 
     if (line.startsWith("! ")) {
       const message = line.slice(2).replace(/^LaTeX Error:\s*/, "").trim();
-      const { line: errLine, context } = readContext(i + 1);
+      const { line: errLine, context, end } = readContext(i + 1);
+      quoteEnd = end ?? i;
       const { hint, pkg } = hintFor(message);
       if (pkg) missingPackages.add(pkg);
       push(errors, { severity: "error", message, line: errLine, context, hint });

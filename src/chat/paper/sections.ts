@@ -42,11 +42,13 @@ export interface SectionUnit {
 
 export interface PaperUnits {
   units: SectionUnit[];
-  /** Macro definitions of the preamble (`\newcommand`, `\def`, ...). */
-  macros: string;
+  /** The preamble's document class, packages and macro definitions (`preambleOf`). */
+  preamble: string;
 }
 
+const SETUP_CHARS = 1_500;
 const MACRO_CHARS = 3_000;
+const SETUP = /^\s*\\(?:documentclass|usepackage|RequirePackage)\b/;
 const MACRO = /^\s*\\(?:(?:re)?newcommand|providecommand|DeclareRobustCommand|DeclareMathOperator|def|let|(?:re)?newenvironment|newtheorem)\b/;
 
 /** A short, stable hash of a text (53-bit cyrb53, in hex). */
@@ -68,31 +70,45 @@ export function unitText(unit: Pick<SectionUnit, "sources">): string {
   return unit.sources.map((s) => s.text).join("\n");
 }
 
-function braceDepth(line: string): number {
+/** Open groups a line leaves: braces, and also brackets for class and package options. */
+function openGroups(line: string, brackets: boolean): number {
   let depth = 0;
   for (let i = 0; i < line.length; i++) {
-    if (line[i] === "\\") i++;
-    else if (line[i] === "{") depth++;
-    else if (line[i] === "}") depth--;
+    const ch = line[i];
+    if (ch === "\\") i++;
+    else if (ch === "{" || (brackets && ch === "[")) depth++;
+    else if (ch === "}" || (brackets && ch === "]")) depth--;
   }
   return depth;
 }
 
-/** Macro definitions in a preamble, each with the lines it continues on. */
-export function macrosOf(preamble: string): string {
+/**
+ * What the Chat and Edit modules read of the preamble, in source order, each
+ * line with the lines it continues on: the document class and packages, which
+ * set the page layout (twocolumn) and the commands a change can use, and the
+ * macro definitions.
+ */
+export function preambleOf(preamble: string): string {
   const lines = maskComments(preamble).split("\n");
   const out: string[] = [];
-  let size = 0;
+  let setupSize = 0;
+  let macroSize = 0;
   for (let i = 0; i < lines.length; i++) {
-    if (!MACRO.test(lines[i])) continue;
+    const setup = SETUP.test(lines[i]);
+    if (!setup && !MACRO.test(lines[i])) continue;
     let end = i;
-    let depth = braceDepth(lines[i]);
-    while (depth > 0 && end + 1 < lines.length && end - i < 8) depth += braceDepth(lines[++end]);
+    let depth = openGroups(lines[i], setup);
+    while (depth > 0 && end + 1 < lines.length && end - i < 8) depth += openGroups(lines[++end], setup);
     const definition = lines.slice(i, end + 1).map((l) => l.trimEnd()).join("\n");
     i = end;
-    if (size + definition.length > MACRO_CHARS) break;
+    if (setup) {
+      if (setupSize + definition.length > SETUP_CHARS) continue;
+      setupSize += definition.length + 1;
+    } else {
+      if (macroSize + definition.length > MACRO_CHARS) continue;
+      macroSize += definition.length + 1;
+    }
     out.push(definition);
-    size += definition.length + 1;
   }
   return out.join("\n");
 }
@@ -100,12 +116,12 @@ export function macrosOf(preamble: string): string {
 /**
  * Split the paper into section units. Units cover the body from
  * `\begin{document}` to `\end{document}`. Title/author declarations form a
- * separate metadata unit; the preamble also supplies macro definitions.
+ * separate metadata unit; the preamble supplies its class, package and macro lines.
  */
 export function paperUnits(doc: PaperDocument, files: Map<string, string>): PaperUnits {
   const main = doc.mainFile;
   const facts = main ? doc.facts.get(main) : undefined;
-  if (!main || !facts || doc.totalLines === 0) return { units: [], macros: "" };
+  if (!main || !facts || doc.totalLines === 0) return { units: [], preamble: "" };
 
   const fileLines = new Map<string, string[]>();
   const linesOf = (path: string) => {
@@ -184,5 +200,5 @@ export function paperUnits(doc: PaperDocument, files: Map<string, string>): Pape
   });
 
   const preamble = begin > 0 ? read(0, begin - 1).map((r) => r.text).join("\n") : "";
-  return { units, macros: macrosOf(preamble) };
+  return { units, preamble: preambleOf(preamble) };
 }

@@ -133,8 +133,8 @@ function paperOf(report: PaperReport): Paper {
     files.push({ path, text });
     used += text.length;
   }
-  const { units, macros } = paperUnits(doc, tex);
-  return { files, omitted, budget: PAPER_BUDGET, units, summaries: summariesFor(units, report), macros, texts: tex };
+  const { units, preamble } = paperUnits(doc, tex);
+  return { files, omitted, budget: PAPER_BUDGET, units, summaries: summariesFor(units, report), preamble, texts: tex };
 }
 
 /**
