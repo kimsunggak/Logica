@@ -48,6 +48,32 @@ function unwrap(log: string): string[] {
 
 const MAX_CONTEXT = 160;
 
+/** Lines that stick out less than this barely touch the margin; wider ones visibly run into it or the next column. */
+const OVERFULL_MIN_PT = 10;
+
+/**
+ * Follow the files TeX opens (`(./sections/a.tex`) and closes (`)`) so that a
+ * warning without a file name can be placed. Every parenthesis is counted, so a
+ * balanced `(12pt too wide)` leaves the stack as it was.
+ */
+function trackFiles(line: string, stack: (string | null)[]) {
+  for (const m of line.matchAll(/\(([^\s()]*)|\)/g)) {
+    if (m[0] === ")") stack.pop();
+    else stack.push(/\.[A-Za-z]{1,8}$/.test(m[1]) ? m[1] : null);
+  }
+}
+
+/** The project .tex file TeX is reading, or undefined for a package file or an unknown one. */
+function currentTexFile(stack: (string | null)[], mainDir: string): string | undefined {
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const file = stack[i];
+    if (!file) continue;
+    const relative = !file.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(file);
+    return relative && file.endsWith(".tex") ? toProjectPath(file, mainDir) : undefined;
+  }
+  return undefined;
+}
+
 function toProjectPath(file: string, mainDir: string): string {
   const cleaned = file.trim().replace(/^"|"$/g, "");
   if (cleaned.startsWith("/") || /^[A-Za-z]:[\\/]/.test(cleaned)) return normalizePath(cleaned);
@@ -123,9 +149,36 @@ export function parseLatexLog(log: string, mainFile = "main.tex"): ParsedLog {
   };
 
   const fileLineError = /^(.*?\.(?:tex|sty|cls|bbl|aux|ltx|def|cfg|clo)):(\d+):\s*(.*)$/;
+  const files: (string | null)[] = [];
+  // TeX prints the contents of an overfull or underfull line after the warning, up to a blank line.
+  let inBoxDump = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    if (inBoxDump) {
+      if (line.trim() === "") inBoxDump = false;
+      continue;
+    }
+    // Source excerpts after an error quote the paper's text, parentheses and all.
+    if (!/^l\.\d+/.test(line) && !/^l\.\d+/.test(lines[i - 1] ?? "")) trackFiles(line, files);
+
+    const overfull = /^Overfull \\hbox \((\d+(?:\.\d+)?)pt too wide\) (?:in paragraph at lines (\d+)--\d+|in alignment at lines (\d+)--\d+|detected at line (\d+))/.exec(line);
+    if (/^(?:Over|Under)full \\hbox/.test(line)) inBoxDump = true;
+    if (overfull) {
+      const width = Number(overfull[1]);
+      const file = currentTexFile(files, mainDir);
+      if (width >= OVERFULL_MIN_PT) {
+        push(warnings, {
+          severity: "warning",
+          message: t("log.overfull", { width: Math.round(width) }),
+          // Without its file the line would be read as a line of the main file.
+          file,
+          line: file ? Number(overfull[2] ?? overfull[3] ?? overfull[4]) : undefined,
+          hint: t("log.overfullHint"),
+        });
+      }
+      continue;
+    }
 
     const fle = fileLineError.exec(line);
     if (fle) {

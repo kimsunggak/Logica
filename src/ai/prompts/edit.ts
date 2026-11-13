@@ -31,6 +31,7 @@ export function buildEditPrompt(request: AIRequest): PromptPayload {
     "For each edit, use the exact source path, a unique ORIGINAL substring, and its complete REVISED replacement. Include unchanged context needed to make ORIGINAL unique. Edits must not overlap. Return all places and files in the same tool call.",
     "For insertion, replace an existing anchor with the anchor plus the inserted text. For deletion, revised can be empty.",
     "Keep the paper's language and style. Preserve LaTeX commands, labels, citation/reference keys, math and environments unless the user requests changing them. Do not invent facts, measurements, citations or claims.",
+    "A tabular does not shrink to fit its column, and text in l or c columns never wraps. When you write or change a table in a two-column paper, keep it within \\columnwidth: give long cells p{...} or tabularx X columns sized as fractions of \\columnwidth that leave room for the padding between columns, put a table with many or long columns in table* so it spans both columns, and use \\resizebox{\\columnwidth}{!}{...} only when the paper already loads graphicx. Otherwise the table runs into the other column.",
     "In summary explain the proposed changes briefly in the user's language. The author will review a diff and apply them; describe them as proposals awaiting application.",
     ...(evidence.length ? EVIDENCE_RULES : []),
     ...(gaps.length ? [GAPS_RULE] : []),

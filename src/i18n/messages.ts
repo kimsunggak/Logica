@@ -155,6 +155,8 @@ const en = {
   "log.korean": "pdflatex cannot typeset Korean text. Add \\usepackage{kotex} to the preamble and choose xelatex or the built-in engine in Settings > LaTeX.",
   "log.unicode": "This character is not supported by pdflatex. Use xelatex (Settings > LaTeX) or replace the character with a LaTeX command.",
   "log.emergency": "Emergency stop.",
+  "log.overfull": "This content is {width}pt wider than the column and runs into the margin or the next column.",
+  "log.overfullHint": "For a table, size its columns to \\columnwidth (p{...} or tabularx), shrink it with \\resizebox{\\columnwidth}{!}{...}, or use table* to span both columns. For text, break the long word or URL.",
 
 
   // validation of AI output
@@ -511,6 +513,8 @@ const ko: Record<MessageKey, string> = {
   "log.korean": "pdflatex는 한글을 조판할 수 없습니다. preamble에 \\usepackage{kotex}를 넣고 설정 > LaTeX에서 컴파일러를 xelatex나 내장 엔진으로 바꾸세요.",
   "log.unicode": "pdflatex가 지원하지 않는 문자입니다. 설정 > LaTeX에서 xelatex를 쓰거나 이 문자를 LaTeX 명령으로 바꾸세요.",
   "log.emergency": "컴파일이 비상 중단되었습니다.",
+  "log.overfull": "내용이 단 폭보다 {width}pt 넓어 여백이나 옆 단으로 넘칩니다.",
+  "log.overfullHint": "표라면 열 너비를 \\columnwidth에 맞추거나(p{...}, tabularx) \\resizebox{\\columnwidth}{!}{...}로 줄이거나, table*로 두 단에 걸치게 하세요. 글이라면 긴 단어나 URL을 끊어 주세요.",
 
 
   "val.empty": "AI가 빈 결과를 반환했습니다.",

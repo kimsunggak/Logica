@@ -78,3 +78,48 @@ describe("missing figure", () => {
     expect(parsed.errors[0].line).toBe(42);
   });
 });
+
+describe("overfull lines", () => {
+  const log = [
+    "(./main.tex",
+    "(/usr/share/texlive/texmf-dist/tex/latex/base/article.cls",
+    "Document Class: article 2023/05/17 v1.4n Standard LaTeX document class",
+    ")",
+    "(./sections/experiments.tex",
+    "Overfull \\hbox (58.21767pt too wide) in paragraph at lines 20--35",
+    "[][] ",
+    "[]\\TU/NanumMyeongjo(0)/m/n/9 갱신 방식 (초안 ",
+    "",
+    "Overfull \\hbox (3.1pt too wide) in paragraph at lines 40--41",
+    "[]\\TU/NanumMyeongjo(0)/m/n/10 짧게 넘친 글",
+    "",
+    "Overfull \\hbox (24.0pt too wide) in alignment at lines 50--60",
+    " [] [] ",
+    "",
+    ")",
+    "Overfull \\hbox (12.5pt too wide) detected at line 8",
+    "$[]$",
+    "",
+    "(/usr/share/texlive/texmf-dist/tex/latex/tools/longtable.sty",
+    "Overfull \\hbox (30.0pt too wide) in paragraph at lines 1--2",
+    "[]",
+    "",
+    "))",
+  ].join("\n");
+  const warnings = parseLatexLog(log, "main.tex").warnings;
+
+  it("reports content that runs past the column with its file and line", () => {
+    expect(warnings.map((w) => [w.file, w.line])).toEqual([
+      ["sections/experiments.tex", 20],
+      ["sections/experiments.tex", 50],
+      ["main.tex", 8],
+      [undefined, undefined],
+    ]);
+    expect(warnings[0].message).toContain("58pt");
+    expect(warnings[0].hint).toContain("table*");
+  });
+
+  it("ignores lines that barely touch the margin", () => {
+    expect(warnings.map((w) => /(\d+)pt/.exec(w.message)?.[1])).toEqual(["58", "24", "13", "30"]);
+  });
+});
