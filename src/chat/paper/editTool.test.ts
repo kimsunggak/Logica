@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AIResponse, SourceRange } from "../../ai/types";
-import { locateExact, preparePaperEdits, readEditProposal, validEditPath } from "./editTool";
+import { t } from "../../i18n";
+import { EditProposalError, locateExact, preparePaperEdits, readEditProposal, validEditPath, type EditRejection } from "./editTool";
 import { textHash } from "./sections";
 
 const sources: SourceRange[] = [{ path: "sections/method.tex", fromLine: 4, toLine: 5, text: "A long explanation.\nAnother paragraph." }];
@@ -10,17 +11,30 @@ const response = (edits: unknown): AIResponse => ({
   toolCalls: [{ id: "tool-1", name: "apply_paper_edits", arguments: { summary: "Proposed changes.", edits } }],
 });
 
+/** The check a proposal failed, as `readEditProposal` reports it. */
+function rejectionOf(read: () => unknown): EditRejection {
+  try {
+    read();
+  } catch (err) {
+    if (err instanceof EditProposalError) return err.rejection;
+    throw err;
+  }
+  throw new Error("The proposal was accepted.");
+}
+
 describe("editing tool arguments", () => {
   it("reads a queued tool proposal without applying it", () => {
     expect(readEditProposal(response([edit]), sources)).toEqual({ callId: "tool-1", summary: "Proposed changes.", edits: [edit] });
   });
   it.each(["/tmp/a.tex", "../a.tex", "sections/../a.tex", "C:\\a.tex", "main.bib", "./main.tex", "a//b.tex"])("rejects invalid source path %s", (path) => {
     expect(validEditPath(path)).toBe(false);
-    expect(() => readEditProposal(response([{ ...edit, path }]), sources)).toThrow();
+    expect(rejectionOf(() => readEditProposal(response([{ ...edit, path }]), sources))).toEqual({ reason: "path", edit: 1, path });
   });
   it("requires original text from a selected editable source", () => {
-    expect(() => readEditProposal(response([{ ...edit, original: "An invented original." }]), sources)).toThrow();
-    expect(() => readEditProposal(response([{ ...edit, path: "other.tex" }]), sources)).toThrow();
+    expect(rejectionOf(() => readEditProposal(response([{ ...edit, original: "An invented original." }]), sources))).toEqual({
+      reason: "not_found", edit: 1, path: edit.path, original: "An invented original.",
+    });
+    expect(rejectionOf(() => readEditProposal(response([{ ...edit, path: "other.tex" }]), sources))).toMatchObject({ reason: "not_found", path: "other.tex" });
   });
   it("keeps the web evidence ids each edit names, and only the ones it was given", () => {
     const proposal = readEditProposal(response([{ ...edit, evidence: ["W2", "W9", "W2", 3] }]), sources, undefined, ["W1", "W2"]);
@@ -35,9 +49,53 @@ describe("editing tool arguments", () => {
   it("rejects partial JSON, multiple tool calls and truncated outputs", () => {
     const invalid = response([edit]);
     invalid.toolCalls![0].argumentsError = "invalid_json";
-    expect(() => readEditProposal(invalid, sources)).toThrow();
-    expect(() => readEditProposal({ ...response([edit]), finishReason: "length" }, sources)).toThrow();
-    expect(() => readEditProposal({ ...response([edit]), toolCalls: [...response([edit]).toolCalls!, ...response([edit]).toolCalls!] }, sources)).toThrow();
+    expect(rejectionOf(() => readEditProposal(invalid, sources))).toEqual({ reason: "arguments" });
+    expect(rejectionOf(() => readEditProposal({ ...response([edit]), finishReason: "length" }, sources))).toEqual({ reason: "incomplete" });
+    const twice = { ...response([edit]), toolCalls: [...response([edit]).toolCalls!, { id: "tool-2", name: "clarify_request", arguments: {} }] };
+    expect(rejectionOf(() => readEditProposal(twice, sources))).toEqual({ reason: "tool_calls", toolCalls: ["apply_paper_edits", "clarify_request"] });
+  });
+});
+
+describe("why a proposal is rejected", () => {
+  it("keeps what the model wrote when it answered without the tool", () => {
+    const text = "Section 4 has no blank lines to remove.";
+    expect(rejectionOf(() => readEditProposal({ ...response([edit]), text, toolCalls: [] }, sources))).toEqual({ reason: "no_tool_call", text });
+  });
+  it("names a missing summary and an empty edit list", () => {
+    const empty = (args: Record<string, unknown>): AIResponse => ({ ...response([edit]), toolCalls: [{ id: "tool-1", name: "apply_paper_edits", arguments: args }] });
+    expect(rejectionOf(() => readEditProposal(empty({ summary: " ", edits: [edit] }), sources))).toEqual({ reason: "summary" });
+    expect(rejectionOf(() => readEditProposal(empty({ summary: "Nothing to change.", edits: [] }), sources))).toEqual({ reason: "no_edits" });
+  });
+  it("names the edit that is malformed, blank or unchanged", () => {
+    expect(rejectionOf(() => readEditProposal(response([edit, "not an edit"]), sources))).toEqual({ reason: "shape", edit: 2 });
+    expect(rejectionOf(() => readEditProposal(response([{ ...edit, original: "\n\n  \n" }]), sources))).toMatchObject({ reason: "blank", edit: 1 });
+    expect(rejectionOf(() => readEditProposal(response([{ ...edit, revised: edit.original }]), sources))).toMatchObject({ reason: "unchanged", edit: 1 });
+  });
+  it("tells an original that differs only in blank lines from one that is not there", () => {
+    const blankLines = { ...edit, original: "A long explanation.\n\n\nAnother paragraph.", revised: "A long explanation.\nAnother paragraph." };
+    expect(rejectionOf(() => readEditProposal(response([blankLines]), sources))).toEqual({ reason: "whitespace", edit: 1, path: edit.path, original: blankLines.original });
+  });
+  it("tells an original outside the sections being edited, or in them twice", () => {
+    const file = "Read-only intro.\nA long explanation.\nAnother paragraph.";
+    const texts = new Map([[edit.path, file]]);
+    expect(rejectionOf(() => readEditProposal(response([{ ...edit, original: "Read-only intro." }]), sources, texts))).toMatchObject({ reason: "outside", edit: 1 });
+    const repeated: SourceRange[] = [{ ...sources[0], text: "Same line.\nSame line." }];
+    expect(rejectionOf(() => readEditProposal(response([{ ...edit, original: "Same line." }]), repeated))).toMatchObject({ reason: "ambiguous", edit: 1 });
+  });
+  it("shows the author which check failed", () => {
+    const err = (() => {
+      try {
+        readEditProposal(response([{ ...edit, original: "An invented original." }]), sources);
+      } catch (e) {
+        return e as EditProposalError;
+      }
+    })()!;
+    expect(err).toMatchObject({ kind: "malformed_response" });
+    expect(err.message).toBe(t("chat.invalidEdits", { reason: t("edits.reject.notFound", { n: 1, path: edit.path }) }));
+  });
+  it("shortens a long original in the rejection", () => {
+    const original = "x".repeat(1000);
+    expect(rejectionOf(() => readEditProposal(response([{ ...edit, original }]), sources)).original).toBe(`${"x".repeat(300)}…`);
   });
 });
 

@@ -1,9 +1,9 @@
 /** apply_paper_edits: validate model arguments, then prepare exact source replacements. */
-import type { ProposedEdit } from "../../ai/agent/edits";
+import { locateEdit, type ProposedEdit } from "../../ai/agent/edits";
 import { AIError } from "../../ai/errors";
 import { ALL_SECTIONS, APPLY_PAPER_EDITS } from "../../ai/tools/chatTools";
 import type { AIResponse, SourceRange } from "../../ai/types";
-import { t } from "../../i18n";
+import { t, type MessageKey } from "../../i18n";
 import type { Paper, Scope } from "./scope";
 import { textHash } from "./sections";
 
@@ -73,22 +73,114 @@ export function editableSources(paper: Paper, selected: string[]): SourceRange[]
   return (paper.units ?? []).filter((u) => keys.has(u.key)).flatMap((u) => u.sources);
 }
 
+/** Why a model's apply_paper_edits call cannot be queued. */
+export type EditRejectionReason =
+  | "incomplete"
+  | "no_tool_call"
+  | "tool_calls"
+  | "arguments"
+  | "summary"
+  | "no_edits"
+  | "shape"
+  | "path"
+  | "blank"
+  | "unchanged"
+  | "whitespace"
+  | "outside"
+  | "ambiguous"
+  | "not_found";
+
+/** A rejected proposal: the failed check, and the edit and text it failed on. */
+export interface EditRejection {
+  reason: EditRejectionReason;
+  /** 1-based number of the edit it concerns. */
+  edit?: number;
+  path?: string;
+  /** The start of that edit's original text, as the model wrote it. */
+  original?: string;
+  /** The tools the model called instead of one apply_paper_edits call. */
+  toolCalls?: string[];
+  /** The start of the model's text, when it answered without the tool. */
+  text?: string;
+}
+
+const REASON_MESSAGES: Record<EditRejectionReason, MessageKey> = {
+  incomplete: "edits.reject.incomplete",
+  no_tool_call: "edits.reject.noToolCall",
+  tool_calls: "edits.reject.toolCalls",
+  arguments: "edits.reject.arguments",
+  summary: "edits.reject.summary",
+  no_edits: "edits.reject.noEdits",
+  shape: "edits.reject.shape",
+  path: "edits.reject.path",
+  blank: "edits.reject.blank",
+  unchanged: "edits.reject.unchanged",
+  whitespace: "edits.reject.whitespace",
+  outside: "edits.reject.outside",
+  ambiguous: "edits.reject.ambiguous",
+  not_found: "edits.reject.notFound",
+};
+
+/** A proposal that cannot be queued; the message names the check it failed. */
+export class EditProposalError extends AIError {
+  readonly rejection: EditRejection;
+
+  constructor(rejection: EditRejection) {
+    const reason = t(REASON_MESSAGES[rejection.reason], { n: rejection.edit ?? "", path: rejection.path ?? "" });
+    super("malformed_response", t("chat.invalidEdits", { reason }));
+    this.rejection = rejection;
+  }
+}
+
+const EXCERPT_CHARS = 300;
+
+function excerpt(text: string): string {
+  return text.length > EXCERPT_CHARS ? `${text.slice(0, EXCERPT_CHARS)}…` : text;
+}
+
+function occurrences(text: string, needle: string): number {
+  let count = 0;
+  for (let i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) count++;
+  return count;
+}
+
+/** Why `original` has no single place in the editable sources of its file. */
+function missingReason(own: SourceRange[], original: string, file: string | undefined): EditRejectionReason {
+  if (own.reduce((n, s) => n + occurrences(s.text, original), 0) > 1) return "ambiguous";
+  // Models often rewrite blank lines and indentation when they copy text.
+  if (own.some((s) => locateEdit(s.text, original))) return "whitespace";
+  // In the file, but in a read-only section or across the end of an editable one.
+  if (file?.includes(original)) return "outside";
+  return "not_found";
+}
+
 /**
  * `texts`: the files the sources were cut from, to place each edit in its file.
  * `evidenceIds`: the web evidence the edit was given; each edit keeps the known ids it names.
+ * Throws an `EditProposalError` that names the check the call failed.
  */
 export function readEditProposal(response: AIResponse, sources: SourceRange[], texts?: ReadonlyMap<string, string>, evidenceIds: readonly string[] = []): EditProposal {
-  const call = response.toolCalls?.[0];
-  const invalid = () => new AIError("malformed_response", t("chat.invalidEdits"));
-  if (response.finishReason !== "stop" || response.toolCalls?.length !== 1 || call?.name !== APPLY_PAPER_EDITS || call.argumentsError) throw invalid();
+  const calls = response.toolCalls ?? [];
+  if (response.finishReason !== "stop") throw new EditProposalError({ reason: "incomplete" });
+  if (!calls.length) throw new EditProposalError({ reason: "no_tool_call", text: excerpt(response.text) });
+  const call = calls[0];
+  if (calls.length !== 1 || call.name !== APPLY_PAPER_EDITS) throw new EditProposalError({ reason: "tool_calls", toolCalls: calls.map((c) => c.name) });
+  if (call.argumentsError) throw new EditProposalError({ reason: "arguments" });
   const { edits, summary } = call.arguments;
-  if (typeof summary !== "string" || !summary.trim() || !Array.isArray(edits) || !edits.length) throw invalid();
-  const parsed: ProposedEdit[] = edits.map((item: unknown) => {
-    if (!item || typeof item !== "object") throw invalid();
+  if (typeof summary !== "string" || !summary.trim()) throw new EditProposalError({ reason: "summary" });
+  if (!Array.isArray(edits) || !edits.length) throw new EditProposalError({ reason: "no_edits" });
+  const parsed: ProposedEdit[] = edits.map((item: unknown, index: number) => {
+    const n = index + 1;
+    if (!item || typeof item !== "object") throw new EditProposalError({ reason: "shape", edit: n });
     const { path, original, revised, evidence } = item as Record<string, unknown>;
-    if (typeof path !== "string" || !validEditPath(path) || typeof original !== "string" || !original.trim() || typeof revised !== "string" || original === revised) throw invalid();
-    const matches = sources.filter((s) => s.path === path && locateExact(s.text, original));
-    if (matches.length !== 1) throw invalid();
+    if (typeof path !== "string" || typeof original !== "string" || typeof revised !== "string") throw new EditProposalError({ reason: "shape", edit: n });
+    if (!validEditPath(path)) throw new EditProposalError({ reason: "path", edit: n, path });
+    const at = { edit: n, path, original: excerpt(original) };
+    if (!original.trim()) throw new EditProposalError({ reason: "blank", ...at });
+    if (original === revised) throw new EditProposalError({ reason: "unchanged", ...at });
+    const own = sources.filter((s) => s.path === path);
+    const matches = own.filter((s) => locateExact(s.text, original));
+    if (matches.length !== 1) throw new EditProposalError({ reason: missingReason(own, original, texts?.get(path)), ...at });
     const anchor = anchorOf(texts?.get(path), matches[0], original);
     const used = Array.isArray(evidence) ? [...new Set(evidence.filter((id): id is string => typeof id === "string" && evidenceIds.includes(id)))] : [];
     return { path, original, revised, ...(anchor ? { anchor } : {}), ...(used.length ? { evidence: used } : {}) };
