@@ -93,7 +93,7 @@ export function CollapseButton({ pane, className }: { pane: PaneId; className?: 
   );
 }
 
-/** What a collapsed panel leaves behind: a narrow strip that expands it again. */
+/** What a collapsed preview or chat leaves behind: a narrow strip that expands it again. */
 export function CollapsedStrip({ pane }: { pane: PaneId }) {
   const t = useT();
   const info = byId(pane);

@@ -19,7 +19,8 @@ const WEIGHT_KEY = { editor: "editorWeight", pdf: "pdfWeight", chat: "chatWeight
 const MIN_WIDTH: Record<SplitPane | "outline", number> = { outline: 160, editor: 280, pdf: 220, chat: 240 };
 
 /**
- * Outline | Editor | Preview | AI chat. Each panel can be collapsed to a strip.
+ * Outline | Editor | Preview | AI chat. Each panel can be collapsed: the preview
+ * and chat leave a strip, and the pane bar brings the outline and editor back.
  * The outline is a sidebar of fixed width; the open editor, preview and chat
  * divide the rest by weight, so they always fit side by side without
  * overlapping. Dragging a border moves width between the two panes it
@@ -98,7 +99,8 @@ export function Workspace() {
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
       <PaneBar />
 
-      {open.outline ? (
+      {/* A collapsed outline or editor leaves no strip: the pane bar right beside them brings them back. */}
+      {open.outline && (
         <>
           <div
             className="min-w-0"
@@ -110,8 +112,6 @@ export function Workspace() {
           </div>
           {openSplit.length > 0 && sidebarHandle}
         </>
-      ) : (
-        <CollapsedStrip pane="outline" />
       )}
 
       {/* The editor stays mounted while collapsed so its view and undo history survive. */}
@@ -126,7 +126,6 @@ export function Workspace() {
           <EditorPane />
         </ErrorBoundary>
       </div>
-      {!open.editor && <CollapsedStrip pane="editor" />}
 
       {!open.outline && openSplit.length === 0 && (
         <div className="flex flex-1 items-center justify-center p-6" data-testid="all-collapsed">
