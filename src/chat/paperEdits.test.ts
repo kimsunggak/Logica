@@ -39,15 +39,17 @@ beforeEach(async () => {
 });
 
 describe("accepted apply_paper_edits execution", () => {
-  it("applies a reviewed replacement through the editor and refreshes the paper summary", async () => {
+  it("applies a reviewed replacement through the editor without bringing the editor forward, and refreshes the paper summary", async () => {
     expect(editorSession.has("main.tex")).toBe(false);
     await applyChatEdit("answer", 0, first);
+    // The file opens as a background tab only so the change can go into its buffer.
+    expect(open).toHaveBeenCalledWith("main.tex", { activate: false });
+    expect(navigate).not.toHaveBeenCalled();
     expect(editorSession.textOf("main.tex")).toBe(original.replace(first.original, first.revised));
     expect(editorSession.isDirty("main.tex")).toBe(true);
     expect(useChat.getState().messages[0].editStates).toEqual({ 0: "applied" });
     await summaryIdle();
     expect(vi.mocked(call).mock.calls.some(([cmd]) => cmd === "paper_save_summary")).toBe(true);
-    expect(navigate).toHaveBeenCalledWith("main.tex", 4);
   });
 
   it("applies multiple positions and files after a complete preflight", async () => {
