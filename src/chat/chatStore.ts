@@ -27,7 +27,7 @@ import { editorSession } from "../editor/editorSession";
 import { clearPendingEdits, focusPendingEdit, pendingEditRange, setPendingEdit } from "../editor/pendingEdits";
 import { mapRange } from "../editor/textDiff";
 import { buildPaperDocument, outlineText } from "../latex/parser/documentModel";
-import { currentTexts, navigateTo, openFile } from "../project/projectActions";
+import { currentTexts, openFile } from "../project/projectActions";
 import { notify, useProject } from "../project/projectStore";
 import { t } from "../i18n";
 
@@ -729,12 +729,17 @@ function messageEdits(message: ChatMessage): ProposedEdit[] {
   });
 }
 
-/** Execute the accepted apply_paper_edits arguments in the current project. */
-async function executePaperEditTool(messageId: string, entries: { index: number; edit: ProposedEdit }[]): Promise<{ path: string; line: number } | null> {
+/**
+ * Execute the accepted apply_paper_edits arguments in the current project.
+ * Changes go into the editor buffers, so undo and save work as for typing; a
+ * file that is not open yet opens as a background tab. The editor panel, its
+ * active tab and the focus stay as the author left them.
+ */
+async function executePaperEditTool(messageId: string, entries: { index: number; edit: ProposedEdit }[]): Promise<boolean> {
   const before = useChat.getState();
   const project = useProject.getState().root;
   const message = before.messages.find((m) => m.id === messageId);
-  if (!project || before.root !== project || !message || !entries.length || new Set(entries.map((e) => e.index)).size !== entries.length) return null;
+  if (!project || before.root !== project || !message || !entries.length || new Set(entries.map((e) => e.index)).size !== entries.length) return false;
   const current = () => useChat.getState().root === project && useProject.getState().root === project && useChat.getState().sessionId === before.sessionId;
   const authorized = () => {
     const latest = useChat.getState().messages.find((m) => m.id === messageId);
@@ -745,7 +750,7 @@ async function executePaperEditTool(messageId: string, entries: { index: number;
       return !latest.editStates?.[index] && original && original.path === edit.path && original.original === edit.original && original.revised === edit.revised;
     });
   };
-  if (!authorized()) return null;
+  if (!authorized()) return false;
   const span = startSpan(messageId, null, "edit", "apply_paper_edits", () => ({ call_id: message.editToolCallId ?? "legacy", edits: entries.map((e) => e.edit) }));
   // Until validation names the proposals that cannot apply, an error fails the whole batch.
   let failed = entries;
@@ -759,14 +764,14 @@ async function executePaperEditTool(messageId: string, entries: { index: number;
     }
     if (!current() || !authorized()) {
       endSpan(span, "edit", { applied: 0, reason: "project, session or pending proposal changed" });
-      return null;
+      return false;
     }
     // A file that is not UTF-8 stays read-only until it is converted; the proposal stays pending.
     const locked = entries.find(({ edit }) => editorSession.isReadOnly(edit.path));
     if (locked) {
       notify("error", t("project.lossyReadOnly", { path: locked.edit.path }));
       endSpan(span, "edit", { applied: 0, reason: "file is not UTF-8 (read-only)" });
-      return null;
+      return false;
     }
     const texts = new Map(entries.filter(({ edit }) => openable(edit.path) && editorSession.has(edit.path)).map(({ edit }) => [edit.path, editorSession.textOf(edit.path) ?? ""]));
     const edits = entries.map(({ edit }) => {
@@ -782,25 +787,23 @@ async function executePaperEditTool(messageId: string, entries: { index: number;
     if (!replacements) failed = entries.filter((_, i) => !preparePaperEdits([edits[i]], texts, ranges && [ranges[i]]));
     step(messageId, span, "edit", "validatePaperEdits", { edits: entries.length }, replacements ? { valid: true } : { valid: false, failed: failed.map((e) => e.index) });
     if (!replacements) throw new Error(t("agent.failed"));
-    const first = replacements[0];
-    const location = { path: first.path, line: lineOf(texts.get(first.path)!, first.from) };
     // All files and anchors have passed validation. Offsets descend within each file.
     for (const edit of replacements) editorSession.applyEdit(edit.path, edit.from, edit.to, edit.revised);
     for (const { index } of entries) setEditState(messageId, index, "applied");
     endSpan(span, "edit", { applied: entries.length, files: [...new Set(replacements.map((e) => e.path))] });
     // Summarize actual source changes, including unsaved editor buffers.
     scheduleSectionSummaries({ traceId: messageId, root: span });
-    return location;
+    return true;
   } catch (err) {
     failSpan(span, "edit", err);
     if (current()) for (const { index } of failed) setEditState(messageId, index, "failed");
-    return null;
+    return false;
   }
 }
 
+/** The card shows the result; the author opens the file when they want to see it. */
 export async function applyChatEdit(messageId: string, index: number, edit: ProposedEdit) {
-  const done = await executePaperEditTool(messageId, [{ index, edit }]);
-  if (done) await navigateTo(done.path, done.line);
+  await executePaperEditTool(messageId, [{ index, edit }]);
 }
 
 export function rejectChatEdit(messageId: string, index: number) {
