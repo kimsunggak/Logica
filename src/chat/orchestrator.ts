@@ -12,9 +12,9 @@ import { NEED_SECTIONS } from "../ai/prompts/answer";
 import { ALL_SECTIONS, CHAT_TOOLS, CLARIFY_REQUEST, editTools, ROUTE_CHAT, ROUTE_EDIT, SELECT_CHAT_SECTIONS, SELECT_EDIT_SECTIONS, sectionTools } from "../ai/tools/chatTools";
 import type { AIMessage, AIResponse, AIUsage, ChatMode, ExecutionMode, FinishReason, SourceRange, WebEvidence, WebSource } from "../ai/types";
 import { SourceList } from "../ai/providers/webSearch";
-import { step, traced, type Span } from "../debug/trace";
+import { spanData, step, traced, type Span } from "../debug/trace";
 import { t } from "../i18n";
-import { editableSources, readEditProposal, requireFullSections } from "./paper/editTool";
+import { EditProposalError, editableSources, readEditProposal, requireFullSections, type EditProposal } from "./paper/editTool";
 import { describeScope, paperMap, paperRequest, resolveScope, type Paper, type Scope } from "./paper/scope";
 import { renderSummary, type ConversationSummary } from "./session/summary";
 import { JUDGE_MESSAGE_CHARS, JUDGE_TURNS, MODULE_MESSAGE_CHARS, MODULE_TURNS, selectHistory, type Clipped, type TurnRecord } from "./session/turns";
@@ -92,6 +92,15 @@ function clarification(response: AIResponse): string | undefined {
   const call = response.toolCalls?.[0];
   if (response.finishReason !== "stop" || response.toolCalls?.length !== 1 || call?.name !== CLARIFY_REQUEST || call.argumentsError) return undefined;
   return typeof call.arguments.question === "string" ? call.arguments.question.trim() || undefined : undefined;
+}
+/** Read the Edit module's tool call; a rejection goes on its span with the edit and text it failed on. */
+function proposalOf(span: Span, read: () => EditProposal): EditProposal {
+  try {
+    return read();
+  } catch (err) {
+    if (err instanceof EditProposalError) spanData(span, "edit", "rejected_proposal", err.rejection);
+    throw err;
+  }
 }
 function complete(result: GatewayResult): void {
   if (result.response.finishReason === "cancelled") throw new AIError("cancelled", t("chat.stopped"));
@@ -321,7 +330,7 @@ export async function runChatTurn(turn: Turn, deps: OrchestratorDeps): Promise<T
         complete(result);
         const question = clarification(result.response);
         if (question) return { result, question, proposal: undefined };
-        const proposal = readEditProposal(result.response, sources, paper.texts, evidenceIds);
+        const proposal = proposalOf(span, () => readEditProposal(result.response, sources, paper.texts, evidenceIds));
         step(turn.id, span, "edit", "queuePaperEdits", { tool: "apply_paper_edits", call_id: proposal.callId }, () => ({ status: "awaiting_application", ...proposal }));
         return { result, proposal, question: undefined };
       }, (out) => out.question ? { clarify: out.question } : { status: "awaiting_application", edits: out.proposal?.edits.length });

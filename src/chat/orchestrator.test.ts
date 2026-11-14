@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AIError } from "../ai/errors";
 import type { ChatRequest, GatewayOptions, GatewayResult } from "../ai/gateway";
 import { chatModels } from "../ai/gateway";
@@ -11,6 +11,18 @@ import { chooseRoute, conversationFor, runChatTurn, type Paper, type Stage, type
 import { FRONT, paperUnits } from "./paper/sections";
 import { emptySummary } from "./session/summary";
 import type { TurnRecord } from "./session/turns";
+
+// Intermediate values each module records for the debugger, by label.
+const { recorded } = vi.hoisted(() => ({ recorded: [] as { fn: string; label: string; value: unknown }[] }));
+vi.mock("../debug/trace", async (importOriginal) => {
+  const trace = await importOriginal<typeof import("../debug/trace")>();
+  return {
+    ...trace,
+    spanData: (span: { fn: string }, _module: string, label: string, value: unknown) => {
+      recorded.push({ fn: span.fn, label, value: typeof value === "function" ? value() : value });
+    },
+  };
+});
 
 const response = (text: string): AIResponse => ({ id: "r", provider: "openai", model: "gpt-6.1-sol", text, finishReason: "stop" });
 const tool = (name: string, args: Record<string, unknown> = { reason: "because" }): AIResponse => ({ ...response(""), toolCalls: [{ id: "c1", name, arguments: args }] });
@@ -168,10 +180,13 @@ describe("Refinement → Routing → Execution", () => {
     expect(r.log.map((c) => c.task)).not.toContain("edit");
   });
 
-  it("rejects changes to a full section that was supplied only for reference", async () => {
+  it("rejects changes to a full section that was supplied only for reference, and records why", async () => {
     const ref = paper.units!.find((u) => u.key === "1")!.sources[0];
-    const r = run("edit", { edit: () => tool("apply_paper_edits", { summary: "change", edits: [{ path: ref.path, original: ref.text, revised: ref.text + "changed" }] }) });
-    await expect(r.result).rejects.toMatchObject({ kind: "malformed_response" });
+    recorded.length = 0;
+    const r = run("edit", { edit: () => tool("apply_paper_edits", { summary: "change", edits: [{ path: ref.path, original: ref.text, revised: ref.text + "changed" }] }) }, { ...paper, texts: tex });
+    const rejection = { reason: "outside", edit: 1, path: ref.path };
+    await expect(r.result).rejects.toMatchObject({ kind: "malformed_response", rejection });
+    expect(recorded).toEqual([{ fn: "runPaperEditModule", label: "rejected_proposal", value: expect.objectContaining(rejection) }]);
   });
 
   it("does not expose truncated edit tool arguments as applicable proposals", async () => {
